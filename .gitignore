@@ -1,0 +1,14 @@
+target/
+
+# The local patch that points the git dependencies at sibling checkouts. Copy
+# .cargo/config.toml.local-check to .cargo/config.toml to use it; park it as config.toml.off to
+# build against the pinned revisions again. Only the .local-check template is tracked.
+.cargo/config.toml
+.cargo/config.toml.off
+
+# Local seed data and scripts.
+seed/
+
+# Flatpak build output.
+.flatpak-builder/
+build-dir/

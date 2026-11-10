@@ -1,0 +1,12 @@
+[package]
+name = "organiser-cli-kit"
+description = "A command-line frontend generated from an organiser engine Schema."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color"] }
+organiser-core.workspace = true
+organiser-engine.workspace = true
+serde_json.workspace = true

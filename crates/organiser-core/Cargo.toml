@@ -1,0 +1,8 @@
+[package]
+name = "organiser-core"
+description = "App-agnostic basics shared by every organiser app: app metadata and XDG paths."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

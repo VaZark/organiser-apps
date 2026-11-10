@@ -1,0 +1,17 @@
+[package]
+name = "faves-gui"
+description = "Graphical frontend for the Faves app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "faves-gui"
+path = "src/main.rs"
+
+[dependencies]
+faves-schema.workspace = true
+iced.workspace = true
+organiser-core.workspace = true
+organiser-engine.workspace = true
+organiser-ui.workspace = true

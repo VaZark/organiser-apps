@@ -1,0 +1,226 @@
+//! The entries: a masonry grid of cards as Google Keep lays out notes, or one compact line per
+//! entry. Above them, the sort, an add button and the filters that are on.
+
+use faves_schema::model::Entry;
+use iced::widget::{column, row};
+use iced::{Alignment, Length};
+use organiser_ui::Element;
+use organiser_ui::components::card::card;
+use organiser_ui::components::chip::{color_of, hashtag, more, pill, removable};
+use organiser_ui::components::empty::empty;
+use organiser_ui::components::heart::heart;
+use organiser_ui::components::row::selectable;
+use organiser_ui::components::toggle::IconToggle;
+use organiser_ui::iad::prelude::*;
+use organiser_ui::iad::primitives::tag_groups::GroupEvent;
+use organiser_ui::primitives::tags::collapse;
+use organiser_ui::primitives::text::{ellipsize, snippet};
+
+use crate::app::{App, Message, View};
+
+/// The narrowest a card is allowed to get before the grid drops a column.
+const CARD_WIDTH: f32 = 270.0;
+
+/// `★★★★☆`
+pub fn stars(rating: u8) -> String {
+    let r = rating.min(5) as usize;
+    format!("{}{}", "★".repeat(r), "☆".repeat(5 - r))
+}
+
+impl App {
+    pub(super) fn grid_page(&self, width: f32) -> Element<'_, Message> {
+        // An add button (only inside a list); the sort lives in the header.
+        let mut head = column![].spacing(8);
+        if self.current().is_some() {
+            head = head.push(
+                row![
+                    container(space()).width(Length::Fill),
+                    tooltip(
+                        icon_button(Icon::ListAdd).on_press(Message::OpenAdd),
+                        "Add an entry",
+                        TooltipPosition::Bottom,
+                    ),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        if let Some(strip) = self.active_filters() {
+            head = head.push(strip);
+        }
+
+        let body: Element<'_, Message> = if self.entries.is_empty() {
+            self.empty_state()
+        } else if self.compact {
+            self.compact_list()
+        } else {
+            self.masonry(width)
+        };
+        column![container(head).padding([12, 16]), body]
+            .spacing(4)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn empty_state(&self) -> Element<'_, Message> {
+        if self.search.query().is_some() || self.filter_count() > 0 {
+            return empty(
+                Icon::Search,
+                "No matches",
+                "Try different words or fewer filters.",
+            );
+        }
+        match self.view {
+            View::Favorites => empty(
+                Icon::Heart,
+                "No favourites yet",
+                "Tap the heart on anything you love.",
+            ),
+            View::List(_) if self.lists.is_empty() => empty(
+                Icon::Folder,
+                "No lists yet",
+                "Open the lists from the title and make one.",
+            ),
+            View::List(_) => empty(
+                Icon::ListAdd,
+                "Nothing here yet",
+                "Add the first entry with the + above.",
+            ),
+        }
+    }
+
+    /// The filters that are on, each a chip that removes itself when pressed.
+    fn active_filters(&self) -> Option<Element<'_, Message>> {
+        if self.filter_count() == 0 {
+            return None;
+        }
+        let removable_text = |label: String, on_press: Message| -> Element<'_, Message> {
+            flat_button(
+                row![text(label), Icon::WindowClose.view(12.0)]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(on_press)
+            .into()
+        };
+        let mut chips = row![
+            IconToggle::new(Icon::Filter, true)
+                .tooltip("Edit filters")
+                .on_toggle(|_| Message::OpenFilter)
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+        if self.fav_only {
+            chips = chips.push(removable_text("Favourites".into(), Message::FavOnly(false)));
+        }
+        if let Some(n) = self.min_rating {
+            chips = chips.push(removable_text(
+                format!("{n}+ stars"),
+                Message::MinRating(None),
+            ));
+        }
+        for (g, group) in self.tag_groups.groups().iter().enumerate() {
+            for tag in group {
+                chips = chips.push(removable(
+                    tag,
+                    Message::TagGroups(GroupEvent::Toggle(g, tag.clone())),
+                ));
+            }
+        }
+        Some(chips.wrap().into())
+    }
+
+    /// One line per entry: the heart, the title, and the rating, status and list.
+    fn compact_list(&self) -> Element<'_, Message> {
+        let rows: Vec<Element<'_, Message>> =
+            self.entries.iter().map(|e| self.compact_row(e)).collect();
+        scrolled_window(container(boxed_list(rows)).padding([4, 16]))
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn compact_row<'a>(&'a self, e: &'a Entry) -> Element<'a, Message> {
+        let selected = self.details.as_ref().is_some_and(|d| d.entry.id == e.id);
+        let mut line = row![text(ellipsize(&e.title, 80)).width(Length::Fill)]
+            .spacing(8)
+            .align_y(Alignment::Center);
+        if let Some(r) = e.rating {
+            line = line.push(text(stars(r)).size(13));
+        }
+        if let Some(s) = e.status {
+            line = line.push(pill(s.label(), Role::Accent));
+        }
+        if self.view == View::Favorites
+            && let Some(l) = self.list_of(e)
+        {
+            line = line.push(pill(&l.title, Role::Neutral));
+        }
+        // The heart sits at the right edge: filled for a favourite, an outline for one that is not.
+        line = line.push(heart(e.favorite, Message::Fave(e.id)));
+        selectable(line.padding([2, 12]), selected, Message::Open(e.id))
+    }
+
+    /// Cards dealt across as many columns as fit, left to right, so a short card never leaves a gap.
+    fn masonry(&self, width: f32) -> Element<'_, Message> {
+        let n = (((width - 32.0) / CARD_WIDTH).floor() as usize).max(1);
+        let mut cols: Vec<Vec<Element<'_, Message>>> = (0..n).map(|_| Vec::new()).collect();
+        for (i, e) in self.entries.iter().enumerate() {
+            cols[i % n].push(self.card(e));
+        }
+        let grid = row(cols
+            .into_iter()
+            .map(|c| column(c).spacing(12).width(Length::FillPortion(1)).into()))
+        .spacing(12);
+        scrolled_window(container(grid).padding([4, 16]))
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn card<'a>(&'a self, e: &'a Entry) -> Element<'a, Message> {
+        let list = self.list_of(e);
+        let selected = self.details.as_ref().is_some_and(|d| d.entry.id == e.id);
+        // A card takes its list's colour, so lists are told apart at a glance, as Keep colours notes.
+        let tint = list.map(|l| color_of(&l.title));
+
+        // The title, with the heart at the right edge: filled for a favourite, an outline if not.
+        let mut body = column![
+            row![
+                text(e.title.clone()).size(15).width(Length::Fill),
+                heart(e.favorite, Message::Fave(e.id))
+            ]
+            .align_y(Alignment::Start)
+        ]
+        .spacing(6);
+        if let Some(r) = e.rating {
+            body = body.push(text(stars(r)).size(14));
+        }
+        let notes = snippet(&e.notes, 4, 180);
+        if !notes.is_empty() {
+            body = body.push(text(notes).size(13));
+        }
+        let tags = collapse(&e.tags, 3);
+        if !tags.shown.is_empty() {
+            let mut chips = row(tags.shown.iter().map(|g| hashtag(g))).spacing(4);
+            if tags.more > 0 {
+                chips = chips.push(more(tags.more));
+            }
+            body = body.push(chips.wrap());
+        }
+
+        let mut facts = row![].spacing(4).align_y(Alignment::Center);
+        if let Some(s) = e.status {
+            facts = facts.push(pill(s.label(), Role::Accent));
+        }
+        // In the favourites, say which list a card comes from.
+        if self.view == View::Favorites
+            && let Some(l) = list
+        {
+            facts = facts.push(pill(&l.title, Role::Neutral));
+        }
+        if e.status.is_some() || (self.view == View::Favorites && list.is_some()) {
+            body = body.push(facts.wrap());
+        }
+
+        card(body, tint, selected, Message::Open(e.id))
+    }
+}

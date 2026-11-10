@@ -1,0 +1,18 @@
+[package]
+name = "todo-cli"
+description = "Command-line frontend for the Todo app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "todo"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+organiser-cli-kit.workspace = true
+organiser-engine.workspace = true
+serde_json.workspace = true
+todo-schema.workspace = true

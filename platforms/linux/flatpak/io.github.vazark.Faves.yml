@@ -1,0 +1,39 @@
+# Local Flatpak build of the Faves GUI (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Faves
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: faves-gui-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
+  # host's, since the sandbox's own would hide it.
+  - --filesystem=xdg-data/faves
+  # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
+  - --filesystem=xdg-config/iced-adaptive-design:ro
+modules:
+  - name: faves
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/faves/cargo
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p faves-gui --features organiser-engine/bundled
+      - install -Dm755 target/release/faves-gui /app/bin/faves-gui
+      - install -Dm755 platforms/linux/flatpak/faves-gui-launch /app/bin/faves-gui-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Faves.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Faves.svg
+      - mkdir -p /app/share/applications && target/release/faves-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=faves-gui-launch/' > /app/share/applications/io.github.vazark.Faves.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Faves.metainfo.xml /app/share/metainfo/io.github.vazark.Faves.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, build-dir]

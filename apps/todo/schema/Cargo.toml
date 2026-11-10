@@ -1,0 +1,13 @@
+[package]
+name = "todo-schema"
+description = "The Todo app on the organiser engine: its schema, task model and task rules."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+organiser-core.workspace = true
+organiser-engine.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+serde.workspace = true
+serde_json.workspace = true

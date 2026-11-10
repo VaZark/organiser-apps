@@ -1,0 +1,18 @@
+[package]
+name = "todo-gui"
+description = "Graphical frontend for the Todo app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "todo-gui"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+iced.workspace = true
+organiser-core.workspace = true
+organiser-engine.workspace = true
+organiser-ui.workspace = true
+todo-schema.workspace = true
