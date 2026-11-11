@@ -4,18 +4,15 @@ use organiser_engine::{Db, Error, ItemPatch, NewItem, Result};
 use serde_json::Value;
 
 use crate::primitives::model::{Entry, EntryEdit, List, ListEdit};
-use crate::primitives::status::Status;
 use crate::{ENTRY, LIST};
 
-pub fn create_list(db: &mut Db, title: &str, rated: bool, tracked: bool) -> Result<List> {
-    let new = NewItem::new(LIST, title)
-        .field("rated", rated)
-        .field("tracked", tracked);
+pub fn create_list(db: &mut Db, title: &str, rated: bool) -> Result<List> {
+    let new = NewItem::new(LIST, title).field("rated", rated);
     Ok(List::from(&db.create(new)?))
 }
 
-/// Edit a list. Switching `rated` or `tracked` off removes the ratings or statuses its entries
-/// had; the engine does that, so it holds for every frontend.
+/// Edit a list. Switching `rated` off removes the ratings its entries had; the engine does that,
+/// so it holds for every frontend.
 pub fn edit_list(db: &mut Db, id: i64, edit: &ListEdit) -> Result<List> {
     Ok(List::from(&db.update(id, edit.to_patch())?))
 }
@@ -34,7 +31,6 @@ pub struct NewEntry {
     pub notes: Option<String>,
     pub favorite: bool,
     pub rating: Option<u8>,
-    pub status: Option<Status>,
     pub tags: Vec<String>,
 }
 
@@ -47,7 +43,7 @@ impl NewEntry {
     }
 }
 
-/// Add an entry to a list. A rating or status is refused if the list does not offer them.
+/// Add an entry to a list. A rating is refused if the list does not offer them.
 pub fn add_entry(db: &mut Db, list: i64, e: &NewEntry) -> Result<Entry> {
     let mut new = NewItem::new(ENTRY, &e.title).parent(list);
     new.tags = e.tags.clone();
@@ -59,9 +55,6 @@ pub fn add_entry(db: &mut Db, list: i64, e: &NewEntry) -> Result<Entry> {
     }
     if let Some(r) = e.rating {
         new = new.field("rating", r);
-    }
-    if let Some(s) = e.status {
-        new = new.field("status", s.as_str());
     }
     Ok(Entry::from(&db.create(new)?))
 }
@@ -81,16 +74,12 @@ pub fn set_favorite(db: &mut Db, id: i64, favorite: bool) -> Result<Entry> {
     )
 }
 
-/// Move an entry to another list. What the new list does not offer (a rating, a status) is
-/// dropped from the entry first.
+/// Move an entry to another list. A rating the new list does not offer is dropped first.
 pub fn move_entry(db: &mut Db, id: i64, to: i64) -> Result<Entry> {
     let dest = List::from(&db.get(to)?);
     let mut patch = ItemPatch::default();
     if !dest.rated {
         patch.fields.insert("rating".into(), Value::Null);
-    }
-    if !dest.tracked {
-        patch.fields.insert("status".into(), Value::Null);
     }
     db.update(id, patch)?;
     Ok(Entry::from(&db.move_item(id, Some(to), None)?))
@@ -98,4 +87,28 @@ pub fn move_entry(db: &mut Db, id: i64, to: i64) -> Result<Entry> {
 
 pub fn set_tags(db: &mut Db, id: i64, tags: &[String]) -> Result<()> {
     db.set_tags(id, tags).map(|_| ())
+}
+
+/// Clear what older versions kept and this one does not: lists had a `tracked` switch and entries
+/// a `status`. The engine refuses fields its schema no longer knows, so an item that still has
+/// one could not be edited. Call it once after opening; it writes only where there is something
+/// to clear, and returns how many items it touched.
+pub fn drop_legacy(db: &mut Db) -> Result<usize> {
+    let mut touched = 0;
+    for (kind, field) in [(LIST, "tracked"), (ENTRY, "status")] {
+        let old: Vec<i64> = db
+            .list(&organiser_engine::Query {
+                kind: Some(kind.into()),
+                ..organiser_engine::Query::default()
+            })?
+            .into_iter()
+            .filter(|i| i.fields.contains_key(field))
+            .map(|i| i.id)
+            .collect();
+        for id in old {
+            db.update(id, ItemPatch::default().field(field, Value::Null))?;
+            touched += 1;
+        }
+    }
+    Ok(touched)
 }

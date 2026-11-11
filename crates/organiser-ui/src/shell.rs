@@ -39,3 +39,16 @@ pub fn theme(dark: bool) -> iad::Theme {
         iad::Theme::light()
     }
 }
+
+/// Open a link from a note in the desktop's default handler. Only web and mail links are opened
+/// (see [`crate::primitives::link::is_openable`]); the error says why nothing happened.
+pub fn open_link(url: &str) -> Result<(), String> {
+    if !crate::primitives::link::is_openable(url) {
+        return Err(format!("Not opening {url}: only web and mail links open"));
+    }
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Cannot open {url}: {e}"))
+}

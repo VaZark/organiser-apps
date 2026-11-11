@@ -4,8 +4,6 @@ use organiser_engine::{Item, ItemPatch};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::status::Status;
-
 fn text(i: &Item, key: &str) -> String {
     i.fields
         .get(key)
@@ -25,8 +23,6 @@ pub struct List {
     pub notes: String,
     /// Its entries can be rated.
     pub rated: bool,
-    /// Its entries have a status.
-    pub tracked: bool,
     pub position: i64,
     pub created: i64,
     pub updated: i64,
@@ -39,7 +35,6 @@ impl From<&Item> for List {
             title: i.title.clone(),
             notes: text(i, "notes"),
             rated: flag(i, "rated"),
-            tracked: flag(i, "tracked"),
             position: i.position,
             created: i.created,
             updated: i.updated,
@@ -57,8 +52,6 @@ pub struct Entry {
     pub favorite: bool,
     /// 1 to 5 stars; only in a list that is rated.
     pub rating: Option<u8>,
-    /// Only in a list that is tracked.
-    pub status: Option<Status>,
     pub tags: Vec<String>,
     pub position: i64,
     pub created: i64,
@@ -78,11 +71,6 @@ impl From<&Item> for Entry {
                 .get("rating")
                 .and_then(Value::as_u64)
                 .map(|r| r as u8),
-            status: i
-                .fields
-                .get("status")
-                .and_then(Value::as_str)
-                .and_then(Status::parse),
             tags: i.tags.clone(),
             position: i.position,
             created: i.created,
@@ -97,8 +85,6 @@ pub struct ListSummary {
     pub list: List,
     pub entries: usize,
     pub favorites: usize,
-    /// Entries marked done, in a tracked list.
-    pub done: usize,
 }
 
 /// A change to a list. `None` leaves a field alone.
@@ -107,7 +93,6 @@ pub struct ListEdit {
     pub title: Option<String>,
     pub notes: Option<String>,
     pub rated: Option<bool>,
-    pub tracked: Option<bool>,
 }
 
 impl ListEdit {
@@ -126,23 +111,20 @@ impl ListEdit {
                 },
             );
         }
-        for (k, v) in [("rated", self.rated), ("tracked", self.tracked)] {
-            if let Some(v) = v {
-                p.fields.insert(k.into(), v.into());
-            }
+        if let Some(v) = self.rated {
+            p.fields.insert("rated".into(), v.into());
         }
         p
     }
 }
 
-/// A change to an entry. `None` leaves a field alone; `Some(None)` clears a rating or status.
+/// A change to an entry. `None` leaves a field alone; `Some(None)` clears a rating.
 #[derive(Debug, Clone, Default)]
 pub struct EntryEdit {
     pub title: Option<String>,
     pub notes: Option<String>,
     pub favorite: Option<bool>,
     pub rating: Option<Option<u8>>,
-    pub status: Option<Option<Status>>,
 }
 
 impl EntryEdit {
@@ -167,12 +149,6 @@ impl EntryEdit {
         if let Some(r) = self.rating {
             p.fields
                 .insert("rating".into(), r.map_or(Value::Null, Value::from));
-        }
-        if let Some(s) = self.status {
-            p.fields.insert(
-                "status".into(),
-                s.map_or(Value::Null, |s| s.as_str().into()),
-            );
         }
         p
     }

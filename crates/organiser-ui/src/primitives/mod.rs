@@ -1,6 +1,8 @@
 //! Headless UI state: no iced, no widgets.
 
+pub mod color;
 pub mod expand;
+pub mod link;
 pub mod scheme;
 pub mod search;
 pub mod tags;

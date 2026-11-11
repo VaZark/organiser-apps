@@ -3,21 +3,26 @@
 
 use faves_schema::lifecycle::{self, NewEntry};
 use faves_schema::model::{Entry, EntryEdit, List, ListEdit, ListSummary};
-use faves_schema::status::Status;
 use faves_schema::views::{self, Filter, Sort};
 use iced::widget::text_editor;
 use iced::{Subscription, Task};
 use organiser_core::paths;
-use organiser_engine::{Db, Tag, TagFilter};
+use organiser_engine::{Db, Filters, Tag};
+use organiser_ui::components::tag_query::{count as tag_count, engine_filter};
+use organiser_ui::iad::primitives::rich_text as rt;
 use organiser_ui::iad::primitives::tag_groups::{GroupEvent, TagGroups};
 use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::scheme::Mode;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
+use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
+use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
 
 /// What the content shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
+    /// Every entry of every list.
+    All,
     /// The favourites of every list.
     Favorites,
     List(i64),
@@ -34,22 +39,27 @@ pub enum Message {
     Compact(bool),
     OpenLists,
     CloseLists,
-    OpenAdd,
-    CloseAdd,
+    /// Open the edit page on a new entry. Nothing is saved until `DCreate`.
+    New,
+    /// Save the new entry being edited.
+    DCreate,
     // The filter, opened from the search.
     OpenFilter,
     CloseFilter,
     ClearFilters,
-    FavOnly(bool),
-    /// Entries with at least this many stars, or any.
-    MinRating(Option<u8>),
+    /// The filters the schema offers changed.
+    Fields(Filters),
+    Tags(TagMsg),
     TagGroups(GroupEvent<String>),
+    OpenPrefs,
+    ClosePrefs,
+    Pref(PrefMsg),
+    /// Faves' own setting: cards, or one compact line per entry.
+    PrefCompact(bool),
     TagQuery(String),
     ToggleSearch,
     SearchInput(String),
     Escape,
-    QuickText(String),
-    QuickSubmit,
     Sort(SortChoice),
     /// Press an entry's heart on its card.
     Fave(i64),
@@ -58,10 +68,15 @@ pub enum Message {
     CloseDetails,
     DTitle(String),
     DNotes(text_editor::Action),
+    /// Show the notes drawn (true) or their Markdown source (false).
+    DPreview(bool),
+    /// Task `n` of the drawn notes was ticked or cleared.
+    DTask(usize, bool),
+    /// A link in the drawn notes was pressed.
+    OpenLink(String),
     DFavorite(bool),
     /// A star was pressed: that rating, or none.
     DRating(Option<u8>),
-    DStatus(StatusChoice),
     DMove(ListChoice),
     DTagStart,
     DTagText(String),
@@ -73,7 +88,6 @@ pub enum Message {
     CloseSettings,
     SetListTitle(String),
     SetRated(bool),
-    SetTracked(bool),
     DeleteList,
     DismissToast,
     Captured,
@@ -103,25 +117,6 @@ impl std::fmt::Display for SortChoice {
     }
 }
 
-/// A status, or none, for the dropdown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatusChoice(pub Option<Status>);
-
-impl StatusChoice {
-    pub const ALL: [StatusChoice; 4] = [
-        StatusChoice(None),
-        StatusChoice(Some(Status::Planned)),
-        StatusChoice(Some(Status::Active)),
-        StatusChoice(Some(Status::Done)),
-    ];
-}
-
-impl std::fmt::Display for StatusChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.map_or("No status", Status::label))
-    }
-}
-
 /// A list, for the "move to" dropdown.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListChoice {
@@ -140,9 +135,21 @@ pub struct Details {
     pub entry: Entry,
     pub title: String,
     pub notes: text_editor::Content,
+    /// Draw the notes instead of editing their source.
+    pub preview: bool,
+    /// The notes drawn, kept so a redraw does not parse them again.
+    pub doc: Vec<rt::Block>,
     pub adding_tag: bool,
     pub tag_text: String,
     pub error: Option<String>,
+}
+
+impl Details {
+    /// Whether this is an entry being written, not yet saved: the edit page doubles as the page
+    /// that creates one, and a draft has no id.
+    pub fn is_new(&self) -> bool {
+        self.entry.id == 0
+    }
 }
 
 pub struct App {
@@ -155,7 +162,6 @@ pub struct App {
     pub tag_names: Vec<String>,
     pub sort: Sort,
     pub search: Search,
-    pub quick: String,
     pub details: Option<Details>,
     pub settings_open: bool,
     /// One compact line per entry instead of cards.
@@ -167,13 +173,15 @@ pub struct App {
     /// Development only: with the menu open, start on this page (1 is Sort).
     pub menu_page: usize,
     pub lists_open: bool,
-    pub add_open: bool,
     pub filter_open: bool,
     /// Only favourites, on top of the view.
-    pub fav_only: bool,
-    pub min_rating: Option<u8>,
+    /// What was chosen in the filters the schema offers (favourite, rating).
+    pub filters: Filters,
+    pub tag_manager: TagManager,
     /// Picked tags: a group needs all of its tags, and several groups are alternatives.
     pub tag_groups: TagGroups<String>,
+    /// The shared settings and the Preferences sheet over them.
+    pub prefs: Preferences,
     /// What was typed to find a tag in the filter.
     pub tag_query: String,
     /// The delete-list button was pressed once and asks for a second press.
@@ -194,13 +202,21 @@ impl App {
                 || paths::db_path(&faves_schema::META),
                 std::path::PathBuf::from,
             );
-        let db = Db::open(&path, &faves_schema::SCHEMA).unwrap_or_else(|e| {
+        let mut db = Db::open(&path, &faves_schema::SCHEMA).unwrap_or_else(|e| {
             eprintln!("error: cannot open {}: {e}", path.display());
             std::process::exit(1);
         });
+        // An older database may still hold statuses, which this version no longer has.
+        if let Err(e) = faves_schema::lifecycle::drop_legacy(&mut db) {
+            eprintln!("error: cannot tidy {}: {e}", path.display());
+            std::process::exit(1);
+        }
+        let prefs = Preferences::load();
+        let mode = Mode::from(prefs.settings.appearance.theme);
+        let prefs_compact = prefs.settings.faves.compact;
         let mut app = Self {
             db,
-            view: View::Favorites,
+            view: View::All,
             lists: Vec::new(),
             list_choices: Vec::new(),
             entries: Vec::new(),
@@ -208,30 +224,25 @@ impl App {
             tag_names: Vec::new(),
             sort: Sort::Manual,
             search: Search::default(),
-            quick: String::new(),
             details: None,
             settings_open: false,
-            compact: false,
+            compact: prefs_compact,
             sort_open: false,
             menu_open: false,
             menu_page: 0,
             lists_open: false,
-            add_open: false,
             filter_open: false,
-            fav_only: false,
-            min_rating: None,
+            filters: Filters::default(),
+            tag_manager: TagManager::default(),
             tag_groups: TagGroups::new(),
+            prefs,
             tag_query: String::new(),
             confirm_delete: false,
             toast: None,
             desktop_dark: false,
-            mode: Mode::Follow,
+            mode,
         };
         app.reload();
-        // Start on the first list, or on the favourites when there are none.
-        if let Some(first) = app.lists.first() {
-            app.view = View::List(first.list.id);
-        }
         // Development switches, for screenshots of states that need a click to reach.
         if std::env::var_os("FAVES_GUI_FAVORITES").is_some() {
             app.view = View::Favorites;
@@ -247,7 +258,7 @@ impl App {
             app.search.input(q);
         }
         app.settings_open = std::env::var_os("FAVES_GUI_SETTINGS").is_some();
-        app.compact = std::env::var_os("FAVES_GUI_COMPACT").is_some();
+        app.compact |= std::env::var_os("FAVES_GUI_COMPACT").is_some();
         app.sort_open = std::env::var_os("FAVES_GUI_SORT_OPEN").is_some();
         app.menu_open = std::env::var_os("FAVES_GUI_MENU_OPEN").is_some();
         app.menu_page = std::env::var("FAVES_GUI_MENU_PAGE")
@@ -255,15 +266,38 @@ impl App {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         app.lists_open = std::env::var_os("FAVES_GUI_LISTS").is_some();
-        app.add_open = std::env::var_os("FAVES_GUI_ADD").is_some();
         app.filter_open = std::env::var_os("FAVES_GUI_FILTER").is_some();
-        app.fav_only = std::env::var_os("FAVES_GUI_FAV_ONLY").is_some();
-        app.min_rating = std::env::var("FAVES_GUI_MIN_RATING")
+        if std::env::var_os("FAVES_GUI_FAV_ONLY").is_some() {
+            app.filters.toggle("favorite", serde_json::json!(true));
+        }
+        if let Some(n) = std::env::var("FAVES_GUI_MIN_RATING")
             .ok()
-            .and_then(|v| v.parse().ok());
+            .and_then(|v| v.parse::<u8>().ok())
+        {
+            app.filters
+                .set_range("rating", Some(serde_json::json!(n)), None);
+        }
         if let Ok(t) = std::env::var("FAVES_GUI_TAG") {
-            app.tag_groups =
-                TagGroups::from_parts(vec![t.split(',').map(String::from).collect()], 0);
+            // `a,b;c` is two groups: a and b together, or c.
+            app.tag_groups = TagGroups::from_parts(
+                t.split(';')
+                    .map(|g| g.split(',').map(String::from).collect())
+                    .collect(),
+                0,
+            );
+        }
+        if std::env::var_os("FAVES_GUI_NEW").is_some() {
+            let _ = app.update(Message::New);
+        }
+        if let Ok(page) = std::env::var("FAVES_GUI_PREFS") {
+            app.prefs.open = true;
+            // Asking for a page opens it, on a narrow window too.
+            app.prefs.page_open = true;
+            app.prefs.page = match page.as_str() {
+                "tags" => organiser_ui::widgets::preferences::Page::Tags,
+                "app" => organiser_ui::widgets::preferences::Page::App,
+                _ => organiser_ui::widgets::preferences::Page::Appearance,
+            };
         }
         match std::env::var("FAVES_GUI_THEME").as_deref() {
             Ok("light") => app.mode = Mode::Light,
@@ -320,7 +354,7 @@ impl App {
     pub fn current(&self) -> Option<&ListSummary> {
         match self.view {
             View::List(id) => self.lists.iter().find(|s| s.list.id == id),
-            View::Favorites => None,
+            View::All | View::Favorites => None,
         }
     }
 
@@ -336,50 +370,24 @@ impl App {
         Filter {
             list: match self.view {
                 View::List(id) => Some(id),
-                View::Favorites => None,
+                View::All | View::Favorites => None,
             },
             text: self.search.query().map(String::from),
-            favorites: self.view == View::Favorites || self.fav_only,
-            min_rating: self.min_rating,
-            tags: self.tag_filter(),
+            favorites: self.view == View::Favorites,
+            fields: self.filters.clone(),
+            tags: engine_filter(&self.tag_groups),
             sort: self.sort,
             ..Filter::default()
         }
     }
 
-    /// The picked tag groups as the engine's filter: the groups are alternatives (one OR block),
-    /// and a group needs every one of its tags.
-    fn tag_filter(&self) -> TagFilter {
-        let leaves: Vec<TagFilter> = self
-            .tag_groups
-            .groups()
-            .iter()
-            .filter(|g| !g.is_empty())
-            .map(|g| TagFilter {
-                all: g.clone(),
-                ..TagFilter::default()
-            })
-            .collect();
-        if leaves.is_empty() {
-            TagFilter::default()
-        } else {
-            TagFilter {
-                blocks: vec![leaves],
-                ..TagFilter::default()
-            }
-        }
-    }
-
-    /// How many filters narrow the entries: favourites, a rating, and each picked tag.
+    /// How many filters narrow the entries: the schema's own, and each picked tag.
     pub fn filter_count(&self) -> usize {
-        usize::from(self.fav_only)
-            + usize::from(self.min_rating.is_some())
-            + self.tag_groups.groups().iter().map(Vec::len).sum::<usize>()
+        self.filters.count() + tag_count(&self.tag_groups)
     }
 
     fn clear_filters(&mut self) {
-        self.fav_only = false;
-        self.min_rating = None;
+        self.filters.clear();
         self.tag_groups = TagGroups::new();
         self.tag_query.clear();
     }
@@ -398,17 +406,21 @@ impl App {
             }
             Err(e) => self.toast = Some(e.to_string()),
         }
-        // A list that no longer exists falls back to the favourites.
+        // A list that no longer exists falls back to everything.
         if let View::List(id) = self.view
             && !self.lists.iter().any(|s| s.list.id == id)
         {
-            self.view = View::Favorites;
+            self.view = View::All;
         }
         match views::entries(&self.db, &self.filter()) {
             Ok(e) => self.entries = e,
             Err(e) => self.toast = Some(e.to_string()),
         }
+        // Every tag has a colour of its own, drawn the same everywhere.
+        let _ = self.db.ensure_tag_colors(&self.prefs.settings.palette());
         if let Ok(t) = self.db.tags() {
+            organiser_ui::components::chip::set_tag_colors(&t);
+            self.tag_manager.sync(&t, &self.prefs.settings.palette());
             self.tag_names = t.iter().map(|t| t.name.clone()).collect();
             self.tags = t;
         }
@@ -426,6 +438,8 @@ impl App {
                 let entry = Entry::from(&item);
                 self.details = Some(Details {
                     title: entry.title.clone(),
+                    preview: std::env::var_os("FAVES_GUI_PREVIEW").is_some(),
+                    doc: organiser_ui::components::rich::render(&entry.notes),
                     notes: text_editor::Content::with_text(&entry.notes),
                     entry,
                     adding_tag: false,
@@ -440,6 +454,9 @@ impl App {
     /// Re-read the selected entry without touching what is typed.
     fn refresh_details(&mut self) {
         let Some(d) = &self.details else { return };
+        if d.is_new() {
+            return;
+        }
         match self.db.get(d.entry.id) {
             Ok(item) => {
                 if let Some(d) = &mut self.details {
@@ -453,6 +470,25 @@ impl App {
     /// Save a change to the selected entry, then show what the database now holds.
     fn edit(&mut self, edit: EntryEdit) {
         let Some(d) = &self.details else { return };
+        if d.is_new() {
+            // A draft takes the change as typed; it is saved by Create.
+            if let Some(d) = &mut self.details {
+                let e = &mut d.entry;
+                if let Some(t) = edit.title {
+                    e.title = t;
+                }
+                if let Some(n) = edit.notes {
+                    e.notes = n;
+                }
+                if let Some(f) = edit.favorite {
+                    e.favorite = f;
+                }
+                if let Some(r) = edit.rating {
+                    e.rating = r;
+                }
+            }
+            return;
+        }
         let id = d.entry.id;
         let result = lifecycle::edit_entry(&mut self.db, id, &edit);
         if let Some(d) = &mut self.details {
@@ -477,6 +513,10 @@ impl App {
         let Some(d) = &self.details else { return };
         let mut tags = d.entry.tags.clone();
         f(&mut tags);
+        if d.is_new() {
+            self.with_details(|d| d.entry.tags = tags);
+            return;
+        }
         let id = d.entry.id;
         if let Err(e) = lifecycle::set_tags(&mut self.db, id, &tags)
             && let Some(d) = &mut self.details
@@ -499,36 +539,48 @@ impl App {
                 self.confirm_delete = false;
                 self.reload();
             }
-            Message::NewList => {
-                match lifecycle::create_list(&mut self.db, "New list", false, false) {
-                    Ok(l) => {
-                        self.view = View::List(l.id);
-                        self.details = None;
-                        self.lists_open = false;
-                        self.settings_open = true;
-                        self.reload();
-                    }
-                    Err(e) => self.fail(e),
+            Message::NewList => match lifecycle::create_list(&mut self.db, "New list", false) {
+                Ok(l) => {
+                    self.view = View::List(l.id);
+                    self.details = None;
+                    self.lists_open = false;
+                    self.settings_open = true;
+                    self.reload();
                 }
-            }
+                Err(e) => self.fail(e),
+            },
             Message::Compact(on) => self.compact = on,
             Message::OpenLists => self.lists_open = true,
             Message::CloseLists => self.lists_open = false,
-            Message::OpenAdd => self.add_open = true,
-            Message::CloseAdd => self.add_open = false,
             Message::OpenFilter => self.filter_open = true,
             Message::CloseFilter => self.filter_open = false,
             Message::ClearFilters => {
                 self.clear_filters();
                 self.reload();
             }
-            Message::FavOnly(on) => {
-                self.fav_only = on;
+            Message::Fields(f) => {
+                self.filters = f;
                 self.reload();
             }
-            Message::MinRating(r) => {
-                self.min_rating = r;
+            Message::Tags(m) => {
+                if let Err(e) = self.tag_manager.update(&mut self.db, m) {
+                    self.fail(e);
+                }
+                self.refresh_details();
                 self.reload();
+            }
+            Message::OpenPrefs => self.prefs.open_first_page(),
+            Message::ClosePrefs => self.prefs.open = false,
+            Message::Pref(m) => match self.prefs.update(m) {
+                Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
+                Ok(Changed::Palette | Changed::Nothing) => {}
+                Err(e) => self.fail(e),
+            },
+            Message::PrefCompact(on) => {
+                self.prefs.settings.faves.compact = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
             }
             Message::TagGroups(event) => {
                 self.tag_groups.apply(event);
@@ -544,8 +596,12 @@ impl App {
                 self.reload();
             }
             Message::Escape => {
-                if self.add_open {
-                    self.add_open = false;
+                if self.tag_manager.leave_editor() {
+                    // Out of a tag's editor first, back to the list.
+                } else if self.prefs.leave_page() {
+                    // Back from a page to the list of pages (a narrow window).
+                } else if self.prefs.open {
+                    self.prefs.open = false;
                 } else if self.filter_open {
                     self.filter_open = false;
                 } else if self.lists_open {
@@ -565,23 +621,101 @@ impl App {
                     self.details = None;
                 }
             }
-            Message::QuickText(s) => self.quick = s,
-            Message::QuickSubmit => {
-                let Some(list) = self.current().map(|s| s.list.id) else {
+            Message::New => {
+                // In a list: that list. In the favourites: the first one, which the page's List
+                // picker can change.
+                let list = match self.view {
+                    View::List(id) => Some(id),
+                    View::All | View::Favorites => self.lists.first().map(|s| s.list.id),
+                };
+                let Some(list_id) = list else {
+                    self.toast = Some("Make a list first: entries live in lists.".into());
                     return Task::none();
                 };
-                let title = self.quick.trim().to_string();
-                if title.is_empty() {
+                self.details = Some(Details {
+                    entry: Entry {
+                        id: 0,
+                        list_id,
+                        title: String::new(),
+                        notes: String::new(),
+                        favorite: false,
+                        rating: None,
+                        tags: Vec::new(),
+                        position: 0,
+                        created: 0,
+                        updated: 0,
+                    },
+                    title: String::new(),
+                    notes: text_editor::Content::new(),
+                    preview: false,
+                    doc: Vec::new(),
+                    adding_tag: false,
+                    tag_text: String::new(),
+                    error: None,
+                });
+            }
+            Message::DCreate => {
+                let Some(d) = &self.details else {
+                    return Task::none();
+                };
+                if !d.is_new() {
                     return Task::none();
                 }
-                match lifecycle::add_entry(&mut self.db, list, &NewEntry::new(&title)) {
+                let Some(list) = self
+                    .lists
+                    .iter()
+                    .find(|s| s.list.id == d.entry.list_id)
+                    .map(|s| s.list.clone())
+                else {
+                    self.with_details(|d| d.error = Some("Pick a list first.".into()));
+                    return Task::none();
+                };
+                if d.title.trim().is_empty() {
+                    self.with_details(|d| d.error = Some("Give the entry a title first.".into()));
+                    return Task::none();
+                }
+                let notes = d.notes.text().trim_end().to_string();
+                let new = NewEntry {
+                    title: d.title.trim().to_string(),
+                    notes: (!notes.is_empty()).then_some(notes),
+                    favorite: d.entry.favorite,
+                    // A list only keeps the extras it offers.
+                    rating: d.entry.rating.filter(|_| list.rated),
+                    tags: d.entry.tags.clone(),
+                };
+                match lifecycle::add_entry(&mut self.db, list.id, &new) {
                     Ok(e) => {
-                        self.quick.clear();
-                        self.add_open = false;
+                        // Follow it into its list, so the card is in view.
+                        if matches!(self.view, View::List(_)) {
+                            self.view = View::List(list.id);
+                        }
                         self.reload();
                         self.open(e.id);
                     }
-                    Err(e) => self.fail(e),
+                    Err(e) => {
+                        self.with_details(|d| d.error = Some(e.to_string()));
+                    }
+                }
+            }
+            Message::DPreview(on) => {
+                self.with_details(|d| d.preview = on);
+            }
+            Message::DTask(n, on) => {
+                let source = self.details.as_ref().map(|d| d.notes.text());
+                if let Some(new) = source.and_then(|s| organiser_markdown::tasks::set(&s, n, on)) {
+                    self.with_details(|d| d.notes = text_editor::Content::with_text(&new));
+                    self.edit(EntryEdit {
+                        notes: Some(new.trim_end().to_string()),
+                        ..EntryEdit::default()
+                    });
+                    self.with_details(|d| {
+                        d.doc = organiser_ui::components::rich::render(&d.notes.text());
+                    });
+                }
+            }
+            Message::OpenLink(url) => {
+                if let Err(e) = organiser_ui::shell::open_link(&url) {
+                    self.toast = Some(e);
                 }
             }
             Message::Sort(SortChoice(s)) => {
@@ -622,6 +756,9 @@ impl App {
                         notes: Some(text.trim_end().to_string()),
                         ..EntryEdit::default()
                     });
+                    self.with_details(|d| {
+                        d.doc = organiser_ui::components::rich::render(&d.notes.text());
+                    });
                 }
             }
             Message::DFavorite(on) => self.edit(EntryEdit {
@@ -632,14 +769,14 @@ impl App {
                 rating: Some(r),
                 ..EntryEdit::default()
             }),
-            Message::DStatus(StatusChoice(s)) => self.edit(EntryEdit {
-                status: Some(s),
-                ..EntryEdit::default()
-            }),
             Message::DMove(choice) => {
                 let Some(d) = &self.details else {
                     return Task::none();
                 };
+                if d.is_new() {
+                    self.with_details(|d| d.entry.list_id = choice.id);
+                    return Task::none();
+                }
                 let id = d.entry.id;
                 match lifecycle::move_entry(&mut self.db, id, choice.id) {
                     Ok(_) => {
@@ -674,6 +811,9 @@ impl App {
                 let Some(d) = &self.details else {
                     return Task::none();
                 };
+                if d.is_new() {
+                    return Task::none();
+                }
                 let id = d.entry.id;
                 match self.db.delete(id) {
                     Ok(_) => self.toast = Some("Deleted".into()),
@@ -704,10 +844,6 @@ impl App {
                 rated: Some(on),
                 ..ListEdit::default()
             }),
-            Message::SetTracked(on) => self.edit_current_list(ListEdit {
-                tracked: Some(on),
-                ..ListEdit::default()
-            }),
             Message::DeleteList => {
                 let Some(id) = self.current().map(|c| c.list.id) else {
                     return Task::none();
@@ -728,7 +864,7 @@ impl App {
                 self.settings_open = false;
                 self.confirm_delete = false;
                 self.details = None;
-                self.view = View::Favorites;
+                self.view = View::All;
                 self.reload();
             }
             Message::DismissToast => self.toast = None,

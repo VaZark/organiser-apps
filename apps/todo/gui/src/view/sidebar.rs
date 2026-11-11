@@ -1,40 +1,49 @@
-//! The board's sidebar: the epics, then the tags with how many tasks each has. (Whether closed
-//! tasks show is the header's toggle, as in the list.) Only the board has one; the list has none.
+//! The sidebar, in the board and the list: All, the tasks that are current today, then the epics
+//! to pick from. Tags and statuses are not here: tags are
+//! found through the filter, in their own colours, and both have a button in the header. Only the
+//! board has a sidebar; the list has none.
 
 use organiser_ui::Element;
 use organiser_ui::iad::prelude::*;
-use organiser_ui::widgets::tag_tree;
+use todo_schema::views::Scope;
 
 use crate::app::{App, Message};
 
 impl App {
     pub(super) fn sidebar(&self) -> Element<'_, Message> {
-        let mut items: Vec<SidebarItem<Message>> = Vec::new();
-
-        for s in self.epics.iter().filter(|s| s.epic.status.is_open()) {
-            let title = format!("{}  ({}/{})", s.epic.title, s.total - s.open, s.total);
-            let item = SidebarItem::new(title, Message::ToggleEpic(s.epic.id))
-                .icon(Icon::Document)
-                .selected(self.epic_filter == Some(s.epic.id));
-            items.push(item);
-        }
-        items.push(SidebarItem::new("New epic", Message::NewEpic).icon(Icon::ListAdd));
-
+        // "All" and the epics are one choice, a selection: picking an epic shows its tasks, picking
+        // All shows everything. (The filter can still pick several.)
+        let everything = self.scope == Scope::All && self.epic_filter.is_none();
+        let mut items: Vec<SidebarItem<Message>> = vec![
+            SidebarItem::new("All", Message::SetEpic(None))
+                .icon(Icon::CardGrid)
+                .selected(everything),
+            SidebarItem::new("Current tasks", Message::Current(true))
+                .icon(Icon::Calendar)
+                .selected(self.scope == Scope::Current),
+        ];
         let mut first = true;
-        for (depth, t) in tag_tree::ordered(&self.tags) {
-            let name = t.name.rsplit(':').next().unwrap_or(&t.name);
-            let mut item = SidebarItem::new(
-                format!("{}{name}  ({})", "   ".repeat(depth), t.count("item")),
-                Message::ToggleTag(t.name.clone()),
-            )
-            .icon(Icon::Tag)
-            .selected(self.tag_filters.contains(&t.name));
+        for s in self
+            .epics
+            .iter()
+            .filter(|s| self.statuses.is_open(s.epic.status))
+        {
+            let title = format!("{}  ({}/{})", s.epic.title, s.total - s.open, s.total);
+            let mut item = SidebarItem::new(title, Message::SetEpic(Some(s.epic.id)))
+                .icon(Icon::Document)
+                .selected(self.scope == Scope::All && self.epic_filter == Some(s.epic.id));
             if first {
                 item = item.divider_above();
                 first = false;
             }
             items.push(item);
         }
+        let mut new_epic = SidebarItem::new("New epic", Message::NewEpic).icon(Icon::ListAdd);
+        if first {
+            new_epic = new_epic.divider_above();
+        }
+        items.push(new_epic);
+
         SidebarList::new(items).style(SidebarStyle::List).into()
     }
 }

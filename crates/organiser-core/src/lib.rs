@@ -1,6 +1,7 @@
 //! App-agnostic basics shared by every organiser app: who the app is and where its files live.
 
 pub mod paths;
+pub mod settings;
 
 /// Static identity of one app. Shared by its engine schema, CLI, GUI and packaging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

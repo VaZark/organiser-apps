@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::priority::Priority;
-use super::status::Status;
 
 fn date(item: &Item, key: &str) -> Option<NaiveDate> {
     item.fields.get(key)?.as_str()?.parse().ok()
@@ -20,12 +19,9 @@ fn text(item: &Item, key: &str) -> String {
         .to_string()
 }
 
-fn status(item: &Item) -> Status {
-    item.fields
-        .get("status")
-        .and_then(Value::as_str)
-        .and_then(Status::parse)
-        .unwrap_or_default()
+/// The id of the status an item points at, if it has one.
+fn status(item: &Item) -> Option<i64> {
+    item.fields.get("status").and_then(Value::as_i64)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,7 +32,9 @@ pub struct Task {
     pub epic: Option<i64>,
     pub title: String,
     pub notes: String,
-    pub status: Status,
+    /// The status this is in (see [`Statuses`](super::status::Statuses)); `None` counts as the
+    /// first open one.
+    pub status: Option<i64>,
     pub priority: Priority,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
@@ -91,7 +89,9 @@ pub struct Epic {
     pub id: i64,
     pub title: String,
     pub notes: String,
-    pub status: Status,
+    /// The status this is in (see [`Statuses`](super::status::Statuses)); `None` counts as the
+    /// first open one.
+    pub status: Option<i64>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
     pub tags: Vec<String>,
@@ -191,7 +191,7 @@ mod tests {
             id: 1,
             title: "e".into(),
             notes: String::new(),
-            status: Status::Open,
+            status: None,
             start: None,
             due: None,
             tags: vec![],

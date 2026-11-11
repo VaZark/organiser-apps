@@ -634,3 +634,59 @@ fn a_field_can_be_gated_through_the_parent() {
     assert!(!db.get(e.id).unwrap().fields.contains_key("rating"));
     assert_eq!(db.delete(on).unwrap(), 2, "the entries go with their list");
 }
+
+// ---- tag colours -----------------------------------------------------------------------------
+
+#[test]
+fn every_tag_gets_a_stored_colour_and_existing_ones_are_kept() {
+    let mut db = db();
+    let a = db
+        .create(NewItem::new("task", "a").tag("work").tag("home"))
+        .unwrap();
+    db.set_tag_color("home", Some("#ABCDEF")).unwrap();
+    assert_eq!(
+        db.ensure_tag_colors(&TAG_PALETTE).unwrap(),
+        1,
+        "only `work` lacked one"
+    );
+    let tags = db.tags().unwrap();
+    let color = |n: &str| tags.iter().find(|t| t.name == n).unwrap().color.clone();
+    assert_eq!(
+        color("home").as_deref(),
+        Some("#abcdef"),
+        "a chosen colour is not replaced"
+    );
+    assert!(TAG_PALETTE.contains(&color("work").unwrap().as_str()));
+    // Running again changes nothing, and a new tag is coloured on the next run.
+    assert_eq!(db.ensure_tag_colors(&TAG_PALETTE).unwrap(), 0);
+    db.add_tags(a.id, &["fresh".to_string()]).unwrap();
+    assert_eq!(db.ensure_tag_colors(&TAG_PALETTE).unwrap(), 1);
+}
+
+#[test]
+fn a_tag_colour_can_be_cleared_and_must_be_a_colour() {
+    let mut db = db();
+    db.create_tag("x", None).unwrap();
+    db.set_tag_color("x", Some("#112233")).unwrap();
+    assert_eq!(db.set_tag_color("x", None).unwrap().color, None);
+    assert!(db.set_tag_color("x", Some("blue")).is_err());
+    assert!(db.set_tag_color("missing", Some("#112233")).is_err());
+}
+
+#[test]
+fn colouring_leaves_a_tags_parent_alone() {
+    let mut db = db();
+    db.create_tag("group", None).unwrap();
+    db.create_tag("child", Some("group")).unwrap();
+    db.set_tag_color("child", Some("#112233")).unwrap();
+    assert_eq!(
+        db.tags()
+            .unwrap()
+            .iter()
+            .find(|t| t.name == "child")
+            .unwrap()
+            .parent
+            .as_deref(),
+        Some("group")
+    );
+}

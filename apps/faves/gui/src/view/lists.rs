@@ -35,20 +35,27 @@ fn item<'a>(
 impl App {
     pub(super) fn lists_panel(&self) -> Element<'_, Message> {
         let favorites: usize = self.lists.iter().map(|s| s.favorites).sum();
-        let mut rows: Vec<Element<'_, Message>> = vec![item(
-            Icon::Heart,
-            "Favorites".into(),
-            format!("{favorites}"),
-            self.view == View::Favorites,
-            Message::Show(View::Favorites),
-        )];
+        let total: usize = self.lists.iter().map(|s| s.entries).sum();
+        let mut rows: Vec<Element<'_, Message>> = vec![
+            item(
+                Icon::CardGrid,
+                "All".into(),
+                format!("{total}"),
+                self.view == View::All,
+                Message::Show(View::All),
+            ),
+            item(
+                Icon::Heart,
+                "Favorites".into(),
+                format!("{favorites}"),
+                self.view == View::Favorites,
+                Message::Show(View::Favorites),
+            ),
+        ];
         for s in &self.lists {
             let mut extras = vec![format!("{} entries", s.entries)];
             if s.list.rated {
                 extras.push("rated".into());
-            }
-            if s.list.tracked {
-                extras.push("tracked".into());
             }
             rows.push(item(
                 Icon::Folder,

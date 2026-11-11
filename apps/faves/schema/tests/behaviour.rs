@@ -4,7 +4,6 @@ use faves_schema::lifecycle::{
     set_tags,
 };
 use faves_schema::model::{Entry, EntryEdit, ListEdit};
-use faves_schema::status::Status;
 use faves_schema::views::{Filter, Sort, entries, lists};
 use organiser_engine::Db;
 
@@ -19,8 +18,8 @@ fn titles(v: &[Entry]) -> Vec<&str> {
 #[test]
 fn rating_is_an_option_each_list_chooses() {
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, false).unwrap();
-    let animals = create_list(&mut db, "Animals", false, false).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
+    let animals = create_list(&mut db, "Animals", false).unwrap();
 
     let alien = add_entry(
         &mut db,
@@ -64,7 +63,7 @@ fn rating_is_an_option_each_list_chooses() {
 #[test]
 fn switching_rating_off_removes_the_ratings_and_back_on_allows_new_ones() {
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, false).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
     let a = add_entry(
         &mut db,
         movies.id,
@@ -112,54 +111,24 @@ fn switching_rating_off_removes_the_ratings_and_back_on_allows_new_ones() {
 }
 
 #[test]
-fn status_is_a_separate_option_and_ratings_stay_in_range() {
+fn only_rated_lists_take_a_rating_and_it_stays_in_range() {
     let mut db = db();
-    let shows = create_list(&mut db, "Shows", false, true).unwrap();
-    let cars = create_list(&mut db, "Cars", false, false).unwrap();
-    let e = add_entry(
-        &mut db,
-        shows.id,
-        &NewEntry {
-            status: Some(Status::Active),
-            ..NewEntry::new("Severance")
-        },
-    )
-    .unwrap();
-    assert_eq!(e.status, Some(Status::Active));
+    let cars = create_list(&mut db, "Cars", false).unwrap();
+    let rated = create_list(&mut db, "Rated", true).unwrap();
+    let with = |rating| NewEntry {
+        rating: Some(rating),
+        ..NewEntry::new("x")
+    };
     assert!(
-        add_entry(
-            &mut db,
-            cars.id,
-            &NewEntry {
-                status: Some(Status::Done),
-                ..NewEntry::new("Mini")
-            }
-        )
-        .is_err()
+        add_entry(&mut db, cars.id, &with(3)).is_err(),
+        "cars are not rated"
+    );
+    assert_eq!(
+        add_entry(&mut db, rated.id, &with(3)).unwrap().rating,
+        Some(3)
     );
     assert!(
-        add_entry(
-            &mut db,
-            shows.id,
-            &NewEntry {
-                rating: Some(3),
-                ..NewEntry::new("x")
-            }
-        )
-        .is_err(),
-        "shows are not rated"
-    );
-    let rated = create_list(&mut db, "Rated", true, false).unwrap();
-    assert!(
-        add_entry(
-            &mut db,
-            rated.id,
-            &NewEntry {
-                rating: Some(9),
-                ..NewEntry::new("x")
-            }
-        )
-        .is_err(),
+        add_entry(&mut db, rated.id, &with(9)).is_err(),
         "1 to 5 only"
     );
 }
@@ -167,8 +136,8 @@ fn status_is_a_separate_option_and_ratings_stay_in_range() {
 #[test]
 fn deleting_a_list_deletes_its_entries() {
     let mut db = db();
-    let l = create_list(&mut db, "Cars", false, false).unwrap();
-    let other = create_list(&mut db, "Animals", false, false).unwrap();
+    let l = create_list(&mut db, "Cars", false).unwrap();
+    let other = create_list(&mut db, "Animals", false).unwrap();
     add_entry(&mut db, l.id, &NewEntry::new("Mini")).unwrap();
     add_entry(&mut db, l.id, &NewEntry::new("Beetle")).unwrap();
     add_entry(&mut db, other.id, &NewEntry::new("Otter")).unwrap();
@@ -182,25 +151,21 @@ fn deleting_a_list_deletes_its_entries() {
 }
 
 #[test]
-fn moving_an_entry_drops_what_the_new_list_does_not_offer() {
+fn moving_an_entry_drops_a_rating_the_new_list_does_not_offer() {
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, true).unwrap();
-    let docs = create_list(&mut db, "Documentaries", false, false).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
+    let docs = create_list(&mut db, "Documentaries", false).unwrap();
     let e = add_entry(
         &mut db,
         movies.id,
         &NewEntry {
             rating: Some(5),
-            status: Some(Status::Done),
             ..NewEntry::new("Free Solo")
         },
     )
     .unwrap();
     let moved = move_entry(&mut db, e.id, docs.id).unwrap();
-    assert_eq!(
-        (moved.list_id, moved.rating, moved.status),
-        (docs.id, None, None)
-    );
+    assert_eq!((moved.list_id, moved.rating), (docs.id, None));
     // The engine itself also refuses to move a rated entry somewhere ratings are off.
     let again = add_entry(
         &mut db,
@@ -217,8 +182,8 @@ fn moving_an_entry_drops_what_the_new_list_does_not_offer() {
 #[test]
 fn favorites_span_lists_and_sort_by_rating() {
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, false).unwrap();
-    let animals = create_list(&mut db, "Animals", false, false).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
+    let animals = create_list(&mut db, "Animals", false).unwrap();
     let a = add_entry(
         &mut db,
         movies.id,
@@ -271,13 +236,12 @@ fn favorites_span_lists_and_sort_by_rating() {
 #[test]
 fn search_tags_and_summaries() {
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, true).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
     let a = add_entry(
         &mut db,
         movies.id,
         &NewEntry {
             notes: Some("Spooky space horror".into()),
-            status: Some(Status::Done),
             ..NewEntry::new("Alien")
         },
     )
@@ -308,17 +272,14 @@ fn search_tags_and_summaries() {
     .unwrap();
     assert_eq!(titles(&tagged), ["Alien"]);
     let summary = &lists(&db).unwrap()[0];
-    assert_eq!(
-        (summary.entries, summary.favorites, summary.done),
-        (2, 1, 1)
-    );
+    assert_eq!((summary.entries, summary.favorites), (2, 1));
 }
 
 #[test]
 fn filters_combine_rating_favourite_and_tag_groups() {
     use organiser_engine::TagFilter;
     let mut db = db();
-    let movies = create_list(&mut db, "Movies", true, false).unwrap();
+    let movies = create_list(&mut db, "Movies", true).unwrap();
     let add = |db: &mut Db, title: &str, rating: Option<u8>, fave: bool, tags: &[&str]| {
         let e = add_entry(
             db,
@@ -409,4 +370,62 @@ fn filters_combine_rating_favourite_and_tag_groups() {
         }),
         "Alien,Dune,Unrated"
     );
+}
+
+#[test]
+fn a_database_from_before_statuses_were_dropped_is_cleaned_and_editable_again() {
+    use faves_schema::lifecycle::drop_legacy;
+    use organiser_engine::{Field, FieldType, Kind, NewItem, Schema};
+    // The schema as it was: lists with a `tracked` switch, entries with a status.
+    static OLD: Schema = Schema {
+        kinds: &[
+            Kind {
+                name: "list",
+                fields: &[
+                    Field::new("rated", FieldType::Bool),
+                    Field::new("tracked", FieldType::Bool),
+                ],
+            },
+            Kind {
+                name: "entry",
+                fields: &[Field::new(
+                    "status",
+                    FieldType::Enum(&["planned", "active", "done"]),
+                )],
+            },
+        ],
+    };
+    let path = std::env::temp_dir().join(format!("faves-legacy-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let entry = {
+        let mut old = Db::open(&path, &OLD).unwrap();
+        let list = old
+            .create(NewItem::new("list", "Shows").field("tracked", true))
+            .unwrap();
+        old.create(
+            NewItem::new("entry", "Severance")
+                .parent(list.id)
+                .field("status", "active"),
+        )
+        .unwrap()
+        .id
+    };
+    let mut db = Db::open(&path, &SCHEMA).unwrap();
+    let edit = EntryEdit {
+        notes: Some("x".into()),
+        ..EntryEdit::default()
+    };
+    assert!(
+        edit_entry(&mut db, entry, &edit).is_err(),
+        "the old field blocks edits"
+    );
+    assert_eq!(
+        drop_legacy(&mut db).unwrap(),
+        2,
+        "the list's switch and the entry's status"
+    );
+    assert_eq!(edit_entry(&mut db, entry, &edit).unwrap().notes, "x");
+    assert_eq!(drop_legacy(&mut db).unwrap(), 0, "nothing left to clear");
+    drop(db);
+    let _ = std::fs::remove_file(&path);
 }

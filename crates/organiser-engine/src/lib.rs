@@ -17,7 +17,9 @@ pub mod primitives;
 
 pub use db::Db;
 pub use error::{Error, Result};
+pub use primitives::filters::{FilterValue, Filters, filterable};
 pub use primitives::item::{Item, ItemPatch, NewItem};
+pub use primitives::palette::{TAG_PALETTE, pick as pick_tag_color};
 pub use primitives::query::{FieldFilter, Op, ParentFilter, Query, Sort};
 pub use primitives::schema::{Field, FieldType, Gate, GateVia, Kind, Schema};
 pub use primitives::tree::{Node, Row, build as build_tree, flatten as flatten_tree};

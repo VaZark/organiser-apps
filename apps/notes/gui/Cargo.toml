@@ -1,0 +1,17 @@
+[package]
+name = "notes-gui"
+description = "Graphical frontend for the Notes app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "notes-gui"
+path = "src/main.rs"
+
+[dependencies]
+iced.workspace = true
+organiser-core.workspace = true
+organiser-engine.workspace = true
+organiser-ui.workspace = true
+notes-schema.workspace = true

@@ -15,4 +15,6 @@ iced.workspace = true
 organiser-core.workspace = true
 organiser-engine.workspace = true
 organiser-ui.workspace = true
+organiser-markdown.workspace = true
+serde_json.workspace = true
 todo-schema.workspace = true

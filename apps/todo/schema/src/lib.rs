@@ -12,7 +12,7 @@ pub mod primitives;
 use organiser_core::AppMeta;
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
-pub use components::{lifecycle, views};
+pub use components::{lifecycle, statuses, views};
 pub use primitives::{board, due, priority, quick, status, task};
 
 pub const META: AppMeta = AppMeta {
@@ -25,6 +25,7 @@ pub const META: AppMeta = AppMeta {
 
 pub const TASK: &str = "task";
 pub const EPIC: &str = "epic";
+pub const STATUS: &str = "status";
 
 pub static SCHEMA: Schema = Schema {
     kinds: &[
@@ -32,24 +33,35 @@ pub static SCHEMA: Schema = Schema {
             name: TASK,
             fields: &[
                 Field::new("notes", FieldType::Markdown).searchable(),
-                Field::new("status", FieldType::Enum(status::NAMES))
-                    .indexed()
-                    .default_to("open"),
+                // The id of one of the person's statuses (see `statuses`).
+                Field::new("status", FieldType::Reference(STATUS)).indexed(),
                 Field::new("priority", FieldType::Enum(priority::NAMES))
                     .indexed()
                     .default_to("medium"),
                 Field::new("start", FieldType::Date).indexed(),
                 Field::new("due", FieldType::Date).indexed(),
-                Field::new("epic", FieldType::Reference(EPIC)).indexed(),
+                // Filtered through the epics themselves (their own section and sidebar), so not
+                // offered a second time among the generated filters.
+                Field::new("epic", FieldType::Reference(EPIC))
+                    .indexed()
+                    .internal(),
+            ],
+        },
+        Kind {
+            name: STATUS,
+            fields: &[
+                // `#rrggbb`.
+                Field::new("color", FieldType::Text),
+                // Finished: done, or decided against.
+                Field::new("closed", FieldType::Bool).indexed(),
             ],
         },
         Kind {
             name: EPIC,
             fields: &[
                 Field::new("notes", FieldType::Markdown).searchable(),
-                Field::new("status", FieldType::Enum(status::NAMES))
-                    .indexed()
-                    .default_to("open"),
+                // The id of one of the person's statuses (see `statuses`).
+                Field::new("status", FieldType::Reference(STATUS)).indexed(),
                 Field::new("start", FieldType::Date).indexed(),
                 Field::new("due", FieldType::Date).indexed(),
             ],

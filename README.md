@@ -7,9 +7,9 @@ Tags come from [weaver](https://github.com/VaZark/weaver).
 
 | App                           | Status                                                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| **Todo** (GTG, Jira, Planify) | Working: kanban board and list, nested tasks, epics, priorities, dates, tags, search, CLI and GUI |
+| **Todo** (GTG, Jira, Planify) | Working: kanban board and list, nested tasks, epics, your own coloured statuses, Markdown notes, tags, search, CLI and GUI |
 | **Faves**                     | Working: lists of anything you track, with optional ratings and notes, CLI and GUI                |
-| Notes (Keep-style)            | Planned                                                                                           |
+| **Notes** (Keep-style)         | Working: coloured cards with Markdown, pinning, archive and trash, CLI and GUI (packaging planned) |
 | Recipes                       | Planned                                                                                           |
 | Bookmarks                     | Planned                                                                                           |
 
@@ -79,7 +79,6 @@ Keep lists of anything you follow: movies, cars, animals, books. Each **list** c
 extras, so what an entry can have depends on the list it is in:
 
 - **Ratings** (up to five stars): on for movies and cars, off for animals, say.
-- **Status** (planned, in progress, done): on for movies and shows, off for cars.
 - Every entry can have **notes or an opinion**, **tags**, and a **favourite** heart. The
   **Favorites** view collects the hearts of every list.
 
@@ -87,15 +86,16 @@ The rules hold everywhere, not just in the GUI: the engine refuses a rating on a
 has ratings off, and switching ratings off for a list removes the ratings its entries had. Deleting
 a list deletes its entries. Moving an entry to another list drops what the new list does not offer.
 
-In the GUI the sidebar lists your lists (with counts) and **Favorites**. The cards of the selected
-list are laid out like Google Keep's notes. The **settings** icon opens the list's name and its
-Ratings and Status switches. Click a card for its details: title, tags, the stars and status the
-list offers, which list it is in, and notes. Every edit is saved as you make it.
+In the GUI the sidebar has **All**, **Favorites** and your lists (with counts). The cards of the
+selected list are laid out like Google Keep's notes. The **settings** icon opens the list's name
+and its Ratings switch. Click a card for its details: title, tags, the stars the list offers,
+which list it is in, and notes. Every edit is saved as you make it, and **+** starts a new entry on
+the same page.
 
 ```sh
-faves list-new Movies --rated --tracked            # prints the list's id, say 1
-faves list-new Animals                             # no ratings, no status
-faves add "Alien" -p 1 -s rating=5 -s status=done -t scifi
+faves list-new Movies --rated                      # prints the list's id, say 1
+faves list-new Animals                             # no ratings
+faves add "Alien" -p 1 -s rating=5 -t scifi
 faves add "Otter" -p 2 -s notes="Holds hands while sleeping."
 faves fave 3                                       # mark a favourite
 faves favorites --sort rating                      # favourites from every list

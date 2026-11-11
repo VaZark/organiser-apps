@@ -1,13 +1,14 @@
 //! The details of the selected task or epic. Every edit is saved as it is made.
 
 use iced::Length;
-use iced::widget::{column, row, text_editor};
+use iced::widget::{column, row};
 use organiser_ui::Element;
+use organiser_ui::components::dot::{color_from_hex, dot};
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::date::Date;
+use organiser_ui::widgets::markdown_field::MarkdownField;
 use organiser_ui::widgets::tag_editor::tag_editor;
 use todo_schema::priority::Priority;
-use todo_schema::status::Status;
 
 use crate::app::{App, Details, EpicChoice, Message, Subject};
 
@@ -30,21 +31,18 @@ impl App {
         let Some(d) = &self.details else {
             return space().into();
         };
-        let (kind, status) = match &d.subject {
+        let (kind, status_id) = match &d.subject {
             Subject::Task(t) => ("Task", t.status),
             Subject::Epic(e) => ("Epic", e.status),
         };
 
         let mut col = column![
-            // Closing the details lives in the pane, so it works however they are shown.
-            row![
-                tooltip(
-                    icon_button(Icon::GoPrevious).on_press(Message::CloseDetails),
-                    "Back",
-                    TooltipPosition::Bottom
-                ),
-                caption(format!("{kind} {}", d.id())),
-            ]
+            // Closing the page is the header's back button.
+            row![caption(if d.is_new() {
+                "New task".to_string()
+            } else {
+                format!("{kind} {}", d.id())
+            }),]
             .spacing(8)
             .align_y(iced::Alignment::Center),
             entry("Title", d.title.as_str()).on_input(Message::DTitle),
@@ -60,10 +58,7 @@ impl App {
                 &|t| Message::DTagRemove(t),
             ),
             row![
-                field(
-                    "Status",
-                    dropdown(&Status::ALL, Some(status), Message::DStatus)
-                ),
+                field("Status", self.status_picker(status_id)),
                 self.priority_or_progress(d),
             ]
             .spacing(12),
@@ -90,29 +85,50 @@ impl App {
                 ]
                 .spacing(12),
             )
-            .push(field(
-                "Details",
-                text_view(&d.notes)
-                    .on_action(|a: text_editor::Action| Message::DNotes(a))
-                    .placeholder("Add details, links, notes…")
-                    .min_lines(7)
-                    .max_lines(16),
-            ));
+            .push(
+                MarkdownField::new(
+                    "Details",
+                    &d.notes,
+                    &d.doc,
+                    self.theme(),
+                    Message::DNotes,
+                    Message::DPreview,
+                )
+                .preview(d.preview)
+                .placeholder("Add details in Markdown…  - [ ] a task, **bold**, `code`")
+                .min_lines(7)
+                .on_task(Message::DTask)
+                .on_link(Message::OpenLink),
+            );
 
-        if let Subject::Task(_) = &d.subject {
+        // A task that is not saved yet has no subtasks to list or add.
+        if matches!(&d.subject, Subject::Task(_)) && !d.is_new() {
             col = col.push(self.subtasks(d));
         }
         if let Some(e) = &d.error {
             col = col.push(tag(e.clone(), Role::Error));
         }
-        col = col.push(
-            destructive_button(text(if matches!(d.subject, Subject::Epic(_)) {
-                "Delete epic"
-            } else {
-                "Delete task"
-            }))
-            .on_press(Message::DDelete),
-        );
+        col = if d.is_new() {
+            // The same page makes a task: nothing is saved until Create.
+            let ready = !d.title.trim().is_empty();
+            col.push(
+                row![
+                    flat_button(text("Cancel")).on_press(Message::CloseDetails),
+                    suggested_button(text("Create task"))
+                        .on_press_maybe(ready.then_some(Message::DCreate)),
+                ]
+                .spacing(8),
+            )
+        } else {
+            col.push(
+                destructive_button(text(if matches!(d.subject, Subject::Epic(_)) {
+                    "Delete epic"
+                } else {
+                    "Delete task"
+                }))
+                .on_press(Message::DDelete),
+            )
+        };
 
         scrolled_window(clamp(
             container(col).padding(16),
@@ -120,6 +136,22 @@ impl App {
         ))
         .height(Length::Fill)
         .into()
+    }
+
+    /// The statuses to choose from, led by a dot in the current one's colour.
+    fn status_picker(&self, current: Option<i64>) -> Element<'_, Message> {
+        let now = self.statuses.resolve(current);
+        let picker = dropdown(self.statuses.all(), now.cloned(), Message::DStatus);
+        match now
+            .and_then(|s| s.color.as_deref())
+            .and_then(color_from_hex)
+        {
+            Some(c) => row![dot(c, 12.0), picker]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            None => picker.into(),
+        }
     }
 
     /// A task's priority picker, or an epic's progress.
@@ -151,7 +183,7 @@ impl App {
             let id = s.id;
             col = col.push(
                 row![
-                    check_button("", s.status == Status::Done)
+                    check_button("", self.statuses.is_closed(s.status))
                         .on_toggle(move |_| Message::Toggle(id)),
                     flat_button(text(s.title.clone())).on_press(Message::Select(id)),
                 ]

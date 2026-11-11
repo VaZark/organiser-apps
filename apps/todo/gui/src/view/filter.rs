@@ -2,11 +2,15 @@
 //! sheet on a narrow one (`organiser_ui::widgets::responsive_dialog`).
 
 use iced::widget::{column, row};
+use organiser_engine::Kind;
 use organiser_ui::Element;
+use organiser_ui::components::dot::color_from_hex;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::filter_sheet::filter_sheet;
-use organiser_ui::widgets::tag_tree;
+use organiser_ui::widgets::schema_filters::{Choice, schema_filters};
+use organiser_ui::widgets::tag_filter::tag_filter;
+use todo_schema::{SCHEMA, TASK};
 
 use crate::app::{App, Message};
 
@@ -32,7 +36,7 @@ impl App {
         let epics: Vec<ChipOption<i64>> = self
             .epics
             .iter()
-            .filter(|s| self.show_closed || s.epic.status.is_open())
+            .filter(|s| self.show_closed || self.statuses.is_open(s.epic.status))
             .map(|s| {
                 ChipOption::new(
                     s.epic.id,
@@ -64,34 +68,52 @@ impl App {
             ChipGroup::new(epics, selected_epic, Message::ToggleEpic).into()
         };
 
-        let tag_options: Vec<ChipOption<String>> = tag_tree::ordered(&self.tags)
-            .into_iter()
-            .map(|(_, t)| {
-                ChipOption::new(
-                    t.name.clone(),
-                    format!("{}  ({})", ellipsize(&t.name, 28), t.count("item")),
-                )
-            })
-            .collect();
-        let tag_chips: Element<'_, Message> = if tag_options.is_empty() {
-            caption("No tags yet. Add some in a task's details.").into()
-        } else {
-            ChipGroup::new(tag_options, self.tag_filters.clone(), Message::ToggleTag)
-                .search(&self.tag_query, Message::TagQuery)
-                .placeholder("Find a tag")
-                .into()
-        };
-
+        let generated = schema_filters(
+            kind(),
+            &self.filters,
+            &|f| match f.name {
+                // A status is one of the person's own, in its colour.
+                "status" => self
+                    .statuses
+                    .all()
+                    .iter()
+                    .map(|s| Choice {
+                        value: serde_json::Value::from(s.id),
+                        label: s.name.clone(),
+                        color: s.color.as_deref().and_then(color_from_hex),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
+            Message::Fields,
+        );
         column![
-            column![heading("Epic"), epic_chips, epic_actions].spacing(10),
-            column![
-                heading("Tags"),
-                caption("A task needs at least one of the tags you pick."),
-                tag_chips
-            ]
-            .spacing(10),
+            EntryRow::new(
+                "Epic",
+                EntryInput::Custom(column![epic_chips, epic_actions].spacing(10).into())
+            )
+            .description("An epic groups related tasks.")
+            .flat(true),
+            generated,
+            tag_filter(
+                &self.tags,
+                &self.tag_groups,
+                &self.tag_query,
+                "A task needs every tag of at least one group. Press + to start another group.",
+                Message::TagGroups,
+                Message::TagQuery,
+            ),
         ]
         .spacing(24)
         .into()
     }
+}
+
+/// The task kind of the schema: what its filters are generated from.
+pub fn kind() -> &'static Kind {
+    SCHEMA
+        .kinds
+        .iter()
+        .find(|k| k.name == TASK)
+        .expect("the schema has tasks")
 }

@@ -5,7 +5,6 @@ use organiser_engine::{
 };
 
 use crate::primitives::model::{Entry, List, ListSummary};
-use crate::primitives::status::Status;
 use crate::{ENTRY, LIST};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -29,7 +28,8 @@ pub struct Filter {
     pub favorites: bool,
     /// At least this many stars. Unrated entries do not match.
     pub min_rating: Option<u8>,
-    pub status: Option<Status>,
+    /// What the person chose in the filters the schema offers (favourite, rating).
+    pub fields: organiser_engine::Filters,
     pub sort: Sort,
 }
 
@@ -54,10 +54,6 @@ pub fn lists(db: &Db) -> Result<Vec<ListSummary>> {
         out.push(ListSummary {
             list: List::from(item),
             favorites: entries.iter().filter(|e| e.favorite).count(),
-            done: entries
-                .iter()
-                .filter(|e| e.status == Some(Status::Done))
-                .count(),
             entries: entries.len(),
         });
     }
@@ -84,9 +80,10 @@ pub fn entries(db: &Db, f: &Filter) -> Result<Vec<Entry>> {
     if let Some(n) = f.min_rating {
         q.filters.push(FieldFilter::new("rating", Op::Ge, n));
     }
-    if let Some(s) = f.status {
-        q.filters
-            .push(FieldFilter::new("status", Op::Eq, s.as_str()));
-    }
-    Ok(db.list(&q)?.iter().map(Entry::from).collect())
+    Ok(db
+        .list(&q)?
+        .iter()
+        .filter(|i| f.fields.matches(i))
+        .map(Entry::from)
+        .collect())
 }

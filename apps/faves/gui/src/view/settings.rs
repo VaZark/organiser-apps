@@ -16,19 +16,17 @@ impl App {
         let l = &s.list;
         let body = column![
             entry("List name", l.title.as_str()).on_input(Message::SetListTitle),
-            column![
-                EntryRow::switch("Ratings", l.rated, Message::SetRated),
-                caption("Give each entry up to five stars. Switching this off removes the ratings."),
-            ]
-            .spacing(4),
-            column![
-                EntryRow::switch("Status", l.tracked, Message::SetTracked),
-                caption("Track each entry as planned, in progress or done. Switching this off removes the statuses."),
-            ]
-            .spacing(4),
+            EntryRow::switch("Ratings", l.rated, Message::SetRated)
+                .description(
+                    "Give each entry up to five stars. Switching this off removes the ratings."
+                )
+                .flat(true),
             column![
                 destructive_button(text(if self.confirm_delete {
-                    format!("Press again to delete the list and its {} entries", s.entries)
+                    format!(
+                        "Press again to delete the list and its {} entries",
+                        s.entries
+                    )
                 } else {
                     "Delete list…".to_string()
                 }))

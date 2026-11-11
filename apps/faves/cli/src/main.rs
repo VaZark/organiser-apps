@@ -6,7 +6,9 @@
 use std::process::ExitCode;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use faves_schema::lifecycle::{create_list, delete_list, edit_list, move_entry, set_favorite};
+use faves_schema::lifecycle::{
+    create_list, delete_list, drop_legacy, edit_list, move_entry, set_favorite,
+};
 use faves_schema::model::{Entry, ListEdit, ListSummary};
 use faves_schema::views::{Filter, Sort, entries, lists};
 use organiser_cli_kit::{Extension, Output};
@@ -39,9 +41,6 @@ fn entry_line(e: &Entry) -> String {
         e.id,
         e.title
     );
-    if let Some(st) = e.status {
-        s.push_str(&format!("  [{}]", st.label()));
-    }
     if e.rating.is_some() {
         s.push_str(&format!("  {}", stars(e.rating)));
     }
@@ -69,9 +68,6 @@ fn lists_out(v: &[ListSummary]) -> Output {
             let mut extras = Vec::new();
             if s.list.rated {
                 extras.push("rated");
-            }
-            if s.list.tracked {
-                extras.push("tracked");
             }
             let extras = if extras.is_empty() {
                 String::new()
@@ -122,22 +118,13 @@ impl Extension for Faves {
                         .long("rated")
                         .action(ArgAction::SetTrue)
                         .help("its entries can be rated"),
-                )
-                .arg(
-                    Arg::new("tracked")
-                        .long("tracked")
-                        .action(ArgAction::SetTrue)
-                        .help("its entries have a status"),
                 ),
             Command::new("list-set")
-                .about(
-                    "Change a list. Switching rated or tracked off removes the ratings or statuses",
-                )
+                .about("Change a list. Switching rated off removes the ratings")
                 .arg(id())
                 .arg(Arg::new("title").long("title"))
                 .arg(Arg::new("notes").long("notes"))
-                .arg(toggle("rated", "let entries be rated"))
-                .arg(toggle("tracked", "give entries a status")),
+                .arg(toggle("rated", "let entries be rated")),
             Command::new("list-rm")
                 .about("Delete a list and all its entries")
                 .arg(id()),
@@ -167,6 +154,10 @@ impl Extension for Faves {
     }
 
     fn run(&self, db: &mut Db, name: &str, m: &ArgMatches) -> Option<Result<Output>> {
+        // An older database may still hold statuses, which this version no longer has.
+        if let Err(e) = drop_legacy(db) {
+            return Some(Err(e));
+        }
         let id = || *m.get_one::<i64>("id").unwrap_or(&0);
         Some(match name {
             "lists" => lists(db).map(|v| lists_out(&v)),
@@ -174,22 +165,19 @@ impl Extension for Faves {
                 db,
                 m.get_one::<String>("title").map_or("", String::as_str),
                 m.get_flag("rated"),
-                m.get_flag("tracked"),
             )
             .map(|l| Output::Custom {
                 human: format!("created list {} ({})", l.id, l.title),
                 json: json!(l),
             }),
             "list-set" => on_off(m, "rated").and_then(|rated| {
-                let tracked = on_off(m, "tracked")?;
                 let edit = ListEdit {
                     title: m.get_one::<String>("title").cloned(),
                     notes: m.get_one::<String>("notes").cloned(),
                     rated,
-                    tracked,
                 };
                 edit_list(db, id(), &edit).map(|l| Output::Custom {
-                    human: format!("{}: rated {}, tracked {}", l.title, l.rated, l.tracked),
+                    human: format!("{}: rated {}", l.title, l.rated),
                     json: json!(l),
                 })
             }),

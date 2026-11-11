@@ -15,8 +15,8 @@ pub fn button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     let m = Metrics::desktop();
     tooltip(
         iced::widget::button(
-            container(Icon::Search.view(m.icon_size + 2.0).weight(0.3))
-                .center(Length::Fixed(m.button_min_height)),
+            // The bundled artwork is already drawn at the right stroke: no extra size or weight.
+            container(Icon::Search.view(m.icon_size)).center(Length::Fixed(m.button_min_height)),
         )
         .padding(0)
         .style(crate::iad::styles::button::flat)

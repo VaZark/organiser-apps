@@ -1,10 +1,12 @@
 //! The lists a frontend shows.
 
 use chrono::NaiveDate;
-use organiser_engine::{Db, FieldFilter, Node, Op, Query, Result, Sort, TagFilter, build_tree};
+use organiser_engine::{
+    Db, FieldFilter, Filters, Node, Op, Query, Result, Sort, TagFilter, build_tree,
+};
 
-use crate::primitives::status::Status;
 use crate::primitives::task::{Epic, EpicSummary, Task};
+use crate::statuses;
 use crate::{EPIC, TASK};
 
 /// Which tasks to list.
@@ -21,11 +23,13 @@ pub enum Scope {
 #[derive(Debug, Clone, Default)]
 pub struct Filter {
     pub scope: Scope,
-    /// Done and won't-do tasks are hidden unless this is set.
+    /// Tasks in a closed status are hidden unless this is set.
     pub show_closed: bool,
     pub text: Option<String>,
     pub tags: TagFilter,
     pub epic: Option<i64>,
+    /// What the person chose in the filters the schema offers (status, priority, …).
+    pub fields: Filters,
     pub include_archived: bool,
 }
 
@@ -38,29 +42,41 @@ fn query(f: &Filter) -> Query {
         sort: vec![Sort::asc("position")],
         ..Query::default()
     };
-    if !f.show_closed {
-        q.filters
-            .push(FieldFilter::new("status", Op::Ne, Status::Done.as_str()));
-        q.filters.push(FieldFilter::new(
-            "status",
-            Op::Ne,
-            Status::Dismissed.as_str(),
-        ));
-    }
     if let Some(e) = f.epic {
         q.filters.push(FieldFilter::new("epic", Op::Eq, e));
     }
     q
 }
 
+/// A forest read top to bottom: each task, then everything below it.
+fn depth_first(nodes: Vec<Node<Task>>) -> Vec<Task> {
+    let mut out = Vec::new();
+    for n in nodes {
+        out.push(n.value);
+        out.extend(depth_first(n.children));
+    }
+    out
+}
+
 /// Tasks matching the filter, flat.
 pub fn tasks(db: &Db, f: &Filter, today: NaiveDate) -> Result<Vec<Task>> {
     let items = db.list(&query(f))?;
-    let found = items.iter().map(Task::from);
+    // Which tasks are finished is the person's to say, and a task may have no status at all, so
+    // closed ones are left out here rather than by an engine filter (which would drop those).
+    let all = statuses::load(db)?;
+    // Choosing statuses is asking for them, closed ones included.
+    let chose_status = !f.fields.any_of("status").is_empty();
+    let found = items
+        .iter()
+        .filter(|i| f.fields.matches(i))
+        .map(Task::from)
+        .filter(|t| f.show_closed || chose_status || all.is_open(t.status));
     // "Current" is an OR over two nullable dates, which the engine's AND-only filters cannot
     // say, so it is applied here.
     Ok(match f.scope {
-        Scope::All => found.collect(),
+        // Parents before their subtasks, siblings in the person's order: not a raw sort by
+        // `position`, which only orders siblings.
+        Scope::All => depth_first(build_tree(found.collect(), |t| t.id, |t| t.parent_id)),
         Scope::Current => {
             let mut current: Vec<Task> = found.filter(|t| t.is_current(today)).collect();
             // Dated deadlines first, soonest first; then those that only have a start. The sort
@@ -83,23 +99,18 @@ pub fn subtasks(db: &Db, id: i64) -> Result<Vec<Task>> {
 
 /// Epics with how many of their tasks are still open. Closed epics only with `show_closed`.
 pub fn epics(db: &Db, show_closed: bool) -> Result<Vec<EpicSummary>> {
-    let mut q = Query {
+    let q = Query {
         kind: Some(EPIC.into()),
         archived: Some(false),
         sort: vec![Sort::asc("position")],
         ..Query::default()
     };
-    if !show_closed {
-        q.filters
-            .push(FieldFilter::new("status", Op::Ne, Status::Done.as_str()));
-        q.filters.push(FieldFilter::new(
-            "status",
-            Op::Ne,
-            Status::Dismissed.as_str(),
-        ));
-    }
+    let all = statuses::load(db)?;
     let mut out = Vec::new();
     for item in db.list(&q)? {
+        if !show_closed && all.is_closed(Epic::from(&item).status) {
+            continue;
+        }
         let linked = db.list(&Query {
             kind: Some(TASK.into()),
             archived: Some(false),
@@ -108,7 +119,7 @@ pub fn epics(db: &Db, show_closed: bool) -> Result<Vec<EpicSummary>> {
         })?;
         let open = linked
             .iter()
-            .filter(|t| Task::from(*t).status.is_open())
+            .filter(|t| all.is_open(Task::from(*t).status))
             .count();
         out.push(EpicSummary {
             epic: Epic::from(&item),

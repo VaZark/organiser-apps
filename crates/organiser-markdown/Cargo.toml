@@ -1,0 +1,10 @@
+[package]
+name = "organiser-markdown"
+description = "Markdown for the organiser apps: parse to a plain document, write it back, tick tasks in the source."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pulldown-cmark = { version = "0.13.6", default-features = false }
+serde.workspace = true

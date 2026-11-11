@@ -1,5 +1,6 @@
 //! A list row that is one big button: the whole surface answers hover and press, and a selected
-//! row takes a soft accent tint. Controls inside it (a checkbox, a fold arrow) stay independent.
+//! row takes a soft neutral tint (the theme's foreground at low opacity, as iad's sidebar does), not
+//! the accent. Controls inside it (a checkbox, a fold arrow) stay independent.
 
 use iced::widget::button;
 use iced::{Background, Color, Length};
@@ -7,12 +8,15 @@ use iced::{Background, Color, Length};
 use crate::Element;
 use crate::iad::{Role, Theme};
 
-/// The tint of a row: `selected` is the soft accent, hovering and pressing darken either state.
+/// The tint of a row: `selected` is a soft neutral, hovering and pressing darken either state.
 fn tint(theme: &Theme, selected: bool, status: button::Status) -> Option<Background> {
-    let (base, rest, hover, press) = if selected {
-        (theme.semantic.swatch(Role::Accent).bg, 0.18, 0.26, 0.32)
+    // One colour, the theme's foreground, at different strengths: nothing here is hard-coded, so
+    // the look follows the theme (and its accent setting) wherever the app runs.
+    let base = theme.semantic.swatch(Role::Neutral).color;
+    let (rest, hover, press) = if selected {
+        (0.12, 0.17, 0.22)
     } else {
-        (theme.semantic.swatch(Role::Neutral).color, 0.0, 0.07, 0.12)
+        (0.0, 0.07, 0.12)
     };
     let alpha = match status {
         button::Status::Hovered => hover,

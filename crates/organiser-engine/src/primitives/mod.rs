@@ -2,8 +2,10 @@
 //! query compiler and search-text handling. No SQLite, no I/O.
 
 pub mod clock;
+pub mod filters;
 pub mod fts;
 pub mod item;
+pub mod palette;
 pub mod plan;
 pub mod query;
 pub mod schema;

@@ -10,7 +10,11 @@ use crate::app::{App, Message, View};
 impl App {
     pub(super) fn sidebar(&self) -> Element<'_, Message> {
         let favorites: usize = self.lists.iter().map(|s| s.favorites).sum();
+        let total: usize = self.lists.iter().map(|s| s.entries).sum();
         let mut items = vec![
+            SidebarItem::new(format!("All  ({total})"), Message::Show(View::All))
+                .icon(Icon::CardGrid)
+                .selected(self.view == View::All),
             SidebarItem::new(
                 format!("Favorites  ({favorites})"),
                 Message::Show(View::Favorites),

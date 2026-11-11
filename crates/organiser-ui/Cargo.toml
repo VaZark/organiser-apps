@@ -8,5 +8,7 @@ license.workspace = true
 [dependencies]
 organiser-core.workspace = true
 organiser-engine.workspace = true
+organiser-markdown.workspace = true
+serde_json.workspace = true
 iced-adaptive-design.workspace = true
 iced.workspace = true

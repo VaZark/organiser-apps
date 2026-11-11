@@ -227,6 +227,25 @@ impl Db {
         Ok(tags::TAGS.set_parent(&mut self.conn, name, parent)?)
     }
 
+    /// Set (or, with `None`, clear) a tag's colour, `#rrggbb`. Its parent and assignments stay.
+    pub fn set_tag_color(&mut self, name: &str, color: Option<&str>) -> Result<Tag> {
+        let icon = tags::TAGS.get(&self.conn, name)?.icon;
+        Ok(tags::TAGS.set_style(&mut self.conn, name, icon.as_deref(), color)?)
+    }
+
+    /// Give every tag that has no colour one from `palette`, picked by its name. Returns how many
+    /// were coloured: nothing is done (and nothing written) when all already have one.
+    pub fn ensure_tag_colors(&mut self, palette: &[&str]) -> Result<usize> {
+        let mut n = 0;
+        for t in self.tags()?.into_iter().filter(|t| t.color.is_none()) {
+            if let Some(c) = crate::primitives::palette::pick(&t.name, palette) {
+                self.set_tag_color(&t.name, Some(c))?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     pub fn delete_tag(&mut self, name: &str, children: ChildPolicy) -> Result<usize> {
         Ok(tags::TAGS.delete(&mut self.conn, name, children)?)
     }

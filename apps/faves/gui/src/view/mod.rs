@@ -2,21 +2,21 @@
 //! details pane that slides in from the right, and dialogs (full-screen sheets on a narrow window)
 //! for the lists, adding an entry, the filter and a list's settings. There is no sidebar.
 
-mod add;
 mod details;
 mod filter;
 mod grid;
 mod lists;
+mod prefs;
 mod settings;
 mod sidebar;
 
 use organiser_ui::Element;
+use organiser_ui::components::new_back::new_or_back;
+use organiser_ui::components::search;
 use organiser_ui::components::toggle::IconToggle;
-use organiser_ui::components::{icons, search};
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::shortcut::Shortcuts;
 use organiser_ui::iad::windows::{Chrome, State};
-use organiser_ui::widgets::choice_menu::choice_menu;
 use organiser_ui::widgets::details_dock::details_dock;
 use organiser_ui::widgets::responsive_dialog;
 
@@ -34,9 +34,12 @@ impl App {
         let radius = self.chrome().radius();
         let body: Element<'_, Message> = responsive(move |size| {
             // One dialog at a time, the one opened last on top.
-            let lists_on_top = self.lists_open && !self.add_open && !self.filter_open;
-            let modal = if self.add_open {
-                Some((self.add_panel(), Message::CloseAdd))
+            let lists_on_top = self.lists_open && !self.filter_open && !self.prefs.open;
+            let modal = if self.prefs.open {
+                Some((
+                    self.prefs_panel(size.width >= TWO_PANES),
+                    Message::ClosePrefs,
+                ))
             } else if self.filter_open {
                 Some((self.filter_panel(), Message::CloseFilter))
             } else if self.lists_open {
@@ -60,6 +63,8 @@ impl App {
         let framed = self.chrome().frame(body, Message::Window);
         let framed = Shortcuts::new()
             .bind("Ctrl+F", Message::ToggleSearch)
+            .bind("Ctrl+N", Message::New)
+            .bind("Ctrl+,", Message::OpenPrefs)
             .bind("Ctrl+Q", Message::Quit)
             .bind("Esc", Message::Escape)
             .scope(framed);
@@ -103,6 +108,7 @@ impl App {
         if self.current().is_some() {
             menu = menu.section([MenuItem::action("List settings", Message::OpenSettings)]);
         }
+        menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);
         menu_button(Icon::OpenMenu, menu)
             .tooltip("Menu")
             .open_initially(self.menu_open)
@@ -163,49 +169,21 @@ impl App {
             } else {
                 head.title(self.heading())
             };
-            // search, the view, the sort and, inside a list, its settings
-            let end = 3 + usize::from(self.current().is_some());
+            // New entry, or back while the edit page is open: the same button in every app.
+            head = head.pack_start(new_or_back(
+                self.details.is_some(),
+                "New entry (Ctrl+N)",
+                Message::New,
+                Message::CloseDetails,
+            ));
+            // The menu (the view, the sort, the list's settings, Preferences) and search are all
+            // the header keeps at the end.
             if self.search.is_open() {
-                head = head.pack_start(search::balance(end, 0, room));
+                head = head.pack_start(search::balance(2, 1, room));
             }
-            head = head.pack_end(search::button(Message::ToggleSearch));
-            if search::narrow(width) {
-                // A narrow header has room for the search and one menu holding the rest.
-                head = head.pack_end(self.actions_menu());
-            } else {
-                // From the window controls inwards: search, the view, the sort, the list's settings.
-                head = head.pack_end(
-                    IconToggle::new(
-                        if self.compact {
-                            icons::compact_rows()
-                        } else {
-                            icons::card_grid()
-                        },
-                        self.compact,
-                    )
-                    .tooltip(if self.compact {
-                        "Compact lines. Show cards"
-                    } else {
-                        "Show one compact line per entry"
-                    })
-                    .on_toggle(Message::Compact),
-                );
-                head = head.pack_end(choice_menu(
-                    Icon::Sort,
-                    "Sort order",
-                    &SortChoice::ALL,
-                    Some(SortChoice(self.sort)),
-                    Message::Sort,
-                    self.sort_open,
-                ));
-                if self.current().is_some() {
-                    head = head.pack_end(tooltip(
-                        icon_button(Icon::Settings).on_press(Message::OpenSettings),
-                        "List settings",
-                        TooltipPosition::Bottom,
-                    ));
-                }
-            }
+            head = head
+                .pack_end(self.actions_menu())
+                .pack_end(search::button(Message::ToggleSearch));
         }
 
         let pane = self.details.is_some().then(|| self.details_pane());
@@ -226,6 +204,7 @@ impl App {
 
     pub(crate) fn heading(&self) -> String {
         match self.view {
+            View::All => "All".into(),
             View::Favorites => "Favorites".into(),
             View::List(_) => self
                 .current()

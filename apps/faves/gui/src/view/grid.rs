@@ -6,15 +6,18 @@ use iced::widget::{column, row};
 use iced::{Alignment, Length};
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
-use organiser_ui::components::chip::{color_of, hashtag, more, pill, removable};
+use organiser_ui::components::chip::{color_of, hashtag, more, pill};
 use organiser_ui::components::empty::empty;
 use organiser_ui::components::heart::heart;
 use organiser_ui::components::row::selectable;
+use organiser_ui::components::tag_groups::tag_groups;
+use organiser_ui::components::tag_query::count as tag_count;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::tag_groups::GroupEvent;
 use organiser_ui::primitives::tags::collapse;
 use organiser_ui::primitives::text::{ellipsize, snippet};
+use organiser_ui::widgets::schema_filters::active_filters;
 
 use crate::app::{App, Message, View};
 
@@ -29,22 +32,7 @@ pub fn stars(rating: u8) -> String {
 
 impl App {
     pub(super) fn grid_page(&self, width: f32) -> Element<'_, Message> {
-        // An add button (only inside a list); the sort lives in the header.
         let mut head = column![].spacing(8);
-        if self.current().is_some() {
-            head = head.push(
-                row![
-                    container(space()).width(Length::Fill),
-                    tooltip(
-                        icon_button(Icon::ListAdd).on_press(Message::OpenAdd),
-                        "Add an entry",
-                        TooltipPosition::Bottom,
-                    ),
-                ]
-                .align_y(Alignment::Center),
-            );
-        }
-
         if let Some(strip) = self.active_filters() {
             head = head.push(strip);
         }
@@ -71,6 +59,11 @@ impl App {
             );
         }
         match self.view {
+            View::All => empty(
+                Icon::Folder,
+                "Nothing yet",
+                "Pick a list and add the first entry with the +.",
+            ),
             View::Favorites => empty(
                 Icon::Heart,
                 "No favourites yet",
@@ -94,15 +87,7 @@ impl App {
         if self.filter_count() == 0 {
             return None;
         }
-        let removable_text = |label: String, on_press: Message| -> Element<'_, Message> {
-            flat_button(
-                row![text(label), Icon::WindowClose.view(12.0)]
-                    .spacing(6)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(on_press)
-            .into()
-        };
+        let mut tag_line: Option<Element<'_, Message>> = None;
         let mut chips = row![
             IconToggle::new(Icon::Filter, true)
                 .tooltip("Edit filters")
@@ -110,27 +95,30 @@ impl App {
         ]
         .spacing(4)
         .align_y(Alignment::Center);
-        if self.fav_only {
-            chips = chips.push(removable_text("Favourites".into(), Message::FavOnly(false)));
+        for c in active_filters(
+            super::filter::kind(),
+            &self.filters,
+            &|_| Vec::new(),
+            Message::Fields,
+        ) {
+            chips = chips.push(c);
         }
-        if let Some(n) = self.min_rating {
-            chips = chips.push(removable_text(
-                format!("{n}+ stars"),
-                Message::MinRating(None),
-            ));
+        // The tag groups: alternatives, set apart by a gap.
+        if tag_count(&self.tag_groups) > 0 {
+            let groups: Vec<Vec<String>> = self.tag_groups.groups().to_vec();
+            let named = groups.clone();
+            tag_line = Some(tag_groups(&groups, move |g, t| {
+                Message::TagGroups(GroupEvent::Toggle(g, named[g][t].clone()))
+            }));
         }
-        for (g, group) in self.tag_groups.groups().iter().enumerate() {
-            for tag in group {
-                chips = chips.push(removable(
-                    tag,
-                    Message::TagGroups(GroupEvent::Toggle(g, tag.clone())),
-                ));
-            }
-        }
-        Some(chips.wrap().into())
+        // The tag groups read like the filter's input: on a line of their own, under the chips.
+        Some(match tag_line {
+            Some(t) => column![chips.wrap(), t].spacing(6).into(),
+            None => chips.wrap().into(),
+        })
     }
 
-    /// One line per entry: the heart, the title, and the rating, status and list.
+    /// One line per entry: the heart, the title, and the rating and list.
     fn compact_list(&self) -> Element<'_, Message> {
         let rows: Vec<Element<'_, Message>> =
             self.entries.iter().map(|e| self.compact_row(e)).collect();
@@ -147,10 +135,7 @@ impl App {
         if let Some(r) = e.rating {
             line = line.push(text(stars(r)).size(13));
         }
-        if let Some(s) = e.status {
-            line = line.push(pill(s.label(), Role::Accent));
-        }
-        if self.view == View::Favorites
+        if matches!(self.view, View::All | View::Favorites)
             && let Some(l) = self.list_of(e)
         {
             line = line.push(pill(&l.title, Role::Neutral));
@@ -208,16 +193,13 @@ impl App {
         }
 
         let mut facts = row![].spacing(4).align_y(Alignment::Center);
-        if let Some(s) = e.status {
-            facts = facts.push(pill(s.label(), Role::Accent));
-        }
-        // In the favourites, say which list a card comes from.
-        if self.view == View::Favorites
+        // Across lists, say which list a card comes from.
+        if matches!(self.view, View::All | View::Favorites)
             && let Some(l) = list
         {
             facts = facts.push(pill(&l.title, Role::Neutral));
         }
-        if e.status.is_some() || (self.view == View::Favorites && list.is_some()) {
+        if matches!(self.view, View::All | View::Favorites) && list.is_some() {
             body = body.push(facts.wrap());
         }
 

@@ -29,9 +29,34 @@ fn shown(name: &str) -> &str {
     }
 }
 
-/// A tag's colour. Stable: the same name (ignoring case) is the same colour everywhere.
+/// The colours the app's tags have stored, by lowercase name. Every chip asks here, so telling
+/// it once (see [`set_tag_colors`]) colours tags everywhere without passing colours around.
+static TAG_COLORS: std::sync::RwLock<Option<std::collections::HashMap<String, Color>>> =
+    std::sync::RwLock::new(None);
+
+/// Record the colour of each tag that has one. Call it after (re)loading the tags.
+pub fn set_tag_colors(tags: &[organiser_engine::Tag]) {
+    let map = tags
+        .iter()
+        .filter_map(|t| {
+            let c = crate::components::dot::color_from_hex(t.color.as_deref()?)?;
+            Some((t.name.to_lowercase(), c))
+        })
+        .collect();
+    if let Ok(mut w) = TAG_COLORS.write() {
+        *w = Some(map);
+    }
+}
+
+/// A tag's colour: the one stored for it, else one made from its name (the same name, ignoring
+/// case, is always the same colour).
 pub fn color_of(name: &str) -> Color {
-    crate::iad::color::from_seed(name.to_lowercase())
+    let key = name.to_lowercase();
+    TAG_COLORS
+        .read()
+        .ok()
+        .and_then(|m| m.as_ref().and_then(|m| m.get(&key).copied()))
+        .unwrap_or_else(|| crate::iad::color::from_seed(key))
 }
 
 fn colored<'a, M: Clone + 'a>(name: &str) -> Chip<'a, M> {
@@ -66,4 +91,36 @@ pub fn pickable<'a, M: Clone + 'a>(name: &str, on_press: M) -> Element<'a, M> {
 /// `+3`: how many tags a crowded row left out.
 pub fn more<'a, M: 'a>(n: usize) -> Element<'a, M> {
     tag(format!("+{n}"), Role::Neutral)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tag(name: &str, color: Option<&str>) -> organiser_engine::Tag {
+        organiser_engine::Tag {
+            name: name.into(),
+            key: None,
+            value: name.into(),
+            parent: None,
+            icon: None,
+            color: color.map(String::from),
+            counts: vec![],
+        }
+    }
+
+    #[test]
+    fn a_stored_colour_wins_and_other_tags_keep_their_name_colour() {
+        let fallback = color_of("unlisted-tag");
+        set_tag_colors(&[tag("Work", Some("#ff0000")), tag("plain", None)]);
+        assert_eq!(
+            color_of("work"),
+            Color::from_rgb8(255, 0, 0),
+            "case does not matter"
+        );
+        assert_eq!(color_of("WORK"), Color::from_rgb8(255, 0, 0));
+        assert_eq!(color_of("unlisted-tag"), fallback);
+        // `plain` has no stored colour, so it falls back like any unknown tag.
+        assert_eq!(color_of("plain"), crate::iad::color::from_seed("plain"));
+    }
 }

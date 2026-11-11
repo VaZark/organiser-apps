@@ -71,6 +71,9 @@ nothing in normal use):
 | `TODO_GUI_THEME=light\|dark`      | force the theme                                           |
 | `TODO_GUI_SEARCH=<text>`          | start with the search open (empty text is fine)           |
 | `TODO_GUI_FILTER=1`               | open the filter                                           |
+| `TODO_GUI_NEW=1`                  | open the edit page on a new task                          |
+| `TODO_GUI_PREFS=appearance\|tags\|statuses\|app` | open Preferences on that page                         |
+| `TODO_GUI_PREVIEW=1`              | with a task selected, show its details drawn as Markdown  |
 | `TODO_GUI_EPIC=<id>`, `TODO_GUI_TAG=a,b` | start with those filters on                        |
 | `TODO_GUI_LIST=1`                 | start in the list (the board is the default view)         |
 | `TODO_GUI_MENU_OPEN=1`            | with a narrow window, draw the header menu open           |
@@ -81,9 +84,12 @@ nothing in normal use):
 
 Faves has the same kind of switches: `FAVES_GUI_SIZE=WxH`, `FAVES_GUI_LIST=<id>`,
 `FAVES_GUI_SELECT=<entry id>`, `FAVES_GUI_SELECT_LATER=<entry id>` (open it half a second after start, to catch the details fading in), `FAVES_GUI_FAVORITES=1`, `FAVES_GUI_COMPACT=1`, `FAVES_GUI_SORT_OPEN=1` (the sort popover open), `FAVES_GUI_MENU_OPEN=1` (the narrow header menu open) and `FAVES_GUI_MENU_PAGE=1` (starting on its Sort page), the dialogs
-(`FAVES_GUI_LISTS=1`, `FAVES_GUI_ADD=1`, `FAVES_GUI_FILTER=1`, `FAVES_GUI_SETTINGS=1`), filters
+(`FAVES_GUI_LISTS=1`, `FAVES_GUI_NEW=1` (the edit page on a new entry), `FAVES_GUI_PREVIEW=1`, `FAVES_GUI_PREFS=appearance|tags|app`, `FAVES_GUI_FILTER=1`, `FAVES_GUI_SETTINGS=1`), filters
 (`FAVES_GUI_FAV_ONLY=1`, `FAVES_GUI_MIN_RATING=<n>`, `FAVES_GUI_TAG=a,b`), `FAVES_GUI_SEARCH=<text>`
 and `FAVES_GUI_THEME=light|dark`.
+
+Notes: `NOTES_GUI_SIZE=WxH`, `NOTES_GUI_FILTER=1`, `NOTES_GUI_PREFS=appearance|tags|app`, `NOTES_GUI_TAG_EDIT=<tag>` (a tag's editor), `NOTES_GUI_PALETTE_EDIT=1` (the palette editor), `NOTES_GUI_NEW=1` (the edit page on a new note), `NOTES_GUI_SELECT=<id>`, `NOTES_GUI_PREVIEW=1` (the selected note drawn as Markdown),
+`NOTES_GUI_SCOPE=archive|trash`, `NOTES_GUI_TAG=a,b`, `NOTES_GUI_SEARCH=<text>` and `NOTES_GUI_THEME=light|dark`.
 
 ## Packaging
 

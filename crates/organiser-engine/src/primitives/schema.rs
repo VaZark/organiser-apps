@@ -59,6 +59,8 @@ pub struct Field {
     pub searchable: bool,
     /// Gets a SQLite expression index, for fields used in filters and sorting.
     pub indexed: bool,
+    /// Kept out of the filter UI: a field apps use for their own bookkeeping (a trash date).
+    pub internal: bool,
     /// Filled in on create when the field is missing (string-valued fields only).
     pub default: Option<&'static str>,
     /// Allowed only while the gate's flag is on; see [`Gate`].
@@ -73,6 +75,7 @@ impl Field {
             required: false,
             searchable: false,
             indexed: false,
+            internal: false,
             default: None,
             gate: None,
         }
@@ -99,6 +102,11 @@ impl Field {
     }
     pub const fn required(mut self) -> Self {
         self.required = true;
+        self
+    }
+    /// Keep this field out of the generated filters.
+    pub const fn internal(mut self) -> Self {
+        self.internal = true;
         self
     }
     pub const fn searchable(mut self) -> Self {

@@ -44,7 +44,8 @@ pub fn filter_sheet<'a, M: Clone + 'a>(
             footer = footer.push(flat_button(text("Cancel")).on_press(on_close));
             footer = footer.push(suggested_button(text(label.to_string())).on_press(m));
         }
-        None => footer = footer.push(suggested_button(text("Done")).on_press(on_close)),
+        // Closing is not the primary action: the theme's neutral button, not the accent.
+        None => footer = footer.push(raised_button(text("Done")).on_press(on_close)),
     }
 
     column![header, scrolled_window(body).height(Length::Fill), footer]
