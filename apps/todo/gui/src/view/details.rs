@@ -3,6 +3,7 @@
 use iced::Length;
 use iced::widget::{column, row};
 use organiser_ui::Element;
+use organiser_ui::components::action::action_button;
 use organiser_ui::components::dot::{color_from_hex, dot};
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::date::Date;
@@ -114,8 +115,7 @@ impl App {
             col.push(
                 row![
                     flat_button(text("Cancel")).on_press(Message::CloseDetails),
-                    suggested_button(text("Create task"))
-                        .on_press_maybe(ready.then_some(Message::DCreate)),
+                    action_button("Create task").on_press_maybe(ready.then_some(Message::DCreate)),
                 ]
                 .spacing(8),
             )
@@ -131,7 +131,7 @@ impl App {
         };
 
         scrolled_window(clamp(
-            container(col).padding(16),
+            container(organiser_ui::components::tab_scope::tab_scope(col)).padding(16),
             organiser_ui::widgets::details_dock::READABLE_WIDTH,
         ))
         .height(Length::Fill)

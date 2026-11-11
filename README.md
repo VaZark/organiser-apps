@@ -10,8 +10,7 @@ Tags come from [weaver](https://github.com/VaZark/weaver).
 | **Todo** (GTG, Jira, Planify) | Working: kanban board and list, nested tasks, epics, your own coloured statuses, Markdown notes, tags, search, CLI and GUI |
 | **Faves**                     | Working: lists of anything you track, with optional ratings and notes, CLI and GUI                |
 | **Notes** (Keep-style)         | Working: coloured cards with Markdown, pinning, archive and trash, CLI and GUI (packaging planned) |
-| Recipes                       | Planned                                                                                           |
-| Bookmarks                     | Planned                                                                                           |
+| **Recipes**                   | Working: ingredients (optional or required), ordered steps, photos, read mode, a log of what you cooked, a fridge with expiry dates, shopping lists from recipes and portions that you can copy into Todo, CLI and GUI |
 
 ## Quick start
 

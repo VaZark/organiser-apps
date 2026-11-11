@@ -14,6 +14,7 @@ use iced::{Alignment, Background, Border, Length};
 use organiser_engine::{ChildPolicy, Db, TAG_PALETTE, Tag};
 
 use crate::Element;
+use crate::components::action::action_button;
 use crate::components::chip::{chip, color_of};
 use crate::components::dot::{color_from_hex, dot};
 use crate::components::row::selectable;
@@ -33,7 +34,15 @@ pub enum TagMsg {
     /// Put a tag under a group, or (`None`) back at the top.
     Parent(String, Option<String>),
     Delete(String),
+    /// Open the page that makes a new tag.
+    NewStart,
+    /// The name typed on that page.
     NewText(String),
+    /// A colour for the new tag, as `#rrggbb`.
+    NewColor(String),
+    /// The group the new tag goes under.
+    NewParent(Option<String>),
+    /// Create the tag from the page.
     New,
 }
 
@@ -71,6 +80,12 @@ pub struct TagManager {
     /// What the editor's colour entry shows, so typing is not interrupted.
     texts: HashMap<String, String>,
     new_name: String,
+    /// The new-tag page is open.
+    creating: bool,
+    new_color: Option<String>,
+    new_parent: Option<String>,
+    /// Every tag, as a group to pick for a new tag.
+    all_groups: Vec<Group>,
 }
 
 fn hex_of(h: Hsva) -> String {
@@ -134,6 +149,13 @@ impl TagManager {
         } else {
             palette.iter().map(|c| c.to_string()).collect()
         };
+        self.all_groups = std::iter::once(Group(None))
+            .chain(
+                tag_tree::ordered(tags)
+                    .into_iter()
+                    .map(|(_, t)| Group(Some(t.name.clone()))),
+            )
+            .collect();
         // A tag deleted elsewhere leaves nothing to edit.
         if self
             .editing
@@ -163,9 +185,18 @@ impl TagManager {
         self.editing.as_deref()
     }
 
+    /// Whether an editor page (of a tag, or of a new one) is showing: the sheet's back button
+    /// leaves it first.
+    pub fn in_editor(&self) -> bool {
+        self.editing.is_some() || self.creating
+    }
+
     /// Leave the editor if it is showing. Returns whether it was, for an app's Escape.
     pub fn leave_editor(&mut self) -> bool {
-        self.editing.take().is_some()
+        let was = self.in_editor();
+        self.editing = None;
+        self.creating = false;
+        was
     }
 
     /// Apply a message to the database. The error says what was wrong; reload the tags (and call
@@ -175,6 +206,23 @@ impl TagManager {
         match msg {
             TagMsg::Edit(name) => {
                 self.editing = name;
+                self.creating = false;
+                Ok(())
+            }
+            TagMsg::NewStart => {
+                self.creating = true;
+                self.editing = None;
+                self.new_name.clear();
+                self.new_color = None;
+                self.new_parent = None;
+                Ok(())
+            }
+            TagMsg::NewColor(hex) => {
+                self.new_color = Some(hex);
+                Ok(())
+            }
+            TagMsg::NewParent(p) => {
+                self.new_parent = p;
                 Ok(())
             }
             TagMsg::Color(name, h) => {
@@ -220,14 +268,23 @@ impl TagManager {
                 if name.is_empty() {
                     return Ok(());
                 }
+                let (color, parent) = (self.new_color.take(), self.new_parent.take());
                 self.new_name.clear();
-                db.create_tag(&name, None).map(|_| ()).map_err(fail)
+                self.creating = false;
+                db.create_tag(&name, parent.as_deref()).map_err(fail)?;
+                if let Some(c) = color {
+                    db.set_tag_color(&name, Some(&c)).map_err(fail)?;
+                }
+                Ok(())
             }
         }
     }
 
     /// The list of tags, or the editor of one.
     pub fn view(&self) -> Element<'_, TagMsg> {
+        if self.creating {
+            return self.creator();
+        }
         match &self.editing {
             Some(name) => self.editor(name),
             None => self.list(),
@@ -235,13 +292,21 @@ impl TagManager {
     }
 
     fn list(&self) -> Element<'_, TagMsg> {
-        let add = Entry::new("", self.new_name.as_str())
-            .on_input(TagMsg::NewText)
-            .on_submit(TagMsg::New)
-            .right_section(section_button(Icon::ListAdd, TagMsg::New));
-        let new = EntryRow::new("New tag or group", EntryInput::Text(add))
-            .description("A group is a tag other tags sit under; filtering by it finds them all.")
-            .flat(true);
+        // The title with a "+" that opens the page for a new tag.
+        let new = row![
+            column![
+                text("Tags").size(15),
+                caption("A group is a tag other tags sit under; filtering by it finds them all.")
+            ]
+            .width(Length::Fill),
+            tooltip(
+                icon_button(Icon::ListAdd).on_press(TagMsg::NewStart),
+                "New tag",
+                TooltipPosition::Bottom
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
 
         let tags: Element<'_, TagMsg> = if self.rows.is_empty() {
             caption("No tags yet.").into()
@@ -264,12 +329,88 @@ impl TagManager {
                     TagMsg::Edit(Some(r.name.clone())),
                 )
             });
-            EntryRow::new("Tags", EntryInput::Custom(boxed_list(rows)))
-                .description("Tap a tag to change its colour or the group it is in.")
-                .flat(true)
-                .into()
+            boxed_list(rows)
         };
         column![new, tags].spacing(16).into()
+    }
+
+    /// The page for a new tag: its name, colour and group, then Create.
+    fn creator(&self) -> Element<'_, TagMsg> {
+        let head = row![
+            tooltip(
+                icon_button(Icon::GoPrevious).on_press(TagMsg::Edit(None)),
+                "Back to the tags",
+                TooltipPosition::Bottom
+            ),
+            text("New tag").size(16),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let name = EntryRow::new(
+            "Name",
+            EntryInput::Text(
+                Entry::new("Tag name", self.new_name.as_str())
+                    .on_input(TagMsg::NewText)
+                    .on_submit(TagMsg::New),
+            ),
+        )
+        .description("Starting a name with # or @ is fine; it is dropped.")
+        .flat(true);
+
+        let chosen = self.new_color.as_deref().unwrap_or("");
+        let mut swatches: Vec<Element<'_, TagMsg>> = self
+            .palette
+            .iter()
+            .filter_map(|hex| {
+                let c = color_from_hex(hex)?;
+                Some(swatch(
+                    c,
+                    hex.eq_ignore_ascii_case(chosen),
+                    TagMsg::NewColor(hex.clone()),
+                ))
+            })
+            .collect();
+        let current = self
+            .new_color
+            .as_deref()
+            .and_then(Hsva::parse)
+            .unwrap_or(Hsva::from_rgb8(0x9a, 0xa0, 0xa6));
+        swatches.push(
+            ColorInput::new(
+                current,
+                chosen,
+                |t| match Hsva::parse(&t) {
+                    Some(h) => TagMsg::NewColor(hex_of(h)),
+                    None => TagMsg::NewColor(t),
+                },
+                |h| TagMsg::NewColor(hex_of(h)),
+            )
+            .swatches(TAG_PALETTE)
+            .trigger(container(Icon::Palette.view(20.0)).padding(8))
+            .into(),
+        );
+        let colour = EntryRow::new(
+            "Colour",
+            EntryInput::Custom(row(swatches).spacing(4).wrap().into()),
+        )
+        .description("Optional: pick one, or leave it for an automatic colour.")
+        .flat(true);
+
+        let group = EntryRow::select(
+            "Group",
+            &self.all_groups,
+            Some(Group(self.new_parent.clone())),
+            |g: Group| TagMsg::NewParent(g.0),
+        )
+        .description("Optional: put it under a group.")
+        .flat(true);
+
+        let create = action_button("Create tag")
+            .on_press_maybe((!self.new_name.trim().is_empty()).then_some(TagMsg::New));
+        column![head, name, colour, group, create]
+            .spacing(16)
+            .into()
     }
 
     fn editor<'a>(&'a self, name: &'a str) -> Element<'a, TagMsg> {
@@ -401,6 +542,30 @@ mod tests {
             .into_iter()
             .find(|t| t.name == name)
             .unwrap()
+    }
+
+    #[test]
+    fn the_new_tag_page_makes_a_tag_with_its_colour_and_group_and_back_leaves_it() {
+        let (mut db, mut m) = setup();
+        add(&mut m, &mut db, "meals");
+        m.update(&mut db, TagMsg::NewStart).unwrap();
+        assert!(m.in_editor());
+        m.update(&mut db, TagMsg::NewText("lunch".into())).unwrap();
+        m.update(&mut db, TagMsg::NewColor("#ff0000".into()))
+            .unwrap();
+        m.update(&mut db, TagMsg::NewParent(Some("meals".into())))
+            .unwrap();
+        m.update(&mut db, TagMsg::New).unwrap();
+        assert!(!m.in_editor(), "back on the list once created");
+        let t = tag(&db, "lunch");
+        assert_eq!(t.parent.as_deref(), Some("meals"));
+        assert_eq!(t.color.as_deref(), Some("#ff0000"));
+        // Starting again begins empty; Back leaves without making anything.
+        m.update(&mut db, TagMsg::NewStart).unwrap();
+        m.update(&mut db, TagMsg::NewText("tmp".into())).unwrap();
+        assert!(m.leave_editor());
+        assert!(!m.leave_editor());
+        assert_eq!(db.tags().unwrap().len(), 2);
     }
 
     #[test]

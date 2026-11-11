@@ -6,6 +6,7 @@ use iced::widget::space;
 
 use crate::Element;
 use crate::components::panel::panel;
+use crate::components::tab_scope::tab_scope;
 use crate::iad::prelude::*;
 
 /// Show `modal` (its content and the message that closes it) over `base`, or just `base`.
@@ -19,7 +20,14 @@ pub fn present<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let (content, close) = match modal {
         Some((content, close)) => (
-            Some(panel(content, narrow, viewport, window_radius)),
+            // A wide dialog is an overlay with its own focus scope; the narrow full-screen sheet is
+            // a dock, which has none, so Tab is given its scope here.
+            Some(panel(
+                if narrow { tab_scope(content) } else { content },
+                narrow,
+                viewport,
+                window_radius,
+            )),
             Some(close),
         ),
         None => (None, None),

@@ -4,6 +4,7 @@
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
 use organiser_ui::Element;
+use organiser_ui::components::action::action_button;
 use organiser_ui::components::heart::heart;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::widgets::markdown_field::MarkdownField;
@@ -103,8 +104,7 @@ impl App {
             col.push(
                 row![
                     flat_button(text("Cancel")).on_press(Message::CloseDetails),
-                    suggested_button(text("Create entry"))
-                        .on_press_maybe(ready.then_some(Message::DCreate)),
+                    action_button("Create entry").on_press_maybe(ready.then_some(Message::DCreate)),
                 ]
                 .spacing(8),
             )
@@ -112,7 +112,7 @@ impl App {
             col.push(destructive_button(text("Delete")).on_press(Message::DDelete))
         };
         scrolled_window(clamp(
-            container(col).padding(16),
+            container(organiser_ui::components::tab_scope::tab_scope(col)).padding(16),
             organiser_ui::widgets::details_dock::READABLE_WIDTH,
         ))
         .height(Length::Fill)

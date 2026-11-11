@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/faves/schema", "apps/faves/cli", "apps/faves/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui"]
+members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/faves/schema", "apps/faves/cli", "apps/faves/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui"]
 
 [workspace.package]
 version = "0.0.1"
@@ -14,6 +14,7 @@ organiser-engine = { path = "crates/organiser-engine" }
 todo-schema = { path = "apps/todo/schema" }
 todo-cli = { path = "apps/todo/cli" }
 faves-schema = { path = "apps/faves/schema" }
+recipes-schema = { path = "apps/recipes/schema" }
 notes-schema = { path = "apps/notes/schema" }
 organiser-cli-kit = { path = "crates/organiser-cli-kit" }
 organiser-ui = { path = "crates/organiser-ui" }

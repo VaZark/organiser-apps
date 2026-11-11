@@ -4,6 +4,7 @@ use iced::widget::{button, column, row};
 use iced::{Alignment, Background, Border, Length};
 use notes_schema::color::{Color, PRESETS};
 use organiser_ui::Element;
+use organiser_ui::components::action::action_button;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::Theme;
 use organiser_ui::iad::prelude::*;
@@ -116,8 +117,7 @@ impl App {
             col.push(
                 row![
                     flat_button(text("Cancel")).on_press(Message::CloseDetails),
-                    suggested_button(text("Create note"))
-                        .on_press_maybe(ready.then_some(Message::DCreate)),
+                    action_button("Create note").on_press_maybe(ready.then_some(Message::DCreate)),
                 ]
                 .spacing(8),
             )
@@ -134,7 +134,7 @@ impl App {
         };
 
         scrolled_window(clamp(
-            container(col).padding(16),
+            container(organiser_ui::components::tab_scope::tab_scope(col)).padding(16),
             organiser_ui::widgets::details_dock::READABLE_WIDTH,
         ))
         .height(Length::Fill)

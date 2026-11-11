@@ -1,0 +1,18 @@
+[package]
+name = "recipes-cli"
+description = "Command-line frontend for the Recipes app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "recipes"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color"] }
+recipes-schema.workspace = true
+organiser-cli-kit.workspace = true
+organiser-engine.workspace = true
+serde_json.workspace = true

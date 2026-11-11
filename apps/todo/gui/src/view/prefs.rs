@@ -34,7 +34,7 @@ impl App {
             page.into(),
             Some(("Statuses", self.statuses_page())),
             self.tag_manager.view().map(Message::Tags),
-            self.tag_manager.editing().is_some(),
+            self.tag_manager.in_editor(),
             Message::Pref,
             Message::ClosePrefs,
         )

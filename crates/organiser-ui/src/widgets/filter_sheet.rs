@@ -2,6 +2,7 @@
 //! (scrolling) and a footer: "Done", or "Cancel" and a primary action when `confirm` is given, and
 //! "Clear all" when `on_clear` is given. It holds no filter logic; the app supplies the body and the messages.
 
+use crate::components::action::action_button;
 use iced::widget::{column, row, space};
 use iced::{Alignment, Length};
 
@@ -42,7 +43,7 @@ pub fn filter_sheet<'a, M: Clone + 'a>(
         // A sheet that does something (adds an entry): Cancel beside the action.
         Some((label, m)) => {
             footer = footer.push(flat_button(text("Cancel")).on_press(on_close));
-            footer = footer.push(suggested_button(text(label.to_string())).on_press(m));
+            footer = footer.push(action_button(label.to_string()).on_press(m));
         }
         // Closing is not the primary action: the theme's neutral button, not the accent.
         None => footer = footer.push(raised_button(text("Done")).on_press(on_close)),

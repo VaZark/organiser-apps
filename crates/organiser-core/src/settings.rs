@@ -120,12 +120,20 @@ pub struct FavesSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
+pub struct RecipesSettings {
+    /// One compact line per recipe instead of cards.
+    pub compact: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub appearance: Appearance,
     pub tags: TagSettings,
     pub todo: TodoSettings,
     pub notes: NotesSettings,
     pub faves: FavesSettings,
+    pub recipes: RecipesSettings,
 }
 
 /// What reading the settings found: the settings to use, and why they are not what the file says,

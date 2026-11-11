@@ -36,3 +36,23 @@ pub fn panel<'a, M: 'a>(
             .into()
     }
 }
+
+/// A panel docked to the right edge: the content on the window surface with rounded left corners,
+/// filling the sidebar the dock gives it.
+pub fn side<'a, M: 'a>(content: Element<'a, M>) -> Element<'a, M> {
+    container(content)
+        .padding(20)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|theme: &iad::Theme| {
+            let mut style = iad::styles::container::window(theme);
+            style.border.radius = iced::border::Radius {
+                top_left: 16.0,
+                top_right: 0.0,
+                bottom_right: 0.0,
+                bottom_left: 16.0,
+            };
+            style
+        })
+        .into()
+}

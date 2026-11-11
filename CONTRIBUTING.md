@@ -88,6 +88,8 @@ Faves has the same kind of switches: `FAVES_GUI_SIZE=WxH`, `FAVES_GUI_LIST=<id>`
 (`FAVES_GUI_FAV_ONLY=1`, `FAVES_GUI_MIN_RATING=<n>`, `FAVES_GUI_TAG=a,b`), `FAVES_GUI_SEARCH=<text>`
 and `FAVES_GUI_THEME=light|dark`.
 
+Recipes has the same switches under `RECIPES_GUI_*`, plus `RECIPES_GUI_EDIT=1` (open the selected recipe in edit mode), `RECIPES_GUI_CALENDAR=1`, `RECIPES_GUI_FRIDGE=1`, `RECIPES_GUI_SHOP=<id,id>` (the shopping list open on these recipes) and `RECIPES_GUI_TODAY=YYYY-MM-DD` (pretend it is that day).
+
 Notes: `NOTES_GUI_SIZE=WxH`, `NOTES_GUI_FILTER=1`, `NOTES_GUI_PREFS=appearance|tags|app`, `NOTES_GUI_TAG_EDIT=<tag>` (a tag's editor), `NOTES_GUI_PALETTE_EDIT=1` (the palette editor), `NOTES_GUI_NEW=1` (the edit page on a new note), `NOTES_GUI_SELECT=<id>`, `NOTES_GUI_PREVIEW=1` (the selected note drawn as Markdown),
 `NOTES_GUI_SCOPE=archive|trash`, `NOTES_GUI_TAG=a,b`, `NOTES_GUI_SEARCH=<text>` and `NOTES_GUI_THEME=light|dark`.
 
