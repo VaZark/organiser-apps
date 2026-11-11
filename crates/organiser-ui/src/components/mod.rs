@@ -7,6 +7,7 @@ pub mod dot;
 pub mod empty;
 pub mod heart;
 pub mod new_back;
+pub mod page_switcher;
 pub mod panel;
 pub mod primary_menu;
 pub mod rich;

@@ -12,6 +12,7 @@ mod sidebar;
 
 use organiser_ui::Element;
 use organiser_ui::components::new_back::new_or_back;
+use organiser_ui::components::page_switcher::title_button;
 use organiser_ui::components::search;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
@@ -118,16 +119,7 @@ impl App {
 
     /// The title, as a button that opens the lists.
     fn lists_button(&self) -> Element<'_, Message> {
-        tooltip(
-            flat_button(
-                row![text(self.heading()), Icon::GoDown.view(12.0)]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::OpenLists),
-            "Switch list",
-            TooltipPosition::Bottom,
-        )
+        title_button(self.heading(), "Switch list", Message::OpenLists)
     }
 
     /// A wide window has a sidebar of lists; a narrow one has none, and its title (a button) opens

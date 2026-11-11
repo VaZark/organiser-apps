@@ -14,6 +14,7 @@ mod sidebar;
 
 use organiser_ui::Element;
 use organiser_ui::components::new_back::new_or_back;
+use organiser_ui::components::page_switcher::page_switcher;
 use organiser_ui::components::panel;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::layouts::anchor::Side;
@@ -193,7 +194,7 @@ impl App {
 
     /// The places as a dropdown in the header of a narrow window: the title with a chevron.
     fn section_switcher(&self) -> Element<'_, Message> {
-        dropdown(Section::ALL, Some(Section::of(self.view)), Message::Go).into()
+        page_switcher(Section::ALL, Section::of(self.view), Message::Go)
     }
 
     fn content_page(&self, room: f32) -> Element<'_, Message> {
