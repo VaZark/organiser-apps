@@ -13,7 +13,7 @@ use todo_schema::status::Status;
 use crate::app::{App, Message};
 
 /// The colours offered in the picker beside the free choice.
-const SWATCHES: [&str; 8] = [
+pub(super) const SWATCHES: [&str; 8] = [
     "#8e99a8", "#6aa5e8", "#7fc97f", "#f2d45c", "#f0a35e", "#e0787a", "#a98be0", "#e88fc0",
 ];
 

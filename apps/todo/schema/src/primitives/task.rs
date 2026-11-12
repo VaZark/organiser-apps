@@ -30,6 +30,8 @@ pub struct Task {
     pub parent_id: Option<i64>,
     /// The epic this task belongs to.
     pub epic: Option<i64>,
+    /// The section of that epic this task is in.
+    pub section: Option<i64>,
     pub title: String,
     pub notes: String,
     /// The status this is in (see [`Statuses`](super::status::Statuses)); `None` counts as the
@@ -43,6 +45,8 @@ pub struct Task {
     pub archived: bool,
     /// Shown as a desktop sticky by the Sticky app.
     pub sticky: bool,
+    /// Kept ahead of the others, in every view.
+    pub pinned: bool,
     pub created: i64,
     pub updated: i64,
 }
@@ -53,6 +57,7 @@ impl From<&Item> for Task {
             id: i.id,
             parent_id: i.parent_id,
             epic: i.fields.get("epic").and_then(Value::as_i64),
+            section: i.fields.get("section").and_then(Value::as_i64),
             title: i.title.clone(),
             notes: text(i, "notes"),
             status: status(i),
@@ -67,6 +72,11 @@ impl From<&Item> for Task {
             tags: i.tags.clone(),
             position: i.position,
             archived: i.archived,
+            pinned: i
+                .fields
+                .get("pinned")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             sticky: i
                 .fields
                 .get("sticky")
@@ -101,6 +111,8 @@ pub struct Epic {
     pub status: Option<i64>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
+    /// `#rrggbb`.
+    pub color: Option<String>,
     pub tags: Vec<String>,
     pub created: i64,
     pub updated: i64,
@@ -115,9 +127,64 @@ impl From<&Item> for Epic {
             status: status(i),
             start: date(i, "start"),
             due: date(i, "due"),
+            color: i
+                .fields
+                .get("color")
+                .and_then(Value::as_str)
+                .map(String::from),
             tags: i.tags.clone(),
             created: i.created,
             updated: i.updated,
+        }
+    }
+}
+
+/// A named group of tasks inside an epic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Section {
+    pub id: i64,
+    pub epic: i64,
+    pub title: String,
+    /// What the section is for, Markdown.
+    pub notes: String,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+    pub position: i64,
+}
+
+/// A section with how far along its tasks are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionSummary {
+    pub section: Section,
+    /// Tasks not yet done or dismissed.
+    pub open: usize,
+    pub total: usize,
+}
+
+impl SectionSummary {
+    /// 0.0..=1.0; a section with no tasks has made no progress.
+    pub fn progress(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            (self.total - self.open) as f32 / self.total as f32
+        }
+    }
+}
+
+impl From<&Item> for Section {
+    fn from(i: &Item) -> Self {
+        Self {
+            id: i.id,
+            epic: i.parent_id.unwrap_or_default(),
+            title: i.title.clone(),
+            notes: text(i, "notes"),
+            color: i
+                .fields
+                .get("color")
+                .and_then(Value::as_str)
+                .map(String::from),
+            position: i.position,
         }
     }
 }
@@ -151,6 +218,11 @@ pub struct Edit {
     pub due: Option<Option<NaiveDate>>,
     pub priority: Option<Priority>,
     pub epic: Option<Option<i64>>,
+    /// Only meaningful with an epic: [`lifecycle::edit`](crate::lifecycle::edit) clears it when
+    /// the epic changes.
+    pub section: Option<Option<i64>>,
+    /// An epic's colour, `#rrggbb`; `Some(None)` clears it.
+    pub color: Option<Option<String>>,
     pub archived: Option<bool>,
 }
 
@@ -184,6 +256,14 @@ impl Edit {
             p.fields
                 .insert("epic".into(), e.map_or(Value::Null, Value::from));
         }
+        if let Some(c) = &self.color {
+            p.fields
+                .insert("color".into(), c.clone().map_or(Value::Null, Value::from));
+        }
+        if let Some(sec) = self.section {
+            p.fields
+                .insert("section".into(), sec.map_or(Value::Null, Value::from));
+        }
         p
     }
 }
@@ -201,6 +281,7 @@ mod tests {
             status: None,
             start: None,
             due: None,
+            color: None,
             tags: vec![],
             created: 0,
             updated: 0,

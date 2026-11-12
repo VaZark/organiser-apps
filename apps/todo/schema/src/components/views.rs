@@ -5,9 +5,10 @@ use organiser_engine::{
     Db, FieldFilter, Filters, Node, Op, Query, Result, Sort, TagFilter, build_tree,
 };
 
-use crate::primitives::task::{Epic, EpicSummary, Task};
+use crate::primitives::sort::{SortKey, sort_tasks};
+use crate::primitives::task::{Epic, EpicSummary, Section, SectionSummary, Task};
 use crate::statuses;
-use crate::{EPIC, TASK};
+use crate::{EPIC, SECTION, TASK};
 
 /// Which tasks to list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -31,6 +32,10 @@ pub struct Filter {
     /// What the person chose in the filters the schema offers (status, priority, …).
     pub fields: Filters,
     pub include_archived: bool,
+    /// Leave out subtasks: only top-level tasks are listed.
+    pub hide_subtasks: bool,
+    /// What to order by; pinned tasks are first whatever it is (see [`sort`](crate::sort)).
+    pub sort: SortKey,
 }
 
 fn query(f: &Filter) -> Query {
@@ -61,6 +66,13 @@ fn depth_first(nodes: Vec<Node<Task>>) -> Vec<Task> {
 /// Tasks matching the filter, flat.
 pub fn tasks(db: &Db, f: &Filter, today: NaiveDate) -> Result<Vec<Task>> {
     let items = db.list(&query(f))?;
+    // How many subtasks each task has, closed ones too: a tie-breaker of the sort.
+    let mut subs: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    for i in &items {
+        if let Some(p) = i.parent_id {
+            *subs.entry(p).or_default() += 1;
+        }
+    }
     // Which tasks are finished is the person's to say, and a task may have no status at all, so
     // closed ones are left out here rather than by an engine filter (which would drop those).
     let all = statuses::load(db)?;
@@ -70,18 +82,28 @@ pub fn tasks(db: &Db, f: &Filter, today: NaiveDate) -> Result<Vec<Task>> {
         .iter()
         .filter(|i| f.fields.matches(i))
         .map(Task::from)
+        .filter(|t| !f.hide_subtasks || t.parent_id.is_none())
         .filter(|t| f.show_closed || chose_status || all.is_open(t.status));
     // "Current" is an OR over two nullable dates, which the engine's AND-only filters cannot
     // say, so it is applied here.
     Ok(match f.scope {
         // Parents before their subtasks, siblings in the person's order: not a raw sort by
         // `position`, which only orders siblings.
-        Scope::All => depth_first(build_tree(found.collect(), |t| t.id, |t| t.parent_id)),
+        // Sorted, pinned first, then built into the tree: siblings keep the order they are in.
+        Scope::All => {
+            let mut all: Vec<Task> = found.collect();
+            sort_tasks(&mut all, f.sort, &subs);
+            depth_first(build_tree(all, |t| t.id, |t| t.parent_id))
+        }
         Scope::Current => {
             let mut current: Vec<Task> = found.filter(|t| t.is_current(today)).collect();
-            // Dated deadlines first, soonest first; then those that only have a start. The sort
+            // Pinned first; then dated deadlines, soonest first; then those that only have a start. The sort
             // is stable, so ties stay in the person's own order.
-            current.sort_by_key(|t| (t.due.is_none(), t.due, t.start));
+            if f.sort == SortKey::Manual {
+                current.sort_by_key(|t| (!t.pinned, t.due.is_none(), t.due, t.start));
+            } else {
+                sort_tasks(&mut current, f.sort, &subs);
+            }
             current
         }
     })
@@ -128,6 +150,37 @@ pub fn epics(db: &Db, show_closed: bool) -> Result<Vec<EpicSummary>> {
         });
     }
     Ok(out)
+}
+
+/// The sections of an epic, in the person's order, with how many of their tasks are open.
+pub fn sections(db: &Db, epic: i64) -> Result<Vec<SectionSummary>> {
+    let all = statuses::load(db)?;
+    let tasks: Vec<Task> = db
+        .list(&Query {
+            kind: Some(TASK.into()),
+            archived: Some(false),
+            filters: vec![FieldFilter::new("epic", Op::Eq, epic)],
+            ..Query::default()
+        })?
+        .iter()
+        .map(Task::from)
+        .collect();
+    Ok(db
+        .children(Some(epic))?
+        .iter()
+        .filter(|i| i.kind == SECTION)
+        .map(Section::from)
+        .map(|section| {
+            let mine = tasks.iter().filter(|t| t.section == Some(section.id));
+            let total = mine.clone().count();
+            let open = mine.filter(|t| all.is_open(t.status)).count();
+            SectionSummary {
+                section,
+                open,
+                total,
+            }
+        })
+        .collect())
 }
 
 pub fn today() -> NaiveDate {

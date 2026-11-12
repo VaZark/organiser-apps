@@ -16,22 +16,13 @@ use organiser_ui::iad::Theme;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::tag_groups::GroupEvent;
 use organiser_ui::primitives::tags::collapse;
+use organiser_ui::widgets::masonry::{PAGE_PADDING, columns_for, masonry};
 use organiser_ui::widgets::schema_filters::active_filters;
 
 use crate::app::{App, Message, paint};
 
-/// The narrowest a card column gets, so cards stay readable.
-const CARD_WIDTH: f32 = 240.0;
-const GAP: f32 = 12.0;
 /// The tallest the drawn body of a card gets.
 const CARD_BODY: f32 = 170.0;
-const PAGE_PADDING: f32 = 16.0;
-
-/// How many card columns fit in `width`, at least one.
-fn columns_for(width: f32) -> usize {
-    let room = (width - 2.0 * PAGE_PADDING + GAP).max(CARD_WIDTH);
-    ((room / (CARD_WIDTH + GAP)) as usize).max(1)
-}
 
 /// A rough height for packing: a title line plus the snippet's lines and a row for tags.
 fn weight(n: &Note) -> usize {
@@ -141,25 +132,7 @@ impl App {
         notes: &[&'a Note],
         cols: usize,
     ) -> Element<'a, Message> {
-        let mut lanes: Vec<(usize, Vec<Element<'a, Message>>)> =
-            (0..cols).map(|_| (0, Vec::new())).collect();
-        for n in notes {
-            let lane = lanes
-                .iter_mut()
-                .min_by_key(|(load, _)| *load)
-                .expect("at least one column");
-            lane.0 += weight(n);
-            lane.1.push(self.card(theme, n));
-        }
-        row(lanes.into_iter().map(|(_, cards)| {
-            column(cards)
-                .spacing(GAP)
-                .width(Length::FillPortion(1))
-                .into()
-        }))
-        .spacing(GAP)
-        .align_y(Alignment::Start)
-        .into()
+        masonry(notes.iter().map(|n| (weight(n), self.card(theme, n))), cols)
     }
 
     fn card<'a>(&'a self, theme: &Theme, n: &'a Note) -> Element<'a, Message> {

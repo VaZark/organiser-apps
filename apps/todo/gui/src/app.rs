@@ -22,14 +22,15 @@ use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
 use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
-use todo_schema::EPIC;
+use todo_schema::{EPIC, SECTION};
 use todo_schema::board::BoardView;
 use todo_schema::lifecycle::{self, NewTask};
 use todo_schema::priority::Priority;
 use todo_schema::quick;
+use todo_schema::sort::{SortKey, sort_tasks};
 use todo_schema::status::{Status, Statuses};
 use todo_schema::statuses::{self, StatusEdit};
-use todo_schema::task::{Edit, Epic, EpicSummary, Task as TodoTask};
+use todo_schema::task::{Edit, Epic, EpicSummary, Section, SectionSummary, Task as TodoTask};
 use todo_schema::views::{self, Filter, Scope};
 
 #[derive(Debug, Clone)]
@@ -43,16 +44,36 @@ pub enum Message {
     ShowClosed(bool),
     /// Show every task at one level, subtasks included.
     Flat(bool),
-    /// Switch between the list and the kanban board.
-    Kanban(bool),
+    /// Show the tasks as notes, a board or a list.
+    SetView(View),
+    /// Order the tasks by this.
+    SetSort(SortKey),
+    /// List subtasks as entries of their own (true), or only top-level tasks.
+    ShowSubtasks(bool),
     /// Open or close the board's sidebar when the window is too narrow to show it.
     Drawer(bool),
-    /// Move a card to the next column (`1`) or the previous one (`-1`).
-    MoveCard(i64, i32),
+    /// A board card was picked up.
+    DragStart(i64),
+    /// The card being dragged was dropped on this status's column.
+    DropOn(i64),
+    /// The pointer button went up: whatever was being dragged is let go.
+    DragEnd,
+    /// The task being dragged was dropped on a section of its epic, or (`None`) on no section.
+    DropInSection(Option<i64>),
+    /// The task being dragged was dropped on another task: it becomes that task's subtask.
+    DropOnTask(i64),
+    /// The task being dragged was dropped on open ground: it leaves its parent and stands alone.
+    DropOut,
+    /// Take a subtask out of its parent, to stand as a task of its own.
+    DConvert(i64),
+    /// The answer to "delete this epic?": keep its tasks (they leave the epic), delete them too,
+    /// or neither.
+    EpicDeleteKeep,
+    EpicDeleteAll,
+    EpicDeleteCancel,
     OpenFilter,
     CloseFilter,
     ClearFilters,
-    ToggleEpic(i64),
     /// Show one epic's tasks, or (`None`) all of them: the sidebar's selection.
     SetEpic(Option<i64>),
     /// The tag filter's groups changed.
@@ -63,10 +84,14 @@ pub enum Message {
     /// Todo's own settings: what it opens on, and whether it starts with finished tasks.
     PrefStartView(StartView),
     PrefShowClosed(bool),
+    PrefShowSubtasks(bool),
+    PrefDetailsDrawer(bool),
     /// Link (true) or unlink this app to the Sticky Notes app.
     PrefStickyLink(bool),
     /// Show the selected task as a desktop sticky (true) or stop.
     DSticky(bool),
+    /// Pin the selected task to the top of every view (true) or unpin it.
+    DPin(bool),
     /// The filters the schema offers changed.
     Fields(Filters),
     Tags(TagMsg),
@@ -98,6 +123,17 @@ pub enum Message {
     DStatus(Status),
     DPriority(Priority),
     DEpic(EpicChoice),
+    /// The section of the task's epic it is in, or none.
+    DSection(Option<i64>),
+    /// The colour of the epic or section open in the details, picked or typed.
+    DColor(Hsva),
+    DColorText(String),
+    /// Add a section to an epic, and open it to be named.
+    NewSection(i64),
+    /// Fold a section of the epic page, or open it again.
+    SectionFold(i64),
+    /// A new task in this section of the epic being viewed.
+    NewInSection(i64),
     DTagStart,
     DTagText(String),
     /// Add a tag; an empty name stops adding.
@@ -119,6 +155,39 @@ pub enum Message {
     Captured,
 }
 
+/// How the tasks are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// Every task a note, in a grid of cards.
+    Notes,
+    /// A kanban board, a column per status.
+    Board,
+    /// The nested list.
+    List,
+}
+
+impl View {
+    pub const ALL: [View; 3] = [View::Notes, View::Board, View::List];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            View::Notes => "Notes",
+            View::Board => "Kanban board",
+            View::List => "List",
+        }
+    }
+}
+
+impl From<StartView> for View {
+    fn from(v: StartView) -> Self {
+        match v {
+            StartView::Notes => View::Notes,
+            StartView::Board => View::Board,
+            StartView::List => View::List,
+        }
+    }
+}
+
 /// One entry of the epic dropdown: an epic, or none.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpicChoice {
@@ -135,6 +204,7 @@ impl std::fmt::Display for EpicChoice {
 pub enum Subject {
     Task(TodoTask),
     Epic(Epic),
+    Section(Section),
 }
 
 /// The selected task or epic. The text fields hold what the person typed; each edit is saved at
@@ -168,6 +238,7 @@ impl Details {
         match &self.subject {
             Subject::Task(t) => t.id,
             Subject::Epic(e) => e.id,
+            Subject::Section(s) => s.id,
         }
     }
 
@@ -175,6 +246,7 @@ impl Details {
         match &self.subject {
             Subject::Task(t) => &t.tags,
             Subject::Epic(e) => &e.tags,
+            Subject::Section(_) => &[],
         }
     }
 }
@@ -201,7 +273,13 @@ pub struct App {
     /// Tasks and their subtasks are equal rows, with no nesting.
     pub flat: bool,
     /// The kanban board instead of the list.
-    pub kanban: bool,
+    pub view: View,
+    /// Subtasks listed as entries of their own.
+    pub show_subtasks: bool,
+    /// What the tasks are ordered by (pinned ones are always first).
+    pub sort: SortKey,
+    /// The notes of the tasks the notes view shows, drawn, by task id.
+    pub docs: HashMap<i64, Vec<rt::Block>>,
     /// The board's tasks: every status, whatever the list's own filters hide.
     pub board: Vec<TodoTask>,
     /// `(done, total)` subtasks of each board task that has any.
@@ -220,13 +298,22 @@ pub struct App {
     /// What each status's name entry shows: a name can be cleared and retyped without each
     /// keystroke having to be a valid name.
     pub status_names: HashMap<i64, String>,
-    /// The notes of the board's tasks, drawn, by task id.
-    pub docs: HashMap<i64, Vec<rt::Block>>,
     pub search: Search,
     pub forest: Vec<Node<TodoTask>>,
     pub epics: Vec<EpicSummary>,
     pub epic_titles: HashMap<i64, String>,
     pub epic_choices: Vec<EpicChoice>,
+    /// The sections of each epic, by epic id.
+    /// The task being dragged across the board.
+    pub dragging: Option<i64>,
+    /// An epic with tasks that is about to be deleted, waiting for the answer to what becomes of
+    /// its tasks.
+    pub confirm_epic_delete: Option<i64>,
+    /// What the dragged task cannot be dropped on: itself and everything below it.
+    pub drag_blocked: std::collections::HashSet<i64>,
+    pub epic_sections: HashMap<i64, Vec<SectionSummary>>,
+    /// Sections folded shut on the epic page.
+    pub folded_sections: std::collections::HashSet<i64>,
     pub tags: Vec<Tag>,
     pub tag_names: Vec<String>,
     pub folds: Folds,
@@ -258,7 +345,8 @@ impl App {
         }
         let prefs = Preferences::load();
         let mode = Mode::from(prefs.settings.appearance.theme);
-        let board_by_default = prefs.settings.todo.start_view == StartView::Board;
+        let view_by_default = View::from(prefs.settings.todo.start_view);
+        let show_subtasks_by_default = prefs.settings.todo.show_subtasks;
         let show_closed_by_default = prefs.settings.todo.show_closed;
         let mut app = Self {
             db,
@@ -274,8 +362,10 @@ impl App {
             tag_query: String::new(),
             show_closed: show_closed_by_default,
             flat: false,
-            // The board is the default view; the list is one toggle away.
-            kanban: board_by_default,
+            view: view_by_default,
+            show_subtasks: show_subtasks_by_default,
+            sort: SortKey::default(),
+            docs: HashMap::new(),
             menu_open: false,
             board: Vec::new(),
             sub_progress: HashMap::new(),
@@ -285,12 +375,16 @@ impl App {
             statuses: Statuses::default(),
             status_text: HashMap::new(),
             status_names: HashMap::new(),
-            docs: HashMap::new(),
             search: Search::default(),
             forest: Vec::new(),
             epics: Vec::new(),
             epic_titles: HashMap::new(),
             epic_choices: Vec::new(),
+            dragging: None,
+            confirm_epic_delete: None,
+            drag_blocked: Default::default(),
+            epic_sections: HashMap::new(),
+            folded_sections: Default::default(),
             tags: Vec::new(),
             tag_names: Vec::new(),
             folds: Folds::default(),
@@ -308,7 +402,22 @@ impl App {
         app.flat = std::env::var_os("TODO_GUI_FLAT").is_some();
         app.menu_open = std::env::var_os("TODO_GUI_MENU_OPEN").is_some();
         if std::env::var_os("TODO_GUI_LIST").is_some() {
-            app.kanban = false;
+            app.view = View::List;
+        }
+        app.confirm_epic_delete = std::env::var("TODO_GUI_DELETE_EPIC")
+            .ok()
+            .and_then(|v| v.parse().ok());
+        match std::env::var("TODO_GUI_SORT").as_deref() {
+            Ok("priority") => app.sort = SortKey::Priority,
+            Ok("created") => app.sort = SortKey::Created,
+            Ok("due") => app.sort = SortKey::Due,
+            _ => {}
+        }
+        match std::env::var("TODO_GUI_VIEW").as_deref() {
+            Ok("notes") => app.view = View::Notes,
+            Ok("board") => app.view = View::Board,
+            Ok("list") => app.view = View::List,
+            _ => {}
         }
         if std::env::var_os("TODO_GUI_CURRENT").is_some() {
             app.scope = Scope::Current;
@@ -384,7 +493,16 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        iad::utils::follow_theme().map(Message::SystemTheme)
+        Subscription::batch([
+            iad::utils::follow_theme().map(Message::SystemTheme),
+            // Letting go anywhere ends a drag. The column it landed on has already been told.
+            iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::DragEnd),
+                _ => None,
+            }),
+        ])
     }
 
     fn filter(&self) -> Filter {
@@ -397,6 +515,8 @@ impl App {
             epic: self.epic_filter,
             fields: self.filters.clone(),
             include_archived: false,
+            hide_subtasks: !self.show_subtasks,
+            sort: self.sort,
         }
     }
 
@@ -423,7 +543,8 @@ impl App {
             }
             Err(e) => self.toast = Some(e.to_string()),
         }
-        if self.kanban {
+        // The notes and the board both read every task, closed ones included.
+        if self.view != View::List {
             self.reload_board();
         }
         self.task_titles = self.titles_of(&self.forest);
@@ -445,6 +566,14 @@ impl App {
                     }),
             )
             .collect();
+            self.epic_sections = all
+                .iter()
+                .filter_map(|s| {
+                    views::sections(&self.db, s.epic.id)
+                        .ok()
+                        .map(|v| (s.epic.id, v))
+                })
+                .collect();
             self.epics = all;
         }
         // Every tag has a colour of its own, drawn the same everywhere.
@@ -459,12 +588,14 @@ impl App {
         }
     }
 
-    /// The board's tasks and how far along each one's subtasks are. The board shows every status
-    /// (its views choose the columns), so it asks for closed tasks whatever the list is hiding.
+    /// The tasks of the board and of the notes, and how far along each one's subtasks are. They
+    /// show every status (each view chooses what to show), so they ask for closed tasks whatever
+    /// the list is hiding, and for subtasks whatever "show subtasks" says, to count them.
     fn reload_board(&mut self) {
-        // The board shows every status; current tasks narrow it like any other filter.
+        // Current tasks narrow it like any other filter.
         let f = Filter {
             show_closed: true,
+            hide_subtasks: false,
             ..self.filter()
         };
         match views::tasks(&self.db, &f, self.today) {
@@ -478,11 +609,25 @@ impl App {
                     }
                 }
                 self.sub_progress = progress;
-                self.docs = tasks
-                    .iter()
-                    .filter(|t| !t.notes.is_empty())
-                    .map(|t| (t.id, organiser_ui::components::rich::render(&t.notes)))
+                let tasks: Vec<TodoTask> = tasks
+                    .into_iter()
+                    .filter(|t| self.show_subtasks || t.parent_id.is_none())
                     .collect();
+                // The notes as they read, drawn once, for the cards that show them.
+                self.docs = if self.view == View::Notes {
+                    tasks
+                        .iter()
+                        .filter(|t| !t.notes.is_empty())
+                        .map(|t| (t.id, organiser_ui::components::rich::render(&t.notes)))
+                        .collect()
+                } else {
+                    HashMap::new()
+                };
+                // Pinned first, then by the chosen order: all the cards as one list, not a tree.
+                let mut tasks = tasks;
+                let subtasks: HashMap<i64, usize> =
+                    self.sub_progress.iter().map(|(id, (_, n))| (*id, *n)).collect();
+                sort_tasks(&mut tasks, self.sort, &subtasks);
                 self.board = tasks;
             }
             Err(e) => self.toast = Some(e.to_string()),
@@ -530,15 +675,24 @@ impl App {
         self.flat || self.scope == Scope::Current
     }
 
+    /// The colour of an epic, if it has been given one.
+    pub fn epic_color(&self, id: i64) -> Option<iced::Color> {
+        self.epics
+            .iter()
+            .find(|s| s.epic.id == id)
+            .and_then(|s| s.epic.color.as_deref())
+            .and_then(organiser_ui::components::dot::color_from_hex)
+    }
+
+    /// The epic being viewed is a page, not a filter, so it stays.
     fn clear_filters(&mut self) {
-        self.epic_filter = None;
         self.tag_groups = TagGroups::new();
         self.filters.clear();
     }
 
-    /// How many filters (an epic, tags, the schema's own) narrow the list.
+    /// How many filters (tags, the schema's own) narrow the list. The epic is the view, not one.
     pub fn filter_count(&self) -> usize {
-        usize::from(self.epic_filter.is_some()) + tag_count(&self.tag_groups) + self.filters.count()
+        tag_count(&self.tag_groups) + self.filters.count()
     }
 
     // ---- details ---------------------------------------------------------------------------
@@ -553,6 +707,9 @@ impl App {
             let e = Epic::from(&item);
             let (n, s, d) = (e.notes.clone(), e.start, e.due);
             (Subject::Epic(e), n, s, d)
+        } else if item.kind == SECTION {
+            let s = Section::from(&item);
+            (Subject::Section(s.clone()), s.notes, None, None)
         } else {
             let t = TodoTask::from(&item);
             let (n, s, d) = (t.notes.clone(), t.start, t.due);
@@ -588,6 +745,8 @@ impl App {
                 if let Some(d) = &mut self.details {
                     d.subject = if item.kind == EPIC {
                         Subject::Epic(Epic::from(&item))
+                    } else if item.kind == SECTION {
+                        Subject::Section(Section::from(&item))
                     } else {
                         Subject::Task(TodoTask::from(&item))
                     };
@@ -640,6 +799,17 @@ impl App {
         let result = match d.subject {
             Subject::Task(_) => lifecycle::edit(&mut self.db, id, &edit).map(|_| ()),
             Subject::Epic(_) => lifecycle::edit_epic(&mut self.db, id, &edit).map(|_| ()),
+            // A section has no dates.
+            Subject::Section(_) => lifecycle::edit_section(
+                &mut self.db,
+                id,
+                &Edit {
+                    start: None,
+                    due: None,
+                    ..edit
+                },
+            )
+            .map(|_| ()),
         };
         if let Some(d) = &mut self.details {
             d.error = result.err().map(|e| e.to_string());
@@ -695,6 +865,32 @@ impl App {
         self.reload();
     }
 
+    /// Colour the epic or section that is open in the details.
+    /// `fail`, for the places that must also return a no-op task.
+    fn fail_with(&mut self, e: impl std::fmt::Display) -> Task<Message> {
+        self.toast = Some(e.to_string());
+        Task::none()
+    }
+
+    fn set_color(&mut self, hex: String) {
+        let Some(d) = &self.details else { return };
+        let id = d.id();
+        let edit = Edit {
+            color: Some(Some(hex)),
+            ..Edit::default()
+        };
+        let result = match d.subject {
+            Subject::Epic(_) => lifecycle::edit_epic(&mut self.db, id, &edit).map(|_| ()),
+            Subject::Section(_) => lifecycle::edit_section(&mut self.db, id, &edit).map(|_| ()),
+            Subject::Task(_) => return,
+        };
+        if let Err(e) = result {
+            self.fail(e);
+        }
+        self.refresh_details();
+        self.reload();
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         // While a task is only a draft the pickers change the draft, and there is nothing yet to
         // add subtasks to or delete.
@@ -714,7 +910,18 @@ impl App {
                         return Task::none();
                     }
                     Message::DEpic(c) => {
+                        if t.epic != c.id {
+                            t.section = None;
+                        }
                         t.epic = c.id;
+                        return Task::none();
+                    }
+                    Message::DSection(s) => {
+                        t.section = *s;
+                        return Task::none();
+                    }
+                    Message::DPin(on) => {
+                        t.pinned = *on;
                         return Task::none();
                     }
                     _ => {}
@@ -741,26 +948,105 @@ impl App {
                 self.reload();
             }
             Message::Flat(on) => self.flat = on,
-            Message::Kanban(on) => {
-                self.kanban = on;
+            Message::SetView(view) => {
+                self.view = view;
                 self.drawer_open = false;
                 self.reload();
             }
+            Message::SetSort(sort) => {
+                self.sort = sort;
+                self.reload();
+            }
+            Message::ShowSubtasks(on) => {
+                self.show_subtasks = on;
+                self.reload();
+            }
             Message::Drawer(open) => self.drawer_open = open,
-            Message::MoveCard(id, step) => {
-                let current = self
-                    .board
-                    .iter()
-                    .find(|t| t.id == id)
-                    .and_then(|t| self.statuses.resolve(t.status))
-                    .map(|s| s.id);
-                let view = self.board_view();
-                if let Some(to) = current.and_then(|s| view.neighbor(&self.statuses, s, step)) {
-                    if let Err(e) = lifecycle::set_status(&mut self.db, id, to) {
-                        self.fail(e);
+            Message::DragStart(id) => {
+                self.dragging = Some(id);
+                self.drag_blocked = std::iter::once(id)
+                    .chain(
+                        lifecycle::descendants(&self.db, id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|t| t.id),
+                    )
+                    .collect();
+            }
+            Message::DragEnd => self.dragging = None,
+            Message::DropOnTask(parent) => {
+                if let Some(id) = self.dragging.take() {
+                    match lifecycle::reparent(&mut self.db, id, Some(parent)) {
+                        Ok(_) => {
+                            self.folds = Folds::default();
+                            self.refresh_details();
+                            self.reload();
+                        }
+                        Err(e) => self.fail(e),
+                    }
+                }
+            }
+            Message::DConvert(id) => {
+                match lifecycle::reparent(&mut self.db, id, None) {
+                    Ok(_) => {
+                        self.folds = Folds::default();
+                        self.refresh_details();
+                        self.reload();
+                    }
+                    Err(e) => self.fail(e),
+                }
+            }
+            Message::DropOut => {
+                if let Some(id) = self.dragging.take() {
+                    match lifecycle::reparent(&mut self.db, id, None) {
+                        Ok(_) => {
+                            self.refresh_details();
+                            self.reload();
+                        }
+                        Err(e) => self.fail(e),
+                    }
+                }
+            }
+            Message::DropInSection(section) => {
+                if let Some(id) = self.dragging.take() {
+                    // Dropped on a section it stands alone there, and its subtasks go with it.
+                    if let Err(e) = lifecycle::reparent(&mut self.db, id, None) {
+                        return self.fail_with(e);
+                    }
+                    let mut ids = vec![id];
+                    match lifecycle::descendants(&self.db, id) {
+                        Ok(d) => ids.extend(d.into_iter().map(|t| t.id)),
+                        Err(e) => return self.fail_with(e),
+                    }
+                    for id in ids {
+                        let edit = Edit {
+                            section: Some(section),
+                            ..Edit::default()
+                        };
+                        if let Err(e) = lifecycle::edit(&mut self.db, id, &edit) {
+                            self.fail(e);
+                            break;
+                        }
                     }
                     self.refresh_details();
                     self.reload();
+                }
+            }
+            Message::DropOn(to) => {
+                if let Some(id) = self.dragging.take() {
+                    let from = self
+                        .board
+                        .iter()
+                        .find(|t| t.id == id)
+                        .and_then(|t| self.statuses.resolve(t.status))
+                        .map(|s| s.id);
+                    if from != Some(to) {
+                        if let Err(e) = lifecycle::set_status(&mut self.db, id, to) {
+                            self.fail(e);
+                        }
+                        self.refresh_details();
+                        self.reload();
+                    }
                 }
             }
             Message::OpenFilter => self.filter_open = true,
@@ -775,14 +1061,6 @@ impl App {
                 self.drawer_open = false;
                 self.reload();
             }
-            Message::ToggleEpic(id) => {
-                self.epic_filter = if self.epic_filter == Some(id) {
-                    None
-                } else {
-                    Some(id)
-                };
-                self.reload();
-            }
             Message::TagGroups(event) => {
                 self.tag_groups.apply(event);
                 self.reload();
@@ -794,6 +1072,17 @@ impl App {
             Message::PrefStickyLink(on) => {
                 if let Err(e) = self.sticky.set(&todo_schema::STICKY, on) {
                     self.fail(e);
+                }
+            }
+            Message::DPin(on) => {
+                if let Some(d) = &self.details
+                    && !d.is_new()
+                {
+                    if let Err(e) = lifecycle::set_pinned(&mut self.db, d.id(), on) {
+                        self.fail(e);
+                    }
+                    self.refresh_details();
+                    self.reload();
                 }
             }
             Message::DSticky(on) => {
@@ -826,6 +1115,18 @@ impl App {
             }
             Message::PrefShowClosed(on) => {
                 self.prefs.settings.todo.show_closed = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
+            Message::PrefShowSubtasks(on) => {
+                self.prefs.settings.todo.show_subtasks = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
+            Message::PrefDetailsDrawer(on) => {
+                self.prefs.settings.todo.details_in_drawer = on;
                 if let Err(e) = self.prefs.save() {
                     self.fail(e);
                 }
@@ -874,6 +1175,8 @@ impl App {
                     // Back from a page to the list of pages (a narrow window).
                 } else if self.prefs.open {
                     self.prefs.open = false;
+                } else if self.confirm_epic_delete.is_some() {
+                    self.confirm_epic_delete = None;
                 } else if self.filter_open {
                     self.filter_open = false;
                 } else if self.drawer_open {
@@ -898,6 +1201,7 @@ impl App {
                         parent_id: None,
                         // Under the epic being looked at, as a task added there would be.
                         epic: self.epic_filter,
+                        section: None,
                         title: String::new(),
                         notes: String::new(),
                         status,
@@ -908,6 +1212,7 @@ impl App {
                         position: 0,
                         archived: false,
                         sticky: false,
+                        pinned: false,
                         created: 0,
                         updated: 0,
                     }),
@@ -954,6 +1259,8 @@ impl App {
                     title: d.title.trim().to_string(),
                     notes: d.notes.text().trim_end().to_string(),
                     epic: t.epic,
+                    section: t.section,
+                    pinned: t.pinned,
                     start,
                     due,
                     priority: Some(t.priority),
@@ -1030,6 +1337,8 @@ impl App {
                     Subject::Epic(_) => {
                         lifecycle::set_epic_status(&mut self.db, id, s.id).map(|_| ())
                     }
+                    // A section has no status of its own.
+                    Subject::Section(_) => Ok(()),
                 };
                 if let Err(e) = result {
                     self.fail(e);
@@ -1077,6 +1386,69 @@ impl App {
                     }
                     self.refresh_details();
                     self.reload();
+                }
+            }
+            Message::DSection(section) => {
+                if let Some(Details {
+                    subject: Subject::Task(t),
+                    ..
+                }) = &self.details
+                {
+                    let id = t.id;
+                    if let Err(e) = lifecycle::edit(
+                        &mut self.db,
+                        id,
+                        &Edit {
+                            section: Some(section),
+                            ..Edit::default()
+                        },
+                    ) {
+                        self.fail(e);
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
+            Message::DColorText(text) => {
+                let parsed = Hsva::parse(&text).map(|h| {
+                    let [r, g, b] = h.to_rgb8();
+                    format!("#{r:02x}{g:02x}{b:02x}")
+                });
+                if let Some(d) = &self.details {
+                    self.status_text.insert(d.id(), text);
+                }
+                if let Some(hex) = parsed {
+                    self.set_color(hex);
+                }
+            }
+            Message::DColor(h) => {
+                let [r, g, b] = h.to_rgb8();
+                let hex = format!("#{r:02x}{g:02x}{b:02x}");
+                if let Some(d) = &self.details {
+                    self.status_text.insert(d.id(), hex.clone());
+                }
+                self.set_color(hex);
+            }
+            Message::NewSection(epic) => match lifecycle::create_section(&mut self.db, epic, "New section") {
+                Ok(sec) => {
+                    self.reload();
+                    self.open(sec.id);
+                }
+                Err(e) => self.fail(e),
+            },
+            Message::SectionFold(id) => {
+                if !self.folded_sections.remove(&id) {
+                    self.folded_sections.insert(id);
+                }
+            }
+            Message::NewInSection(id) => {
+                let _ = self.update(Message::New);
+                if let Some(Details {
+                    subject: Subject::Task(t),
+                    ..
+                }) = &mut self.details
+                {
+                    t.section = Some(id);
                 }
             }
             Message::DTagStart => {
@@ -1134,6 +1506,13 @@ impl App {
                     return Task::none();
                 };
                 let id = d.id();
+                // An epic that has tasks asks what becomes of them first.
+                if matches!(d.subject, Subject::Epic(_))
+                    && self.epics.iter().any(|s| s.epic.id == id && s.total > 0)
+                {
+                    self.confirm_epic_delete = Some(id);
+                    return Task::none();
+                }
                 let result = match d.subject {
                     Subject::Task(_) => self
                         .db
@@ -1141,6 +1520,8 @@ impl App {
                         .map(|n| format!("Deleted {n} task{}", if n == 1 { "" } else { "s" })),
                     Subject::Epic(_) => lifecycle::delete_epic(&mut self.db, id)
                         .map(|()| "Deleted epic".to_string()),
+                    Subject::Section(_) => lifecycle::delete_section(&mut self.db, id)
+                        .map(|()| "Deleted section".to_string()),
                 };
                 match result {
                     Ok(m) => self.toast = Some(m),
@@ -1151,6 +1532,29 @@ impl App {
                 }
                 self.details = None;
                 self.reload();
+            }
+            Message::EpicDeleteCancel => self.confirm_epic_delete = None,
+            Message::EpicDeleteKeep | Message::EpicDeleteAll => {
+                let all = matches!(message, Message::EpicDeleteAll);
+                if let Some(id) = self.confirm_epic_delete.take() {
+                    let result = if all {
+                        lifecycle::delete_epic_and_tasks(&mut self.db, id).map(|n| {
+                            format!("Deleted the epic and {n} task{}", if n == 1 { "" } else { "s" })
+                        })
+                    } else {
+                        lifecycle::delete_epic(&mut self.db, id)
+                            .map(|()| "Deleted the epic; its tasks stay".to_string())
+                    };
+                    match result {
+                        Ok(m) => self.toast = Some(m),
+                        Err(e) => self.fail(e),
+                    }
+                    if self.epic_filter == Some(id) {
+                        self.epic_filter = None;
+                    }
+                    self.details = None;
+                    self.reload();
+                }
             }
             Message::DPreview(on) => {
                 self.with_details(|d| d.preview = on);

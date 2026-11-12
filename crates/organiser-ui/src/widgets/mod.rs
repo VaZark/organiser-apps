@@ -5,6 +5,7 @@ pub mod choice_menu;
 pub mod details_dock;
 pub mod filter_sheet;
 pub mod markdown_field;
+pub mod masonry;
 pub mod preferences;
 pub mod responsive_dialog;
 pub mod schema_filters;

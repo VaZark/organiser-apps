@@ -2,12 +2,12 @@
 //! closes its open subtasks; reopening one reopens the closed tasks above it.
 
 use chrono::NaiveDate;
-use organiser_engine::{Db, Error, ItemPatch, NewItem, Result};
+use organiser_engine::{Db, Error, FieldFilter, ItemPatch, NewItem, Op, Query, Result};
 
 use crate::primitives::priority::Priority;
-use crate::primitives::task::{Edit, Epic, Task};
+use crate::primitives::task::{Edit, Epic, Section, Task};
 use crate::statuses;
-use crate::{EPIC, TASK};
+use crate::{EPIC, SECTION, TASK};
 
 #[derive(Debug, Clone, Default)]
 pub struct NewTask {
@@ -16,12 +16,15 @@ pub struct NewTask {
     pub notes: String,
     pub parent: Option<i64>,
     pub epic: Option<i64>,
+    /// A section of that epic; ignored without an epic.
+    pub section: Option<i64>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
     pub priority: Option<Priority>,
     /// Where it starts; the first open status when not given.
     pub status: Option<i64>,
     pub tags: Vec<String>,
+    pub pinned: bool,
 }
 
 impl NewTask {
@@ -49,8 +52,15 @@ pub fn create(db: &mut Db, t: &NewTask) -> Result<Task> {
     if let Some(p) = t.priority {
         new = new.field("priority", p.as_str());
     }
+    if t.pinned {
+        new = new.field("pinned", true);
+    }
     if let Some(e) = t.epic {
         new = new.field("epic", e);
+        if let Some(sec) = t.section {
+            check_section(db, sec, e)?;
+            new = new.field("section", sec);
+        }
     }
     let start = match t.status {
         Some(s) => Some(s),
@@ -62,8 +72,48 @@ pub fn create(db: &mut Db, t: &NewTask) -> Result<Task> {
     Ok(Task::from(&db.create(new)?))
 }
 
+/// The section must be one of that epic's.
+fn check_section(db: &Db, section: i64, epic: i64) -> Result<()> {
+    let item = db.get(section)?;
+    if item.kind != SECTION || item.parent_id != Some(epic) {
+        return Err(Error::Invalid(format!(
+            "item {section} is not a section of epic {epic}"
+        )));
+    }
+    Ok(())
+}
+
+/// Edit a task. A section always belongs to the task's epic: changing or clearing the epic
+/// clears the section, unless the same edit names one of the new epic's.
 pub fn edit(db: &mut Db, id: i64, edit: &Edit) -> Result<Task> {
+    let mut edit = edit.clone();
+    let epic = match edit.epic {
+        Some(e) => e,
+        None => Task::from(&db.get(id)?).epic,
+    };
+    match (edit.section, epic) {
+        (Some(Some(sec)), Some(e)) => check_section(db, sec, e)?,
+        (Some(Some(_)), None) => {
+            return Err(Error::Invalid("a section needs an epic".into()));
+        }
+        (None, _) if edit.epic.is_some() && Task::from(&db.get(id)?).epic != epic => {
+            edit.section = Some(None);
+        }
+        _ => {}
+    }
     Ok(Task::from(&db.update(id, edit.to_patch())?))
+}
+
+/// Pin a task, to keep it ahead of the others in every view, or unpin it.
+pub fn set_pinned(db: &mut Db, id: i64, pinned: bool) -> Result<Task> {
+    let v = if pinned {
+        serde_json::Value::Bool(true)
+    } else {
+        serde_json::Value::Null
+    };
+    Ok(Task::from(
+        &db.update(id, ItemPatch::default().field("pinned", v))?,
+    ))
 }
 
 /// Make the item's tags exactly `tags` (adding and removing only the difference).
@@ -130,6 +180,42 @@ pub fn descendants(db: &Db, id: i64) -> Result<Vec<Task>> {
     Ok(out)
 }
 
+/// Move a task under another task (`Some`), making it a subtask, or out to the top level (`None`).
+///
+/// Under a parent it joins that parent's epic and section, and so do its own subtasks: a task
+/// and its subtasks live in one place. Out to the top level it keeps its epic and section.
+pub fn reparent(db: &mut Db, id: i64, parent: Option<i64>) -> Result<Task> {
+    if db.get(id)?.kind != TASK {
+        return Err(Error::Invalid(format!("item {id} is not a task")));
+    }
+    if let Some(p) = parent {
+        let target = db.get(p)?;
+        if target.kind != TASK {
+            return Err(Error::Invalid(format!("item {p} is not a task")));
+        }
+        if p == id || descendants(db, id)?.iter().any(|t| t.id == p) {
+            return Err(Error::Invalid(
+                "a task cannot become a subtask of itself or of its own subtasks".into(),
+            ));
+        }
+        let home = Task::from(&target);
+        let mut moved = vec![id];
+        moved.extend(descendants(db, id)?.into_iter().map(|t| t.id));
+        for t in moved {
+            edit(
+                db,
+                t,
+                &Edit {
+                    epic: Some(home.epic),
+                    section: Some(home.section),
+                    ..Edit::default()
+                },
+            )?;
+        }
+    }
+    Ok(Task::from(&db.move_item(id, parent, None)?))
+}
+
 // ---- epics ---------------------------------------------------------------------------------
 
 pub fn create_epic(db: &mut Db, title: &str) -> Result<Epic> {
@@ -155,6 +241,68 @@ pub fn set_epic_status(db: &mut Db, id: i64, status: i64) -> Result<Epic> {
 pub fn delete_epic(db: &mut Db, id: i64) -> Result<()> {
     if db.get(id)?.kind != EPIC {
         return Err(Error::Invalid(format!("item {id} is not an epic")));
+    }
+    db.delete(id)?;
+    Ok(())
+}
+
+/// Delete an epic and every task in it, subtasks included. Returns how many tasks went.
+pub fn delete_epic_and_tasks(db: &mut Db, id: i64) -> Result<usize> {
+    if db.get(id)?.kind != EPIC {
+        return Err(Error::Invalid(format!("item {id} is not an epic")));
+    }
+    let linked = db.list(&Query {
+        kind: Some(TASK.into()),
+        filters: vec![FieldFilter::new("epic", Op::Eq, id)],
+        ..Query::default()
+    })?;
+    let mut gone = 0;
+    for t in linked {
+        // A subtask goes with its parent, which may already have taken it.
+        match db.delete(t.id) {
+            Ok(n) => gone += n,
+            Err(Error::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    db.delete(id)?;
+    Ok(gone)
+}
+
+// ---- sections ------------------------------------------------------------------------------
+
+/// Add a section, last, to an epic.
+pub fn create_section(db: &mut Db, epic: i64, title: &str) -> Result<Section> {
+    if db.get(epic)?.kind != EPIC {
+        return Err(Error::Invalid(format!("item {epic} is not an epic")));
+    }
+    let mut new = NewItem::new(SECTION, title);
+    new.parent_id = Some(epic);
+    Ok(Section::from(&db.create(new)?))
+}
+
+/// Edit a section's title, description (`notes`) or colour.
+pub fn edit_section(db: &mut Db, id: i64, edit: &Edit) -> Result<Section> {
+    if db.get(id)?.kind != SECTION {
+        return Err(Error::Invalid(format!("item {id} is not a section")));
+    }
+    Ok(Section::from(&db.update(id, edit.to_patch())?))
+}
+
+pub fn rename_section(db: &mut Db, id: i64, title: &str) -> Result<Section> {
+    Ok(Section::from(&db.update(
+        id,
+        ItemPatch {
+            title: Some(title.into()),
+            ..ItemPatch::default()
+        },
+    )?))
+}
+
+/// Delete a section. Its tasks stay in the epic, in no section.
+pub fn delete_section(db: &mut Db, id: i64) -> Result<()> {
+    if db.get(id)?.kind != SECTION {
+        return Err(Error::Invalid(format!("item {id} is not a section")));
     }
     db.delete(id)?;
     Ok(())

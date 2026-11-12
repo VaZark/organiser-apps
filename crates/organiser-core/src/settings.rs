@@ -40,18 +40,21 @@ impl std::fmt::Display for ThemeChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StartView {
+    /// Every task a note, in a grid of cards.
     #[default]
+    Notes,
     Board,
     List,
 }
 
 impl StartView {
-    pub const ALL: [StartView; 2] = [Self::Board, Self::List];
+    pub const ALL: [StartView; 3] = [Self::Notes, Self::Board, Self::List];
 }
 
 impl std::fmt::Display for StartView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Notes => "Notes",
             Self::Board => "Kanban board",
             Self::List => "List",
         })
@@ -92,12 +95,29 @@ impl Default for TagSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TodoSettings {
     pub start_view: StartView,
     /// Start with finished tasks shown.
     pub show_closed: bool,
+    /// Open a task's details in a side drawer on wide windows. Off, or on a narrow window, the
+    /// details are a full page that fades in.
+    pub details_in_drawer: bool,
+    /// List subtasks as entries of their own, in every view. Off, only top-level tasks are
+    /// listed (their subtasks are still counted and shown in their details).
+    pub show_subtasks: bool,
+}
+
+impl Default for TodoSettings {
+    fn default() -> Self {
+        Self {
+            start_view: StartView::default(),
+            show_closed: false,
+            details_in_drawer: true,
+            show_subtasks: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

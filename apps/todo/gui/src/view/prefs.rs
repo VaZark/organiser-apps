@@ -12,19 +12,33 @@ impl App {
         let todo = &self.prefs.settings.todo;
         let page = column![
             EntryRow::select(
-                "Start on",
+                "Default view",
                 &StartView::ALL,
                 Some(todo.start_view),
                 Message::PrefStartView,
             )
-            .description("What Todo opens on: the kanban board or the list.")
+            .description("What Todo opens on: notes, the kanban board or the list.")
             .flat(true),
             EntryRow::switch(
                 "Show finished tasks",
                 todo.show_closed,
                 Message::PrefShowClosed
             )
-            .description("Start with finished tasks shown, on the board and in the list.")
+            .description("Start with finished tasks shown, in every view.")
+            .flat(true),
+            EntryRow::switch(
+                "Show subtasks",
+                todo.show_subtasks,
+                Message::PrefShowSubtasks
+            )
+            .description("List subtasks as entries of their own in every view. Off, only top-level tasks are listed.")
+            .flat(true),
+            EntryRow::switch(
+                "Open details in drawer",
+                todo.details_in_drawer,
+                Message::PrefDetailsDrawer
+            )
+            .description("Show a task's details beside the list. On narrow windows, or when off, they open as a full page.")
             .flat(true),
             self.sticky.row(Message::PrefStickyLink),
         ]

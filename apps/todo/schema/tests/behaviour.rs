@@ -808,7 +808,7 @@ fn schema_filters_pick_tasks_by_status_and_priority_and_asking_for_a_status_show
     let offered: Vec<_> = filterable(kind).iter().map(|f| f.name).collect();
     assert_eq!(
         offered,
-        ["status", "priority", "start", "due"],
+        ["pinned", "sticky", "status", "priority", "start", "due"],
         "epics have their own filter"
     );
     let mut db = db();
@@ -854,4 +854,165 @@ fn schema_filters_pick_tasks_by_status_and_priority_and_asking_for_a_status_show
 
 fn titles_of(v: &[Task]) -> Vec<String> {
     v.iter().map(|t| t.title.clone()).collect()
+}
+
+#[test]
+fn sections_belong_to_their_epic() {
+    use todo_schema::lifecycle::{create_section, delete_section, edit_section};
+    use todo_schema::views::sections;
+    let mut db = db();
+    let a = create_epic(&mut db, "A").unwrap();
+    let b = create_epic(&mut db, "B").unwrap();
+    let design = create_section(&mut db, a.id, "Design").unwrap();
+    let other = create_section(&mut db, b.id, "Other").unwrap();
+
+    let t = create(
+        &mut db,
+        &NewTask {
+            epic: Some(a.id),
+            section: Some(design.id),
+            ..NewTask::new("t")
+        },
+    )
+    .unwrap();
+    assert_eq!(t.section, Some(design.id));
+
+    // A section of another epic, or of none, is refused.
+    let wrong = Edit {
+        section: Some(Some(other.id)),
+        ..Edit::default()
+    };
+    assert!(edit(&mut db, t.id, &wrong).is_err());
+
+    // Progress counts the section's own tasks.
+    let s = &sections(&db, a.id).unwrap()[0];
+    assert_eq!((s.open, s.total), (1, 1));
+    set_status(&mut db, t.id, DONE).unwrap();
+    assert_eq!(sections(&db, a.id).unwrap()[0].progress(), 1.0);
+
+    // Colour and description are the section's own.
+    let e = Edit {
+        notes: Some("why".into()),
+        color: Some(Some("#112233".into())),
+        ..Edit::default()
+    };
+    let s = edit_section(&mut db, design.id, &e).unwrap();
+    assert_eq!((s.notes.as_str(), s.color.as_deref()), ("why", Some("#112233")));
+
+    // Moving the task to another epic leaves its old section behind.
+    let moved = Edit {
+        epic: Some(Some(b.id)),
+        ..Edit::default()
+    };
+    assert_eq!(edit(&mut db, t.id, &moved).unwrap().section, None);
+
+    // Deleting a section keeps its tasks in the epic.
+    let t2 = create(
+        &mut db,
+        &NewTask {
+            epic: Some(b.id),
+            section: Some(other.id),
+            ..NewTask::new("t2")
+        },
+    )
+    .unwrap();
+    delete_section(&mut db, other.id).unwrap();
+    let t2 = all(&db, &Filter::default()).into_iter().find(|t| t.id == t2.id).unwrap();
+    assert_eq!((t2.epic, t2.section), (Some(b.id), None));
+}
+
+#[test]
+fn reparenting_joins_the_new_parents_place() {
+    use todo_schema::lifecycle::{create_section, reparent};
+    let mut db = db();
+    let e = create_epic(&mut db, "E").unwrap();
+    let s = create_section(&mut db, e.id, "S").unwrap();
+    let home = create(
+        &mut db,
+        &NewTask {
+            epic: Some(e.id),
+            section: Some(s.id),
+            ..NewTask::new("home")
+        },
+    )
+    .unwrap();
+    let a = task(&mut db, "a");
+    let child = create(
+        &mut db,
+        &NewTask {
+            parent: Some(a.id),
+            ..NewTask::new("child")
+        },
+    )
+    .unwrap();
+
+    // Nested, it takes the parent's epic and section, and so do its subtasks.
+    let moved = reparent(&mut db, a.id, Some(home.id)).unwrap();
+    assert_eq!((moved.parent_id, moved.epic, moved.section), (Some(home.id), Some(e.id), Some(s.id)));
+    let all = all(&db, &Filter::default());
+    let child = all.iter().find(|t| t.id == child.id).unwrap();
+    assert_eq!((child.parent_id, child.epic, child.section), (Some(a.id), Some(e.id), Some(s.id)));
+
+    // Never under itself or its own subtasks.
+    assert!(reparent(&mut db, a.id, Some(a.id)).is_err());
+    assert!(reparent(&mut db, a.id, Some(child.id)).is_err());
+
+    // Out to the top level, it keeps its place.
+    let out = reparent(&mut db, a.id, None).unwrap();
+    assert_eq!((out.parent_id, out.epic), (None, Some(e.id)));
+}
+
+#[test]
+fn deleting_an_epic_keeps_or_deletes_its_tasks() {
+    use todo_schema::lifecycle::delete_epic_and_tasks;
+    let mut db = db();
+    let keep = create_epic(&mut db, "keep").unwrap();
+    let all_gone = create_epic(&mut db, "gone").unwrap();
+    for (epic, title) in [(keep.id, "k1"), (all_gone.id, "g1")] {
+        let t = create(
+            &mut db,
+            &NewTask {
+                epic: Some(epic),
+                ..NewTask::new(title)
+            },
+        )
+        .unwrap();
+        create(
+            &mut db,
+            &NewTask {
+                epic: Some(epic),
+                parent: Some(t.id),
+                ..NewTask::new(&format!("{title} sub"))
+            },
+        )
+        .unwrap();
+    }
+    // Keeping: the tasks stay, in no epic.
+    delete_epic(&mut db, keep.id).unwrap();
+    let stay = all(&db, &Filter::default());
+    assert!(stay.iter().filter(|t| t.title.starts_with('k')).all(|t| t.epic.is_none()));
+    assert_eq!(stay.len(), 4);
+    // Deleting: the tasks and their subtasks go too.
+    assert_eq!(delete_epic_and_tasks(&mut db, all_gone.id).unwrap(), 2);
+    let left = all(&db, &Filter::default());
+    assert_eq!(titles(&left), ["k1", "k1 sub"]);
+}
+
+#[test]
+fn pinned_tasks_come_first() {
+    use todo_schema::lifecycle::set_pinned;
+    let mut db = db();
+    let a = task(&mut db, "a");
+    let b = task(&mut db, "b");
+    let c = task(&mut db, "c");
+    assert_eq!(titles(&all(&db, &Filter::default())), ["a", "b", "c"]);
+    assert!(set_pinned(&mut db, c.id, true).unwrap().pinned);
+    assert_eq!(titles(&all(&db, &Filter::default())), ["c", "a", "b"]);
+    // Still in the person's order among the pinned.
+    set_pinned(&mut db, b.id, true).unwrap();
+    assert_eq!(titles(&all(&db, &Filter::default())), ["b", "c", "a"]);
+    set_pinned(&mut db, c.id, false).unwrap();
+    set_pinned(&mut db, b.id, false).unwrap();
+    assert_eq!(titles(&all(&db, &Filter::default())), ["a", "b", "c"]);
+    let _ = a;
 }

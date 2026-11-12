@@ -4,6 +4,7 @@
 //! board has a sidebar; the list has none.
 
 use organiser_ui::Element;
+use organiser_ui::components::icons;
 use organiser_ui::iad::prelude::*;
 use todo_schema::views::Scope;
 
@@ -19,7 +20,7 @@ impl App {
                 .icon(Icon::CardGrid)
                 .selected(everything),
             SidebarItem::new("Current tasks", Message::Current(true))
-                .icon(Icon::Calendar)
+                .icon(icons::calendar())
                 .selected(self.scope == Scope::Current),
         ];
         let mut first = true;
@@ -30,8 +31,13 @@ impl App {
         {
             let title = format!("{}  ({}/{})", s.epic.title, s.total - s.open, s.total);
             let mut item = SidebarItem::new(title, Message::SetEpic(Some(s.epic.id)))
-                .icon(Icon::Document)
+                .icon(icons::folder())
                 .selected(self.scope == Scope::All && self.epic_filter == Some(s.epic.id));
+            // The folder wears the epic's colour.
+            if let Some(c) = self.epic_color(s.epic.id) {
+                item = item.icon_color(c);
+            }
+
             if first {
                 item = item.divider_above();
                 first = false;

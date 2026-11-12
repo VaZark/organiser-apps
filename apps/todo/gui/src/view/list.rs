@@ -7,10 +7,12 @@ use organiser_ui::Element;
 use organiser_ui::components::chip::{chip, more, pill};
 use organiser_ui::components::dot::{color_from_hex, dot_label};
 use organiser_ui::components::empty::empty;
+use organiser_ui::components::icons;
 use organiser_ui::components::row::selectable;
 use organiser_ui::components::tag_groups::tag_groups;
 use organiser_ui::components::tag_query::count as tag_count;
 use organiser_ui::iad::prelude::*;
+use organiser_ui::iad::primitives::drag::DropHint;
 use organiser_ui::iad::primitives::tag_groups::GroupEvent;
 use organiser_ui::primitives::expand::plain_rows;
 use organiser_ui::primitives::tags::collapse;
@@ -19,6 +21,7 @@ use organiser_ui::widgets::schema_filters::{Choice, active_filters};
 use todo_schema::due::{Bucket, bucket, label};
 use todo_schema::priority::Priority;
 use todo_schema::task::Task;
+use todo_schema::views::Scope;
 
 use crate::app::{App, Message};
 
@@ -43,41 +46,172 @@ impl App {
             };
             empty(Icon::Check, title, text)
         } else {
-            boxed_list(rows.iter().map(|r| self.task_row(r, stacked)))
+            match self.epic_filter.filter(|_| self.scope == Scope::All) {
+                Some(epic) => self.epic_sections_list(epic, &rows, stacked),
+                None if self.scope == Scope::All => self.pinned_and_rest(&rows, stacked),
+                None => self.open_ground(rows.iter().map(|r| self.dnd_row(r, stacked)).collect()),
+            }
         };
         let mut col = column![].spacing(12).width(Length::Fill);
+        if let Some(epic) = self.epic_filter.filter(|_| self.scope == Scope::All) {
+            col = col.push(self.epic_header(epic));
+        }
         if let Some(strip) = self.active_filters() {
             col = col.push(strip);
         }
         col.push(body).into()
     }
 
+    /// The top of an epic's page: its colour, name and how far along it is, with a button to edit
+    /// it and a menu to add a section.
+    pub(super) fn epic_header(&self, id: i64) -> Element<'_, Message> {
+        let Some(s) = self.epics.iter().find(|s| s.epic.id == id) else {
+            return space().into();
+        };
+        let mut title = row![icons::tinted(
+            icons::folder(),
+            22.0,
+            s.epic.color.as_deref().and_then(color_from_hex),
+        )]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        title = title.push(text(s.epic.title.clone()).size(20).width(Length::Fill));
+        title = title.push(tooltip(
+            icon_button(Icon::Edit).on_press(Message::EditEpic(id)),
+            "Edit epic",
+            TooltipPosition::Bottom,
+        ));
+        title = title.push(
+            menu_button(
+                Icon::ViewMore,
+                Menu::new("Epic").section([MenuItem::action(
+                    "Add section",
+                    Message::NewSection(id),
+                )]),
+            )
+            .tooltip("More"),
+        );
+        column![
+            title,
+            progress_bar(0.0..=1.0, s.progress()),
+            caption(format!("{} of {} tasks done", s.total - s.open, s.total)),
+        ]
+        .spacing(6)
+        .padding([4, 4])
+        .into()
+    }
+
+    /// An epic's rows under a collapsible header per section: the tasks in no section first, then
+    /// each section in order, empty ones too. A subtask goes with its parent.
+    fn epic_sections_list<'a>(
+        &'a self,
+        epic: i64,
+        rows: &[Row<'a, Task>],
+        stacked: bool,
+    ) -> Element<'a, Message> {
+        let sections = self
+            .epic_sections
+            .get(&epic)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if sections.is_empty() {
+            return self.open_ground(rows.iter().map(|r| self.dnd_row(r, stacked)).collect());
+        }
+        // Which group each top-level row opens: `None` is the tasks in no section.
+        let mut groups: Vec<(Option<i64>, Vec<Element<'a, Message>>)> = std::iter::once(None)
+            .chain(sections.iter().map(|s| Some(s.section.id)))
+            .map(|id| (id, Vec::new()))
+            .collect();
+        let mut at = 0;
+        for r in rows {
+            if r.depth == 0 {
+                let want = r
+                    .value
+                    .section
+                    .filter(|s| sections.iter().any(|x| x.section.id == *s));
+                at = groups.iter().position(|(id, _)| *id == want).unwrap_or(0);
+            }
+            // Hold a task and move to carry it to another section; its subtasks go with it.
+            groups[at].1.push(self.dnd_row(r, stacked));
+        }
+        let dragging = self.dragging.is_some();
+        let mut col = column![].spacing(16).width(Length::Fill);
+        for (id, items) in groups {
+            let Some(sec) = id.and_then(|id| sections.iter().find(|s| s.section.id == id)) else {
+                // The tasks in no section need no header. While dragging there is always a
+                // place to drop one, to take it out of its section.
+                if !items.is_empty() {
+                    col = col.push(
+                        drop_zone(boxed_list(items), dragging, Message::DropInSection(None))
+                            .hint(DropHint::new("Make a separate task, in no section")),
+                    );
+                } else if dragging {
+                    col = col.push(drop_zone(
+                        container(caption("Drop here for no section"))
+                            .padding(12)
+                            .width(Length::Fill),
+                        true,
+                        Message::DropInSection(None),
+                    )
+                    .hint(DropHint::new("Make a separate task, in no section")));
+                }
+                continue;
+            };
+            let sid = sec.section.id;
+            let folded = self.folded_sections.contains(&sid);
+            let header = row![
+                icon_button(if folded { Icon::GoNext } else { Icon::GoDown })
+                    .on_press(Message::SectionFold(sid)),
+                // Read only: the name, and under it what the section is for, small.
+                {
+                    let mut name = column![text(sec.section.title.clone()).size(15)].spacing(1);
+                    if let Some(line) = sec.section.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
+                        name = name.push(text(ellipsize(line, 110))
+                                .size(11)
+                                .style(organiser_ui::iad::styles::text::dim));
+                    }
+                    container(name).width(Length::Fill)
+                },
+                caption(format!("{}/{}", sec.total - sec.open, sec.total)),
+                tooltip(
+                    icon_button(Icon::Edit).on_press(Message::Select(sid)),
+                    "Edit section",
+                    TooltipPosition::Bottom,
+                ),
+                tooltip(
+                    icon_button(Icon::ListAdd).on_press(Message::NewInSection(sid)),
+                    "Add a task to this section",
+                    TooltipPosition::Bottom,
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+            // The header and its tasks are one place to drop, folded or not.
+            let mut group = column![header].spacing(8);
+            if !folded {
+                group = group.push(if items.is_empty() {
+                    caption("No tasks in this section").into()
+                } else {
+                    boxed_list(items)
+                });
+            }
+            col = col.push(
+                drop_zone(group, dragging, Message::DropInSection(Some(sid)))
+                    .hint(DropHint::new(format!("Move to {}", sec.section.title))),
+            );
+        }
+        col.into()
+    }
+
     /// The filters that are on, each a chip that removes itself when pressed.
-    fn active_filters(&self) -> Option<Element<'_, Message>> {
+    pub(super) fn active_filters(&self) -> Option<Element<'_, Message>> {
         if self.filter_count() == 0 {
             return None;
         }
-        let removable = |label: String, on_press: Message| -> Element<'_, Message> {
-            flat_button(
-                row![text(label), Icon::WindowClose.view(12.0)]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-            )
-            .on_press(on_press)
-            .into()
-        };
         let mut tag_line: Option<Element<'_, Message>> = None;
         let mut chips = row![icon_button(Icon::Filter).on_press(Message::OpenFilter)]
             .spacing(4)
             .align_y(iced::Alignment::Center);
-        if let Some(id) = self.epic_filter {
-            let name = self
-                .epic_titles
-                .get(&id)
-                .cloned()
-                .unwrap_or_else(|| "Epic".into());
-            chips = chips.push(removable(name, Message::ToggleEpic(id)));
-        }
         // The groups: alternatives, with a comma between them.
         if tag_count(&self.tag_groups) > 0 {
             let groups: Vec<Vec<String>> = self.tag_groups.groups().to_vec();
@@ -111,6 +245,64 @@ impl App {
             Some(t) => column![chips.wrap(), t].spacing(6).into(),
             None => chips.wrap().into(),
         })
+    }
+
+    /// A task row that can be picked up and dropped on: onto another task it becomes that task's
+    /// subtask. Always wrapped the same way, so a drag in progress keeps its place in the tree.
+    fn dnd_row<'a>(&'a self, r: &Row<'a, Task>, stacked: bool) -> Element<'a, Message> {
+        let id = r.value.id;
+        let source = drag_source(self.task_row(r, stacked), Message::DragStart(id));
+        let active = self.dragging.is_some();
+        if self.drag_blocked.contains(&id) {
+            // Over itself or its own subtasks nothing happens, and nothing behind it does either.
+            return drop_zone(source, active, Message::DragEnd).into();
+        }
+        drop_zone(source, active, Message::DropOnTask(id))
+            .hint(
+                DropHint::new(format!("Make a subtask of {}", ellipsize(&r.value.title, 28)))
+                    .shrink(),
+            )
+            .into()
+    }
+
+    /// `rows` with the pinned tasks in a "Pinned" section on top, under their own heading, and
+    /// the rest under "Others". A task's subtasks stay with it. Without pinned tasks, just the
+    /// list.
+    fn pinned_and_rest<'a>(&'a self, rows: &[Row<'a, Task>], stacked: bool) -> Element<'a, Message> {
+        let (mut pinned, mut rest) = (Vec::new(), Vec::new());
+        let mut in_pinned = false;
+        for r in rows {
+            if r.depth == 0 {
+                in_pinned = r.value.pinned;
+            }
+            let row = self.dnd_row(r, stacked);
+            if in_pinned {
+                pinned.push(row);
+            } else {
+                rest.push(row);
+            }
+        }
+        if pinned.is_empty() {
+            return self.open_ground(rest);
+        }
+        let mut col = column![caption("Pinned"), self.open_ground(pinned)]
+            .spacing(8)
+            .width(Length::Fill);
+        if !rest.is_empty() {
+            col = col.push(caption("Others")).push(self.open_ground(rest));
+        }
+        col.into()
+    }
+
+    /// `rows` as one list that is also open ground: dropped on it, a task leaves its parent.
+    fn open_ground<'a>(&'a self, items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+        drop_zone(
+            boxed_list(items),
+            self.dragging.is_some(),
+            Message::DropOut,
+        )
+        .hint(DropHint::new("Make a separate task"))
+        .into()
     }
 
     fn task_row<'a>(&'a self, r: &Row<'a, Task>, stacked: bool) -> Element<'a, Message> {
@@ -171,11 +363,22 @@ impl App {
         // A row is one button (see `selectable`), so the title is just text that fills the line.
         let title = title.width(Length::Fill).padding([6, 8]);
 
-        // On the side, always when set: the epic, the due date, then the person's own tags.
+        // On the side, always when set: the epic, the person's own tags, then the due date, last.
         let mut side = row![].spacing(4);
-        if let Some(e) = t.epic.and_then(|id| self.epic_titles.get(&id)) {
-            side = side.push(pill(e, Role::Warning));
+        if let Some(flags) = self.flags_row(t) {
+            side = side.push(flags);
         }
+        if let Some(e) = t.epic.and_then(|id| self.epic_titles.get(&id)) {
+            side = side.push(icons::epic_chip(e, t.epic.and_then(|id| self.epic_color(id))));
+        }
+        let tags = collapse(&t.tags, 2);
+        for g in &tags.shown {
+            side = side.push(chip(g));
+        }
+        if tags.more > 0 {
+            side = side.push(more(tags.more));
+        }
+        // The date is always last.
         if let Some(d) = t.due {
             let role = match (closed, bucket(d, self.today)) {
                 (true, _) => Role::Success,
@@ -184,13 +387,6 @@ impl App {
                 _ => Role::Accent,
             };
             side = side.push(pill(&label(d, self.today), role));
-        }
-        let tags = collapse(&t.tags, 2);
-        for g in &tags.shown {
-            side = side.push(chip(g));
-        }
-        if tags.more > 0 {
-            side = side.push(more(tags.more));
         }
 
         // Beside the title when there is room for both. Otherwise the chips go under it and wrap

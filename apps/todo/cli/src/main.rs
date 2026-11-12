@@ -8,7 +8,7 @@ use organiser_cli_kit::{Extension, Output};
 use organiser_engine::{Db, Error, Node, Result, TagFilter};
 use serde_json::json;
 use todo_schema::due::label;
-use todo_schema::lifecycle::{create_epic, delete_epic, set_status};
+use todo_schema::lifecycle::{create_epic, create_section, delete_epic, delete_section, reparent, set_status};
 use todo_schema::status::Statuses;
 use todo_schema::statuses::{self, StatusEdit, ensure_defaults};
 use todo_schema::task::{EpicSummary, Task};
@@ -93,6 +93,8 @@ fn filter(m: &ArgMatches, scope: Scope) -> Filter {
         },
         epic: m.try_get_one::<i64>("epic").ok().flatten().copied(),
         include_archived: false,
+        hide_subtasks: false,
+        sort: Default::default(),
         fields: Default::default(),
     }
 }
@@ -197,6 +199,29 @@ impl Extension for Todo {
             Command::new("epic-rm")
                 .about("Delete an epic; its tasks stay")
                 .arg(id()),
+            Command::new("section-new")
+                .about("Add a section to an epic")
+                .arg(id().help("the epic"))
+                .arg(Arg::new("title").required(true)),
+            Command::new("section-rm")
+                .about("Delete a section; its tasks stay in the epic")
+                .arg(id()),
+            Command::new("move")
+                .about("Make a task a subtask of another, or (--out) a task of its own")
+                .arg(id())
+                .arg(
+                    Arg::new("under")
+                        .long("under")
+                        .value_parser(clap::value_parser!(i64))
+                        .help("the task to nest it under"),
+                )
+                .arg(
+                    Arg::new("out")
+                        .long("out")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("under")
+                        .help("take it out of its parent"),
+                ),
             Command::new("status")
                 .about("Put a task in a status, by name")
                 .arg(id())
@@ -322,6 +347,24 @@ impl Extension for Todo {
                     }
                 }),
             ),
+            "section-new" => Some(
+                create_section(db, id, m.get_one::<String>("title").map_or("", String::as_str))
+                    .map(|s| Output::Custom {
+                        human: format!("created section {} ({})", s.id, s.title),
+                        json: json!(s),
+                    }),
+            ),
+            "section-rm" => {
+                Some(delete_section(db, id).map(|()| Output::Message("deleted section".into())))
+            }
+            "move" => Some({
+                let under = m.get_one::<i64>("under").copied();
+                if under.is_none() && !m.get_flag("out") {
+                    Err(Error::Invalid("give --under TASK or --out".into()))
+                } else {
+                    reparent(db, id, under).map(|t| tasks_out(&[t], &st))
+                }
+            }),
             "epic-rm" => Some(delete_epic(db, id).map(|()| Output::Message("deleted epic".into()))),
             "statuses" => Some(Ok(statuses_out(&st))),
             "status-new" => Some(

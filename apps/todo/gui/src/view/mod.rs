@@ -1,15 +1,17 @@
-//! The window. There are two views of the same tasks, switched from the header:
+//! The window. There are three views of the same tasks, switched from the menu:
 //!
-//! * the **list**: a header over the task list, with no sidebar;
-//! * the **board**: a kanban board with a sidebar for All, Closed, epics and tags.
+//! * the **notes**: every task a note, in a grid of cards (the default);
+//! * the **board**: a kanban board, a column per status;
+//! * the **list**: the nested task list.
 //!
-//! Both open a task's details in a pane that slides in from the right, and both open the filter
-//! from the search.
+//! All have a sidebar of All, Current tasks and epics, open a task's details beside or over
+//! them, and open the filter from the search.
 
 mod board;
 mod details;
 mod filter;
 mod list;
+mod notes;
 mod prefs;
 mod sidebar;
 mod statuses;
@@ -21,11 +23,12 @@ use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::shortcut::Shortcuts;
 use organiser_ui::iad::windows::{Chrome, State};
-use organiser_ui::widgets::details_dock::details_dock;
+use organiser_ui::widgets::details_dock::{details_dock, details_drawer};
 use organiser_ui::widgets::responsive_dialog;
+use todo_schema::sort::SortKey;
 use todo_schema::views::Scope;
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, View};
 
 /// Below this window width the filter is a full-screen sheet rather than a dialog.
 const TWO_PANES: f32 = 900.0;
@@ -48,7 +51,9 @@ impl App {
                     .then(|| (self.filter_panel(), Message::CloseFilter))
             };
             let window = self.shell(size.width);
-            responsive_dialog::present(window, modal, narrow, size, radius, false)
+            let page = responsive_dialog::present(window, modal, narrow, size, radius, false);
+            // The question about an epic's tasks is a small alert over everything.
+            present_dialog(page, self.epic_delete_dialog(), Some(Message::EpicDeleteCancel), radius)
         })
         .into();
         let framed = self.chrome().frame(body, Message::Window);
@@ -66,6 +71,25 @@ impl App {
             ),
             None => toast_stack(framed, Vec::new()),
         }
+    }
+
+    /// "Delete this epic?": what becomes of its tasks. `None` unless one is waiting for the answer.
+    fn epic_delete_dialog(&self) -> Option<Element<'_, Message>> {
+        let id = self.confirm_epic_delete?;
+        let summary = self.epics.iter().find(|s| s.epic.id == id)?;
+        let n = summary.total;
+        Some(
+            AlertDialog::new("Delete this epic?")
+                .body(format!(
+                    "“{}” has {n} task{}. Keep them, without an epic, or delete them with it?",
+                    summary.epic.title,
+                    if n == 1 { "" } else { "s" }
+                ))
+                .response("Cancel", ResponseAppearance::Default, Message::EpicDeleteCancel)
+                .response("Keep tasks", ResponseAppearance::Suggested, Message::EpicDeleteKeep)
+                .response("Delete tasks", ResponseAppearance::Destructive, Message::EpicDeleteAll)
+                .into(),
+        )
     }
 
     /// The filter button at the end of the search entry, with how many filters are on.
@@ -114,14 +138,15 @@ impl App {
         }
         // New task: the edit page, empty.
         head = head.pack_start(new_or_back(
-            self.details.is_some(),
+            // The drawer leaves the header alone: the list is still there, so no back button.
+            self.details.is_some() && !self.in_drawer(window),
             "New task (Ctrl+N)",
             Message::New,
             Message::CloseDetails,
         ));
         let start_buttons = usize::from(start_present) + 1;
         // Search and the menu are all that is left at the end: everything else is in the menu.
-        let end_buttons = 2;
+        let end_buttons = 3;
         if self.search.is_open() {
             head = head.pack_start(search::balance(end_buttons, start_buttons, room));
         }
@@ -135,33 +160,61 @@ impl App {
         } else {
             head.title(self.heading())
         };
-        // From the window controls inwards: the menu, then search.
+        // From the window controls inwards: the menu, then search, then the order beside it.
         head.pack_end(self.actions_menu())
             .pack_end(search::button(Message::ToggleSearch))
+            .pack_end(self.sort_menu())
     }
 
-    /// The view settings and Preferences: everything the header does not need a button for.
+    /// The order of the tasks: a button beside the search, lit while it is not the manual one.
+    fn sort_menu(&self) -> Element<'_, Message> {
+        let by = Menu::new("Sort by")
+            .check_style(MenuCheckStyle::Mark)
+            .section(
+                SortKey::ALL
+                    .map(|k| MenuItem::check(k.label(), self.sort == k, Message::SetSort(k))),
+            );
+        menu_button(Icon::Sort, by)
+            .tooltip(if self.sort == SortKey::Manual {
+                "Sort".to_string()
+            } else {
+                format!("Sorted by {}", self.sort.label().to_lowercase())
+            })
+            .into()
+    }
+
+    /// The view and what it shows, and Preferences: everything the header does not need a button
+    /// for. The views are a submenu; what a view shows are switches.
     fn actions_menu(&self) -> Element<'_, Message> {
-        let mut view = vec![
-            MenuItem::check("Kanban board", self.kanban, Message::Kanban(!self.kanban)),
-            MenuItem::check(
+        let views = Menu::new("View")
+            .check_style(MenuCheckStyle::Mark)
+            .section(
+                View::ALL
+                    .map(|v| MenuItem::check(v.label(), self.view == v, Message::SetView(v))),
+            );
+        let mut shows = vec![
+            MenuItem::switch(
                 "Show closed tasks",
                 self.show_closed,
                 Message::ShowClosed(!self.show_closed),
             ),
+            MenuItem::switch(
+                "Show subtasks",
+                self.show_subtasks,
+                Message::ShowSubtasks(!self.show_subtasks),
+            ),
         ];
-        if !self.kanban {
+        if self.view == View::List {
             let current = self.scope == Scope::Current;
-            let flat = MenuItem::check("Flat list", self.is_flat(), Message::Flat(!self.flat));
-            view.push(if current { flat.disabled() } else { flat });
+            let flat = MenuItem::switch("Flat list", self.is_flat(), Message::Flat(!self.flat));
+            shows.push(if current { flat.disabled() } else { flat });
         }
         menu_button(
             Icon::OpenMenu,
-            Menu::new("Menu").section(view).section([MenuItem::action(
-                "Preferences",
-                Message::OpenPrefs,
-            )
-            .accel("Ctrl+,")]),
+            Menu::new("Menu")
+                .section([MenuItem::submenu("View", views)])
+                .section(shows)
+                .section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]),
         )
         .tooltip("Menu")
         .open_initially(self.menu_open)
@@ -169,8 +222,24 @@ impl App {
     }
 
     /// `base` with the details of the selected task fading in over all of it.
-    fn over_details<'a>(&'a self, base: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-        details_dock(base, self.details.is_some().then(|| self.details_pane()))
+    ///
+    /// On a wide window, with the setting on, they are a drawer beside the list instead.
+    fn over_details<'a>(
+        &'a self,
+        base: impl Into<Element<'a, Message>>,
+        width: f32,
+    ) -> Element<'a, Message> {
+        let pane = self.details.is_some().then(|| self.details_pane());
+        if self.in_drawer(width) {
+            details_drawer(base, pane, Message::CloseDetails)
+        } else {
+            details_dock(base, pane)
+        }
+    }
+
+    /// Whether the details are a drawer: the setting is on and the window is wide enough.
+    fn in_drawer(&self, width: f32) -> bool {
+        self.prefs.settings.todo.details_in_drawer && width >= TWO_PANES
     }
 
     // ---- the window: a sidebar of All, current tasks and epics, beside the board or the list ----
@@ -196,14 +265,14 @@ impl App {
         };
         let head = self.header((collapsed, true), start, room, width);
         // The details cover the content rather than share its row, so it has the whole width.
-        let page: Element<'_, Message> = if self.kanban {
-            self.board_page(width)
-        } else {
-            page(self.list_page(width < STACK_BELOW))
-                .maximum_size(820.0)
-                .into()
+        let page: Element<'_, Message> = match self.view {
+            View::Notes => self.notes_page(room),
+            View::Board => self.board_page(width),
+            View::List => page(self.list_page(width < STACK_BELOW))
+                .maximum_size(1000.0)
+                .into(),
         };
-        let content = toolbar_view(self.over_details(page)).top_bar(head);
+        let content = toolbar_view(self.over_details(page, width)).top_bar(head);
         NavigationSplitView::new(side, content)
             .adapt(width)
             .show_sidebar(self.drawer_open)
@@ -214,10 +283,16 @@ impl App {
 
     /// The title of what the window shows.
     pub(crate) fn heading(&self) -> String {
-        match (self.scope, self.kanban) {
+        if self.scope == Scope::All
+            && let Some(title) = self.epic_filter.and_then(|id| self.epic_titles.get(&id))
+        {
+            return title.clone();
+        }
+        match (self.scope, self.view) {
             (Scope::Current, _) => "Current tasks".into(),
-            (Scope::All, true) => "Board".into(),
-            (Scope::All, false) => "All tasks".into(),
+            (Scope::All, View::Notes) => "Notes".into(),
+            (Scope::All, View::Board) => "Board".into(),
+            (Scope::All, View::List) => "All tasks".into(),
         }
     }
 }

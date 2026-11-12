@@ -17,13 +17,15 @@ pub const COLUMN_WIDTH: f32 = 260.0;
 const WASH: f32 = 0.07;
 
 /// `width` is `FillPortion(1)` to share the board equally, or `Fixed(COLUMN_WIDTH)` to scroll.
+/// `count` is how many cards there are, shown by the heading; `cards` may also hold headings of
+/// groups of them.
 pub fn board_column<'a, M: Clone + 'a>(
     title: &str,
     accent: Option<Color>,
+    count: usize,
     cards: Vec<Element<'a, M>>,
     width: Length,
 ) -> Element<'a, M> {
-    let count = cards.len();
     let mut head = row![].spacing(8).align_y(Alignment::Center);
     if let Some(c) = accent {
         head = head.push(dot(c, 10.0));
@@ -31,7 +33,7 @@ pub fn board_column<'a, M: Clone + 'a>(
     let head = head
         .push(heading(title.to_string()))
         .push(caption(count.to_string()));
-    let body: Element<'a, M> = if cards.is_empty() {
+    let body: Element<'a, M> = if count == 0 {
         caption("Nothing here").into()
     } else {
         column(cards).spacing(10).width(Length::Fill).into()

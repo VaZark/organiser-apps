@@ -41,3 +41,32 @@ pub fn details_dock<'a, M: Clone + 'a>(
         .fade(true)
         .into()
 }
+
+/// How wide the details drawer is: a form, a little wider than comfortable to read in.
+pub const DRAWER_WIDTH: f32 = 440.0;
+
+/// `base` with `pane` in a drawer on the right, sliding in over it, or just `base` when `pane` is
+/// `None`. A click outside the drawer sends `on_outside`.
+pub fn details_drawer<'a, M: Clone + 'a>(
+    base: impl Into<Element<'a, M>>,
+    pane: Option<Element<'a, M>>,
+    on_outside: M,
+) -> Element<'a, M> {
+    let open = pane.is_some();
+    let surface: Element<'a, M> = match pane {
+        Some(p) => container(p)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(window)
+            .into(),
+        None => space().into(),
+    };
+    Dock::new(base, surface)
+        .open(open)
+        .side(Side::Right)
+        .size(DockSize::Fixed(DRAWER_WIDTH))
+        .mode(DockMode::Overlay)
+        .scrim(true)
+        .on_outside(on_outside)
+        .into()
+}
