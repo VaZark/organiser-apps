@@ -1,0 +1,18 @@
+[package]
+name = "sticky-gui"
+description = "Sticky Notes: desktop stickies for items of the linked organiser apps."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sticky-gui"
+path = "src/main.rs"
+
+[dependencies]
+iced.workspace = true
+organiser-core.workspace = true
+organiser-engine.workspace = true
+organiser-ui.workspace = true
+organiser-sticky.workspace = true
+sticky-engine.workspace = true

@@ -34,6 +34,71 @@ impl Db {
         Ok(Self { conn, schema })
     }
 
+    /// Open an existing database without knowing its app's schema, for a program that only shows and edits
+    /// one text field of items it does not own (Sticky Notes). Use [`Db::flagged_loose`] and
+    /// [`Db::update_loose`] on it; the typed calls know no kinds and fail.
+    pub fn open_loose(path: impl AsRef<Path>) -> Result<Self> {
+        static NONE: Schema = Schema { kinds: &[] };
+        let conn = connection::open_existing(path.as_ref())?;
+        // Not migrated: this is somebody else's database, which must already be in the engine's
+        // layout (an `items` table and its search index), or it is left alone.
+        let tables: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('items', 'items_fts')",
+            [],
+            |r| r.get(0),
+        )?;
+        if tables != 2 {
+            return invalid("not an organiser database (no items table)");
+        }
+        Ok(Self {
+            conn,
+            schema: &NONE,
+        })
+    }
+
+    /// Items of `kind`, not archived, whose bool field `flag` is true.
+    pub fn flagged_loose(&self, kind: &str, flag: &str) -> Result<Vec<Item>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {cols} FROM items WHERE kind = ?1 AND archived = 0 AND json_extract(fields, ?2) = 1 ORDER BY updated DESC",
+            cols = items::COLUMNS
+        ))?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params![kind, format!("$.{flag}")],
+                items::from_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        items::with_tags(&self.conn, rows)
+    }
+
+    /// Change an item's title or fields without checking them against a schema. The search index
+    /// is rebuilt from the title and the string fields named in `searchable`.
+    pub fn update_loose(&mut self, id: i64, patch: ItemPatch, searchable: &[&str]) -> Result<Item> {
+        let mut item = self.get(id)?;
+        if let Some(t) = patch.title {
+            item.title = t.trim().to_string();
+            if item.title.is_empty() {
+                return invalid("title must not be empty");
+            }
+        }
+        for (k, v) in patch.fields {
+            if v.is_null() {
+                item.fields.remove(&k);
+            } else {
+                item.fields.insert(k, v);
+            }
+        }
+        let text: Vec<String> = searchable
+            .iter()
+            .filter_map(|f| item.fields.get(*f)?.as_str().map(String::from))
+            .collect();
+        let tx = self.conn.transaction()?;
+        items::write(&tx, id, &item.title, &item.fields, item.archived, now())?;
+        fts::index(&tx, id, &item.title, &text.join("\n"))?;
+        tx.commit()?;
+        self.get(id)
+    }
+
     pub fn schema(&self) -> &'static Schema {
         self.schema
     }

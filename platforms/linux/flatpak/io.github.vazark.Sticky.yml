@@ -1,0 +1,45 @@
+# Local Flatpak build of the Sticky Notes GUI (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Sticky
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: sticky-gui-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  # The databases of the apps it can link. The launcher points XDG_DATA_HOME at the host's, since
+  # the sandbox's own would hide them.
+  - --filesystem=xdg-data/notes
+  - --filesystem=xdg-data/todo
+  - --filesystem=xdg-data/faves
+  # The list of linked apps, shared by every app.
+  - --filesystem=xdg-config/organiser
+  # "Start on login": an autostart entry in the host's ~/.config/autostart.
+  - --filesystem=xdg-config/autostart
+  # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
+  - --filesystem=xdg-config/iced-adaptive-design:ro
+modules:
+  - name: sticky
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/sticky/cargo
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p sticky-gui --features organiser-engine/bundled
+      - install -Dm755 target/release/sticky-gui /app/bin/sticky-gui
+      - install -Dm755 platforms/linux/flatpak/sticky-gui-launch /app/bin/sticky-gui-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Sticky.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Sticky.svg
+      - mkdir -p /app/share/applications && target/release/sticky-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=sticky-gui-launch/' > /app/share/applications/io.github.vazark.Sticky.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Sticky.metainfo.xml /app/share/metainfo/io.github.vazark.Sticky.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, build-dir]

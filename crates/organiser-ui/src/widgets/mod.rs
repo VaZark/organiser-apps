@@ -8,6 +8,7 @@ pub mod markdown_field;
 pub mod preferences;
 pub mod responsive_dialog;
 pub mod schema_filters;
+pub mod sticky_link;
 pub mod tag_editor;
 pub mod tag_filter;
 pub mod tag_manager;

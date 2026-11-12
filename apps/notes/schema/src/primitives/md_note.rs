@@ -38,6 +38,7 @@ mod tests {
             body: body.into(),
             color: None,
             pinned: false,
+            sticky: false,
             archived: false,
             trashed: None,
             tags: vec![],

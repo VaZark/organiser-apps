@@ -50,6 +50,8 @@ pub struct Entry {
     /// Notes, or the person's opinion.
     pub notes: String,
     pub favorite: bool,
+    /// Shown as a desktop sticky by the Sticky app.
+    pub sticky: bool,
     /// 1 to 5 stars; only in a list that is rated.
     pub rating: Option<u8>,
     pub tags: Vec<String>,
@@ -66,6 +68,7 @@ impl From<&Item> for Entry {
             title: i.title.clone(),
             notes: text(i, "notes"),
             favorite: flag(i, "favorite"),
+            sticky: flag(i, "sticky"),
             rating: i
                 .fields
                 .get("rating")

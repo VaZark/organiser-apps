@@ -2,6 +2,7 @@
 
 pub mod paths;
 pub mod settings;
+pub mod sticky;
 
 /// Static identity of one app. Shared by its engine schema, CLI, GUI and packaging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

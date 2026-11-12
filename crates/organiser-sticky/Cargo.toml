@@ -1,0 +1,19 @@
+[package]
+name = "organiser-sticky"
+description = "Shared sticky-notes infra: the link registry, the per-item sticky flag, and finding the Sticky app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+organiser-core.workspace = true
+organiser-engine.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+toml = "0.8"
+
+[dev-dependencies]
+notes-schema.workspace = true
+todo-schema.workspace = true
+faves-schema.workspace = true
+rusqlite.workspace = true

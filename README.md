@@ -11,6 +11,7 @@ Tags come from [weaver](https://github.com/VaZark/weaver).
 | **Faves**                     | Working: lists of anything you track, with optional ratings and notes, CLI and GUI                |
 | **Notes** (Keep-style)         | Working: coloured cards with Markdown, pinning, archive and trash, CLI and GUI (packaging planned) |
 | **Recipes**                   | Working: ingredients (optional or required), ordered steps, photos, read mode, a log of what you cooked, a fridge with expiry dates, shopping lists from recipes and portions that you can copy into Todo, CLI and GUI |
+| **Sticky Notes**              | Working: shows items of Notes, Todo, Faves and any compliant-app as coloured desktop stickies. It holds no data of its own, only a list of linked apps and flags per entry. Sticky Notes decides whether a sticky is a desktop window or only listed in its own window. GUI and CLI (`sticky`); it can start on login |
 
 ## Quick start
 

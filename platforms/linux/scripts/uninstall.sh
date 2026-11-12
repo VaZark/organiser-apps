@@ -1,7 +1,7 @@
 #!/bin/sh
 # Removes what install.sh put in place. Your data is left alone.
 #
-#   uninstall.sh [--prefix PREFIX] [todo|faves|notes|recipes|all]...
+#   uninstall.sh [--prefix PREFIX] [todo|faves|notes|recipes|sticky|all]...
 #
 # PREFIX defaults to ~/.local; no app (or `all`) means every app. Safe to run in parallel.
 set -eu
@@ -11,12 +11,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --prefix=*) prefix=${1#--prefix=}; shift ;;
-    all) apps="$apps todo faves notes recipes"; shift ;;
-    todo|faves|notes|recipes) apps="$apps $1"; shift ;;
-    *) echo "usage: uninstall.sh [--prefix PREFIX] [todo|faves|notes|recipes|all]..." >&2; exit 2 ;;
+    all) apps="$apps todo faves notes recipes sticky"; shift ;;
+    todo|faves|notes|recipes|sticky) apps="$apps $1"; shift ;;
+    *) echo "usage: uninstall.sh [--prefix PREFIX] [todo|faves|notes|recipes|sticky|all]..." >&2; exit 2 ;;
   esac
 done
-[ -n "$apps" ] || apps="todo faves notes recipes"
+[ -n "$apps" ] || apps="todo faves notes recipes sticky"
 
 for app in $apps; do
   case "$app" in
@@ -24,6 +24,7 @@ for app in $apps; do
     faves) id=io.github.vazark.Faves ;;
     notes) id=io.github.vazark.Notes ;;
     recipes) id=io.github.vazark.Recipes ;;
+    sticky) id=io.github.vazark.Sticky ;;
   esac
   rm -f "$prefix/bin/$app-gui" "$prefix/bin/$app" \
     "$prefix/share/icons/hicolor/scalable/apps/$id.svg" \

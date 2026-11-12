@@ -7,13 +7,15 @@ use crate::app::{App, Message};
 
 impl App {
     pub(super) fn prefs_panel(&self, wide: bool) -> Element<'_, Message> {
-        let page = EntryRow::switch(
+        let compact = EntryRow::switch(
             "Compact lines",
             self.prefs.settings.faves.compact,
             Message::PrefCompact,
         )
         .description("Show one line per entry instead of cards.")
         .flat(true);
+        let page =
+            iced::widget::column![compact, self.sticky.row(Message::PrefStickyLink)].spacing(12);
         self.prefs.view(
             wide,
             "Faves",

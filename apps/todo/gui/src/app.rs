@@ -19,6 +19,7 @@ use organiser_ui::primitives::scheme::Mode;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
+use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
 use todo_schema::EPIC;
 use todo_schema::board::BoardView;
@@ -61,6 +62,10 @@ pub enum Message {
     /// Todo's own settings: what it opens on, and whether it starts with finished tasks.
     PrefStartView(StartView),
     PrefShowClosed(bool),
+    /// Link (true) or unlink this app to the Sticky Notes app.
+    PrefStickyLink(bool),
+    /// Show the selected task as a desktop sticky (true) or stop.
+    DSticky(bool),
     /// The filters the schema offers changed.
     Fields(Filters),
     Tags(TagMsg),
@@ -183,6 +188,8 @@ pub struct App {
     pub tag_groups: TagGroups<String>,
     /// The shared settings and the Preferences sheet over them.
     pub prefs: Preferences,
+    /// Whether Sticky Notes is installed and this app is linked to it.
+    pub sticky: StickyLink,
     /// What was chosen in the filters the schema offers (status, priority, …).
     pub filters: Filters,
     pub tag_manager: TagManager,
@@ -259,6 +266,7 @@ impl App {
             epic_filter: None,
             tag_groups: TagGroups::new(),
             prefs,
+            sticky: StickyLink::load(&todo_schema::STICKY),
             filters: Filters::default(),
             tag_manager: TagManager::default(),
             filter_open: false,
@@ -778,7 +786,31 @@ impl App {
                 self.tag_groups.apply(event);
                 self.reload();
             }
-            Message::OpenPrefs => self.prefs.open_first_page(),
+            Message::OpenPrefs => {
+                self.sticky.refresh(&todo_schema::STICKY);
+                self.prefs.open_first_page();
+            }
+            Message::PrefStickyLink(on) => {
+                if let Err(e) = self.sticky.set(&todo_schema::STICKY, on) {
+                    self.fail(e);
+                }
+            }
+            Message::DSticky(on) => {
+                let Some(d) = &self.details else {
+                    return Task::none();
+                };
+                if d.is_new() || !matches!(d.subject, Subject::Task(_)) {
+                    return Task::none();
+                }
+                let id = d.id();
+                if let Err(e) = organiser_sticky::flag::set_sticky(&mut self.db, id, on) {
+                    self.fail(e);
+                } else if on && let Err(e) = self.sticky.open_sticky() {
+                    self.fail(e);
+                }
+                self.refresh_details();
+                self.reload();
+            }
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
                 Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
@@ -874,6 +906,7 @@ impl App {
                         tags: Vec::new(),
                         position: 0,
                         archived: false,
+                        sticky: false,
                         created: 0,
                         updated: 0,
                     }),

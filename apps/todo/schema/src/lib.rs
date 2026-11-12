@@ -10,6 +10,7 @@ pub mod components;
 pub mod primitives;
 
 use organiser_core::AppMeta;
+use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
 pub use components::{lifecycle, statuses, views};
@@ -27,12 +28,24 @@ pub const TASK: &str = "task";
 pub const EPIC: &str = "epic";
 pub const STATUS: &str = "status";
 
+/// What this app offers Sticky Notes: its tasks can be desktop stickies.
+pub const STICKY: StickySpec = StickySpec {
+    meta: META,
+    kinds: &[StickyKind {
+        kind: TASK,
+        body: "notes",
+    }],
+};
+
 pub static SCHEMA: Schema = Schema {
     kinds: &[
         Kind {
             name: TASK,
             fields: &[
                 Field::new("notes", FieldType::Markdown).searchable(),
+                // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
+                Field::new("sticky", FieldType::Bool).indexed().internal(),
+                Field::new("sticky_color", FieldType::Text).internal(),
                 // The id of one of the person's statuses (see `statuses`).
                 Field::new("status", FieldType::Reference(STATUS)).indexed(),
                 Field::new("priority", FieldType::Enum(priority::NAMES))

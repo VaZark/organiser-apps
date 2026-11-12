@@ -13,6 +13,7 @@ pub mod components;
 pub mod primitives;
 
 use organiser_core::AppMeta;
+use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
 pub use components::{lifecycle, views};
@@ -29,6 +30,15 @@ pub const META: AppMeta = AppMeta {
 pub const LIST: &str = "list";
 pub const ENTRY: &str = "entry";
 
+/// What this app offers Sticky Notes: its entries can be desktop stickies.
+pub const STICKY: StickySpec = StickySpec {
+    meta: META,
+    kinds: &[StickyKind {
+        kind: ENTRY,
+        body: "notes",
+    }],
+};
+
 pub static SCHEMA: Schema = Schema {
     kinds: &[
         Kind {
@@ -44,6 +54,9 @@ pub static SCHEMA: Schema = Schema {
             fields: &[
                 Field::new("notes", FieldType::Markdown).searchable(),
                 Field::new("favorite", FieldType::Bool).indexed(),
+                // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
+                Field::new("sticky", FieldType::Bool).indexed().internal(),
+                Field::new("sticky_color", FieldType::Text).internal(),
                 Field::new("rating", FieldType::Rating)
                     .indexed()
                     .gated_by_parent(LIST, "rated"),

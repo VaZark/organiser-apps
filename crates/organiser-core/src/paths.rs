@@ -15,6 +15,11 @@ pub fn config_dir(meta: &AppMeta) -> PathBuf {
     resolve(env("XDG_CONFIG_HOME"), env("HOME"), ".config", meta.slug)
 }
 
+/// `$XDG_CONFIG_HOME/organiser`: what every organiser app shares (settings, the Sticky links).
+pub fn shared_config_dir() -> PathBuf {
+    resolve(env("XDG_CONFIG_HOME"), env("HOME"), ".config", "organiser")
+}
+
 /// The app's database file: `<data_dir>/<slug>.db`.
 pub fn db_path(meta: &AppMeta) -> PathBuf {
     data_dir(meta).join(format!("{}.db", meta.slug))

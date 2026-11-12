@@ -14,6 +14,12 @@ finish-args:
   - --filesystem=xdg-data/faves
   # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
   - --filesystem=xdg-config/iced-adaptive-design:ro
+  # The list of apps linked to Sticky Notes, shared by every app, and a way to find and start
+  # Sticky Notes (an installed Flatpak) from here.
+  - --filesystem=xdg-config/organiser
+  - --filesystem=/var/lib/flatpak/exports/bin:ro
+  - --filesystem=~/.local/share/flatpak/exports/bin:ro
+  - --talk-name=org.freedesktop.Flatpak
 modules:
   - name: faves
     buildsystem: simple

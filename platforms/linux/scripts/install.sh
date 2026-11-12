@@ -2,7 +2,7 @@
 # Installs apps so the desktop (GNOME Resources, the shell) shows them as apps: the GUI binary,
 # the command-line tool, the icon and the .desktop file.
 #
-#   install.sh [--prefix PREFIX] [todo|faves|notes|recipes|all]...
+#   install.sh [--prefix PREFIX] [todo|faves|notes|recipes|sticky|all]...
 #
 # PREFIX defaults to ~/.local; no app (or `all`) means every app. Apps are installed in parallel,
 # and the desktop database and icon cache are refreshed once at the end, so several invocations
@@ -19,12 +19,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --prefix=*) prefix=${1#--prefix=}; shift ;;
-    all) apps="$apps todo faves notes recipes"; shift ;;
-    todo|faves|notes|recipes) apps="$apps $1"; shift ;;
-    *) echo "usage: install.sh [--prefix PREFIX] [todo|faves|notes|recipes|all]..." >&2; exit 2 ;;
+    all) apps="$apps todo faves notes recipes sticky"; shift ;;
+    todo|faves|notes|recipes|sticky) apps="$apps $1"; shift ;;
+    *) echo "usage: install.sh [--prefix PREFIX] [todo|faves|notes|recipes|sticky|all]..." >&2; exit 2 ;;
   esac
 done
-[ -n "$apps" ] || apps="todo faves notes recipes"
+[ -n "$apps" ] || apps="todo faves notes recipes sticky"
 
 install_one() {
   app=$1
@@ -33,6 +33,7 @@ install_one() {
     faves) id=io.github.vazark.Faves ;;
     notes) id=io.github.vazark.Notes ;;
     recipes) id=io.github.vazark.Recipes ;;
+    sticky) id=io.github.vazark.Sticky ;;
   esac
   gui=$root/target/release/$app-gui
   cli=$root/target/release/$app

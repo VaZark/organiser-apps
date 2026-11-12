@@ -15,3 +15,4 @@ organiser-core.workspace = true
 organiser-engine.workspace = true
 organiser-ui.workspace = true
 notes-schema.workspace = true
+organiser-sticky.workspace = true

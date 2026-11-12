@@ -21,6 +21,7 @@ use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::scheme::Mode;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
+use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
 
 #[derive(Debug, Clone)]
@@ -45,6 +46,8 @@ pub enum Message {
     Pref(PrefMsg),
     /// Notes' own setting: days a note stays in the trash.
     PrefTrashDays(u32),
+    /// Link (true) or unlink this app to the Sticky Notes app.
+    PrefStickyLink(bool),
     ToggleSearch,
     SearchInput(String),
     Escape,
@@ -71,6 +74,8 @@ pub enum Message {
     /// A colour dragged in the custom picker.
     DColorPick(Hsva),
     DPin(bool),
+    /// Show the note as a desktop sticky (true) or stop.
+    DSticky(bool),
     DArchive(bool),
     DTrash,
     DRestore,
@@ -124,6 +129,8 @@ pub struct App {
     pub tag_manager: TagManager,
     /// The shared settings and the Preferences sheet over them.
     pub prefs: Preferences,
+    /// Whether Sticky Notes is installed and this app is linked to it.
+    pub sticky: StickyLink,
     pub notes: Vec<Note>,
     /// Each listed note's body drawn, by note id.
     pub docs: HashMap<i64, Vec<rt::Block>>,
@@ -183,6 +190,7 @@ impl App {
             tag_query: String::new(),
             tag_manager: TagManager::default(),
             prefs,
+            sticky: StickyLink::load(&notes_schema::STICKY),
             notes: Vec::new(),
             docs: HashMap::new(),
             search: Search::default(),
@@ -480,7 +488,10 @@ impl App {
                 self.filters = f;
                 self.reload();
             }
-            Message::OpenPrefs => self.prefs.open_first_page(),
+            Message::OpenPrefs => {
+                self.sticky.refresh(&notes_schema::STICKY);
+                self.prefs.open_first_page();
+            }
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
                 Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
@@ -490,6 +501,11 @@ impl App {
             Message::PrefTrashDays(d) => {
                 self.prefs.settings.notes.trash_days = d;
                 if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
+            Message::PrefStickyLink(on) => {
+                if let Err(e) = self.sticky.set(&notes_schema::STICKY, on) {
                     self.fail(e);
                 }
             }
@@ -539,6 +555,7 @@ impl App {
                         body: String::new(),
                         color: None,
                         pinned: false,
+                        sticky: false,
                         archived: false,
                         trashed: None,
                         tags: Vec::new(),
@@ -653,6 +670,15 @@ impl App {
                     self.with_details(|d| d.note.pinned = on);
                 } else {
                     self.act(|db, id| lifecycle::set_pinned(db, id, on).map(|_| ()));
+                }
+            }
+            Message::DSticky(on) => {
+                if self.details.as_ref().is_some_and(Details::is_new) {
+                    return Task::none();
+                }
+                self.act(|db, id| organiser_sticky::flag::set_sticky(db, id, on).map(|_| ()));
+                if on && let Err(e) = self.sticky.open_sticky() {
+                    self.fail(e);
                 }
             }
             Message::DArchive(on) => {

@@ -13,6 +13,9 @@ pub struct Note {
     pub body: String,
     pub color: Option<Color>,
     pub pinned: bool,
+    /// Shown as a desktop sticky by the Sticky app.
+    #[serde(default)]
+    pub sticky: bool,
     pub archived: bool,
     /// Unix seconds when trashed.
     pub trashed: Option<i64>,
@@ -39,6 +42,7 @@ impl From<&Item> for Note {
                 .and_then(Value::as_str)
                 .and_then(Color::parse),
             pinned: f.get("pinned").and_then(Value::as_bool).unwrap_or(false),
+            sticky: f.get("sticky").and_then(Value::as_bool).unwrap_or(false),
             archived: i.archived,
             trashed: f.get("trashed").and_then(Value::as_i64),
             tags: i.tags.clone(),

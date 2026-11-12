@@ -10,6 +10,7 @@ pub mod components;
 pub mod primitives;
 
 use organiser_core::AppMeta;
+use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
 pub use components::{lifecycle, views};
@@ -26,6 +27,15 @@ pub const META: AppMeta = AppMeta {
 
 pub const NOTE: &str = "note";
 
+/// What this app offers Sticky Notes: its notes can be desktop stickies.
+pub const STICKY: StickySpec = StickySpec {
+    meta: META,
+    kinds: &[StickyKind {
+        kind: NOTE,
+        body: "body",
+    }],
+};
+
 pub static SCHEMA: Schema = Schema {
     kinds: &[Kind {
         name: NOTE,
@@ -34,6 +44,9 @@ pub static SCHEMA: Schema = Schema {
             // Any `#rrggbb`; see `color::Color`. Absent means the default card.
             Field::new("color", FieldType::Text),
             Field::new("pinned", FieldType::Bool).indexed(),
+            // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
+            Field::new("sticky", FieldType::Bool).indexed().internal(),
+            Field::new("sticky_color", FieldType::Text).internal(),
             // Unix seconds when moved to the trash; absent means not trashed.
             Field::new("trashed", FieldType::Number)
                 .indexed()

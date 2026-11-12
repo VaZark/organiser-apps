@@ -64,6 +64,11 @@ pub const DEFAULT_PALETTE: [&str; 10] = [
     "#e88fc0", "#9aa0a6",
 ];
 
+/// The paper colours Sticky Notes offers, until its palette is changed.
+pub const DEFAULT_STICKY_PALETTE: [&str; 7] = [
+    "#fff59d", "#c5e1a5", "#90caf9", "#f8bbd0", "#ffcc80", "#ce93d8", "#e0e0e0",
+];
+
 /// How long a note stays in the trash, unless changed.
 pub const DEFAULT_TRASH_DAYS: u32 = 30;
 
@@ -111,6 +116,24 @@ impl Default for NotesSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StickySettings {
+    /// `#rrggbb` paper colours a sticky can take.
+    pub palette: Vec<String>,
+    /// The paper of a sticky that has no colour of its own.
+    pub default_color: String,
+}
+
+impl Default for StickySettings {
+    fn default() -> Self {
+        Self {
+            palette: DEFAULT_STICKY_PALETTE.map(String::from).to_vec(),
+            default_color: DEFAULT_STICKY_PALETTE[0].into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FavesSettings {
@@ -134,6 +157,7 @@ pub struct Settings {
     pub notes: NotesSettings,
     pub faves: FavesSettings,
     pub recipes: RecipesSettings,
+    pub sticky: StickySettings,
 }
 
 /// What reading the settings found: the settings to use, and why they are not what the file says,
@@ -172,6 +196,18 @@ impl Settings {
             self.tags.palette = DEFAULT_PALETTE.map(String::from).to_vec();
         }
         self.notes.trash_days = self.notes.trash_days.clamp(1, 3650);
+        self.sticky.palette.retain(|c| is_hex(c));
+        for c in &mut self.sticky.palette {
+            c.make_ascii_lowercase();
+        }
+        if self.sticky.palette.is_empty() {
+            self.sticky.palette = DEFAULT_STICKY_PALETTE.map(String::from).to_vec();
+        }
+        if is_hex(&self.sticky.default_color) {
+            self.sticky.default_color.make_ascii_lowercase();
+        } else {
+            self.sticky.default_color = self.sticky.palette[0].clone();
+        }
         self
     }
 

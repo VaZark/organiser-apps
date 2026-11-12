@@ -19,7 +19,7 @@ const CHOICES: [Days; 5] = [Days(7), Days(14), Days(30), Days(60), Days(90)];
 
 impl App {
     pub(super) fn prefs_panel(&self, wide: bool) -> Element<'_, Message> {
-        let page = EntryRow::select(
+        let trash = EntryRow::select(
             "Days in the trash",
             &CHOICES,
             Some(Days(self.prefs.settings.notes.trash_days)),
@@ -27,6 +27,8 @@ impl App {
         )
         .description("A note is deleted for good after this long in the trash.")
         .flat(true);
+        let page =
+            iced::widget::column![trash, self.sticky.row(Message::PrefStickyLink)].spacing(12);
         self.prefs.view(
             wide,
             "Notes",

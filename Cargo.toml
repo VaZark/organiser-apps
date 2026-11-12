@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/faves/schema", "apps/faves/cli", "apps/faves/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui"]
+members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/faves/schema", "apps/faves/cli", "apps/faves/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui", "crates/organiser-sticky", "apps/sticky/engine", "apps/sticky/cli", "apps/sticky/gui"]
 
 [workspace.package]
 version = "0.0.1"
@@ -18,6 +18,8 @@ recipes-schema = { path = "apps/recipes/schema" }
 notes-schema = { path = "apps/notes/schema" }
 organiser-cli-kit = { path = "crates/organiser-cli-kit" }
 organiser-ui = { path = "crates/organiser-ui" }
+organiser-sticky = { path = "crates/organiser-sticky" }
+sticky-engine = { path = "apps/sticky/engine" }
 iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "c61ccbe55b6655d95537c22bcaddd938f5125c4a" }
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "wayland", "advanced", "svg", "image", "tokio", "canvas"] }
 rusqlite = "0.37"

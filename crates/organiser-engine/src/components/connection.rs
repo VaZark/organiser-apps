@@ -27,6 +27,18 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Open a database that must already exist, changing nothing about it: no file or folder is made
+/// and its journal mode is left as it is (only this connection's own settings are applied).
+pub fn open_existing(path: &Path) -> Result<Connection> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    conn.busy_timeout(Duration::from_secs(5))?;
+    Ok(conn)
+}
+
 pub fn open_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     configure(&conn, false)?;

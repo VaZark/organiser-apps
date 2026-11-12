@@ -26,6 +26,7 @@ impl App {
             )
             .description("Start with finished tasks shown, on the board and in the list.")
             .flat(true),
+            self.sticky.row(Message::PrefStickyLink),
         ]
         .spacing(12);
         self.prefs.view(

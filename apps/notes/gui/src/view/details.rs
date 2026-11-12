@@ -58,8 +58,19 @@ impl App {
                     .tooltip(if n.pinned { "Unpin" } else { "Pin to the top" })
                     .on_toggle(Message::DPin),
             );
-            // A note that is not saved yet has nothing to archive.
+            // A note that is not saved yet has nothing to archive or to stick.
             if !draft {
+                if self.sticky.usable() {
+                    actions = actions.push(
+                        IconToggle::new(Icon::Note, n.sticky)
+                            .tooltip(if n.sticky {
+                                "Remove the sticky"
+                            } else {
+                                "Show as a sticky"
+                            })
+                            .on_toggle(Message::DSticky),
+                    );
+                }
                 actions = actions.push(
                     IconToggle::new(Icon::Archive, n.archived)
                         .tooltip(if n.archived { "Unarchive" } else { "Archive" })

@@ -68,7 +68,9 @@ pub fn set_archived(db: &mut Db, id: i64, archived: bool) -> Result<Note> {
 pub fn trash(db: &mut Db, id: i64, now: i64) -> Result<Note> {
     let patch = ItemPatch::default()
         .field("trashed", now)
-        .field("pinned", Value::Null);
+        .field("pinned", Value::Null)
+        .field("sticky", Value::Null)
+        .field("sticky_color", Value::Null);
     Ok(Note::from(&db.update(id, patch)?))
 }
 

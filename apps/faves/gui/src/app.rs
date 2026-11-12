@@ -16,6 +16,7 @@ use organiser_ui::primitives::scheme::Mode;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
+use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
 
 /// What the content shows.
@@ -56,6 +57,10 @@ pub enum Message {
     Pref(PrefMsg),
     /// Faves' own setting: cards, or one compact line per entry.
     PrefCompact(bool),
+    /// Link (true) or unlink this app to the Sticky Notes app.
+    PrefStickyLink(bool),
+    /// Show the selected entry as a desktop sticky (true) or stop.
+    DSticky(bool),
     TagQuery(String),
     ToggleSearch,
     SearchInput(String),
@@ -182,6 +187,8 @@ pub struct App {
     pub tag_groups: TagGroups<String>,
     /// The shared settings and the Preferences sheet over them.
     pub prefs: Preferences,
+    /// Whether Sticky Notes is installed and this app is linked to it.
+    pub sticky: StickyLink,
     /// What was typed to find a tag in the filter.
     pub tag_query: String,
     /// The delete-list button was pressed once and asks for a second press.
@@ -236,6 +243,7 @@ impl App {
             tag_manager: TagManager::default(),
             tag_groups: TagGroups::new(),
             prefs,
+            sticky: StickyLink::load(&faves_schema::STICKY),
             tag_query: String::new(),
             confirm_delete: false,
             toast: None,
@@ -569,7 +577,31 @@ impl App {
                 self.refresh_details();
                 self.reload();
             }
-            Message::OpenPrefs => self.prefs.open_first_page(),
+            Message::OpenPrefs => {
+                self.sticky.refresh(&faves_schema::STICKY);
+                self.prefs.open_first_page();
+            }
+            Message::PrefStickyLink(on) => {
+                if let Err(e) = self.sticky.set(&faves_schema::STICKY, on) {
+                    self.fail(e);
+                }
+            }
+            Message::DSticky(on) => {
+                let Some(d) = &self.details else {
+                    return Task::none();
+                };
+                if d.is_new() {
+                    return Task::none();
+                }
+                let id = d.entry.id;
+                if let Err(e) = organiser_sticky::flag::set_sticky(&mut self.db, id, on) {
+                    self.fail(e);
+                } else if on && let Err(e) = self.sticky.open_sticky() {
+                    self.fail(e);
+                }
+                self.refresh_details();
+                self.reload();
+            }
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
                 Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
@@ -639,6 +671,7 @@ impl App {
                         title: String::new(),
                         notes: String::new(),
                         favorite: false,
+                        sticky: false,
                         rating: None,
                         tags: Vec::new(),
                         position: 0,

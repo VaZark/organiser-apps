@@ -1,0 +1,14 @@
+[package]
+name = "sticky-cli"
+description = "Command-line frontend of Sticky Notes: register apps, link them, list and drop stickies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sticky"
+path = "src/main.rs"
+
+[dependencies]
+organiser-sticky.workspace = true
+sticky-engine.workspace = true

@@ -41,6 +41,8 @@ pub struct Task {
     pub tags: Vec<String>,
     pub position: i64,
     pub archived: bool,
+    /// Shown as a desktop sticky by the Sticky app.
+    pub sticky: bool,
     pub created: i64,
     pub updated: i64,
 }
@@ -65,6 +67,11 @@ impl From<&Item> for Task {
             tags: i.tags.clone(),
             position: i.position,
             archived: i.archived,
+            sticky: i
+                .fields
+                .get("sticky")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             created: i.created,
             updated: i.updated,
         }

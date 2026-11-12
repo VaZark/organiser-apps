@@ -5,6 +5,7 @@ use iced::widget::{column, row};
 use organiser_ui::Element;
 use organiser_ui::components::action::action_button;
 use organiser_ui::components::dot::{color_from_hex, dot};
+use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::date::Date;
 use organiser_ui::widgets::markdown_field::MarkdownField;
@@ -39,11 +40,15 @@ impl App {
 
         let mut col = column![
             // Closing the page is the header's back button.
-            row![caption(if d.is_new() {
-                "New task".to_string()
-            } else {
-                format!("{kind} {}", d.id())
-            }),]
+            row![
+                container(caption(if d.is_new() {
+                    "New task".to_string()
+                } else {
+                    format!("{kind} {}", d.id())
+                }))
+                .width(Length::Fill),
+                self.sticky_toggle(d),
+            ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
             entry("Title", d.title.as_str()).on_input(Message::DTitle),
@@ -198,5 +203,25 @@ impl App {
                 .left_section(Icon::ListAdd.view(16.0)),
         );
         field("Subtasks", col)
+    }
+}
+
+impl App {
+    /// The "show as a sticky" toggle: for a saved task, once Sticky Notes is linked.
+    fn sticky_toggle(&self, d: &Details) -> Element<'_, Message> {
+        let Subject::Task(t) = &d.subject else {
+            return space().into();
+        };
+        if !self.sticky.usable() || d.is_new() {
+            return space().into();
+        }
+        IconToggle::new(Icon::Note, t.sticky)
+            .tooltip(if t.sticky {
+                "Remove the sticky"
+            } else {
+                "Show as a sticky"
+            })
+            .on_toggle(Message::DSticky)
+            .into()
     }
 }

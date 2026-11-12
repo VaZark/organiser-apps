@@ -6,11 +6,12 @@ use iced::{Alignment, Length};
 use organiser_ui::Element;
 use organiser_ui::components::action::action_button;
 use organiser_ui::components::heart::heart;
+use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::widgets::markdown_field::MarkdownField;
 use organiser_ui::widgets::tag_editor::tag_editor;
 
-use crate::app::{App, Message};
+use crate::app::{App, Details, Message};
 
 fn field<'a>(label: &'a str, control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     column![caption(label), control.into()]
@@ -30,11 +31,17 @@ impl App {
         let heart = heart(e.favorite, Message::DFavorite(!e.favorite));
         let mut col = column![
             // Closing the page is the header's back button.
-            caption(if d.is_new() {
-                "New entry".to_string()
-            } else {
-                list.map_or("Entry".to_string(), |l| l.title.clone())
-            }),
+            row![
+                container(caption(if d.is_new() {
+                    "New entry".to_string()
+                } else {
+                    list.map_or("Entry".to_string(), |l| l.title.clone())
+                }))
+                .width(Length::Fill),
+                self.sticky_toggle(d),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
             row![
                 entry("Title", d.title.as_str())
                     .on_input(Message::DTitle)
@@ -117,5 +124,22 @@ impl App {
         ))
         .height(Length::Fill)
         .into()
+    }
+}
+
+impl App {
+    /// The "show as a sticky" toggle: for a saved entry, once Sticky Notes is linked.
+    fn sticky_toggle(&self, d: &Details) -> Element<'_, Message> {
+        if !self.sticky.usable() || d.is_new() {
+            return space().into();
+        }
+        IconToggle::new(Icon::Note, d.entry.sticky)
+            .tooltip(if d.entry.sticky {
+                "Remove the sticky"
+            } else {
+                "Show as a sticky"
+            })
+            .on_toggle(Message::DSticky)
+            .into()
     }
 }
