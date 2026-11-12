@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.vazark.Faves</id>
   <name>Faves</name>
-  <summary>Track the movies, cars, animals and anything else you like</summary>
+  <summary>Track anything else you like</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <developer id="io.github.vazark">
@@ -10,8 +10,7 @@
   </developer>
   <launchable type="desktop-id">io.github.vazark.Faves.desktop</launchable>
   <description>
-    <p>Faves keeps lists of whatever you follow. Each list chooses whether its entries have a star rating or a status, and every entry can have notes, tags and a favourite heart.</p>
-    <p>Nothing leaves your computer: your lists live in a database in your own data directory.</p>
+    <p>Faves lists help you track whatever you follow with each entry having its own notes, tags and rating.</p>
   </description>
   <provides>
     <binary>faves-gui</binary>

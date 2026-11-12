@@ -1,0 +1,5 @@
+#!/bin/sh
+# Entry point inside the Flatpak: use the host's data directory (the database the command-line
+# `notes` shares with the GUI) instead of the sandbox's own.
+export XDG_DATA_HOME="$HOME/.local/share"
+exec notes-gui "$@"

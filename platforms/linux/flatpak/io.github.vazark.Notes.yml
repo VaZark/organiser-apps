@@ -1,0 +1,39 @@
+# Local Flatpak build of the Notes GUI (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Notes
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: notes-gui-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
+  # host's, since the sandbox's own would hide it.
+  - --filesystem=xdg-data/notes
+  # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
+  - --filesystem=xdg-config/iced-adaptive-design:ro
+modules:
+  - name: notes
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/notes/cargo
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p notes-gui --features organiser-engine/bundled
+      - install -Dm755 target/release/notes-gui /app/bin/notes-gui
+      - install -Dm755 platforms/linux/flatpak/notes-gui-launch /app/bin/notes-gui-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Notes.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Notes.svg
+      - mkdir -p /app/share/applications && target/release/notes-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=notes-gui-launch/' > /app/share/applications/io.github.vazark.Notes.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Notes.metainfo.xml /app/share/metainfo/io.github.vazark.Notes.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, build-dir]

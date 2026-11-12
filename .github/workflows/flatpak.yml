@@ -1,0 +1,41 @@
+name: Build Flatpaks
+
+# Manual only: run it from the Actions tab.
+on:
+  workflow_dispatch:
+
+# A newer run of the same ref replaces one still going.
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # One job per app, each on its own runner with its own build directory, so all four build in
+  # parallel and a failure in one does not stop the others.
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        app: [Todo, Faves, Notes, Recipes]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the 26.08 runtime, SDK and Rust extension
+        run: |
+          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --noninteractive flathub \
+            org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: ${{ matrix.app }}.flatpak
+          manifest-path: platforms/linux/flatpak/io.github.vazark.${{ matrix.app }}.yml
+          cache-key: flatpak-${{ matrix.app }}-${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-flatpak
+          path: ${{ matrix.app }}.flatpak
