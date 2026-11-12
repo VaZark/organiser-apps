@@ -9,6 +9,7 @@ target/
 # Local seed data and scripts.
 seed/
 
-# Flatpak build output.
+# Flatpak build output, and the cargo downloads and compiled dependencies the Flatpak builds share.
 .flatpak-builder/
+.flatpak-cache/
 build-dir/

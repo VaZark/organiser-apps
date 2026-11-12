@@ -36,4 +36,4 @@ modules:
         path: ../../..
         # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
         # is local demo data.
-        skip: [target, .git, .cargo, seed, .flatpak-builder, build-dir]
+        skip: [target, .git, .cargo, seed, .flatpak-builder, .flatpak-cache, build-dir]
