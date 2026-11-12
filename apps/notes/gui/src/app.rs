@@ -110,6 +110,12 @@ pub enum Message {
     DragEnd,
     /// The note being dragged was dropped on this section of its folder, or (`None`) on none.
     DropInSection(Option<i64>),
+    /// A folder of the sidebar is picked up, to move it.
+    FolderDragStart(i64),
+    /// The picked-up folder is dropped before or after this one.
+    DropFolder(i64, organiser_ui::iad::primitives::drag::Place),
+    /// A note dropped on a folder's group of a grouped page: it moves to that folder.
+    DropInFolder(Option<i64>),
     /// A section was picked up by its name, to put it in another place.
     SectionDragStart(i64),
     /// Link (true) or unlink this app to the Sticky Notes app.
@@ -254,6 +260,8 @@ pub struct App {
     pub dragging: Option<i64>,
     /// The section being dragged to another place.
     pub dragging_section: Option<i64>,
+    /// The folder being carried to another place in the sidebar.
+    pub dragging_folder: Option<i64>,
     /// The folder whose settings are open.
     pub folder_settings: Option<i64>,
     /// The folder being deleted, waiting for the answer to what becomes of its notes.
@@ -350,6 +358,7 @@ impl App {
             section_color_text: None,
             dragging: None,
             dragging_section: None,
+            dragging_folder: None,
             folder_settings: None,
             confirm_folder_delete: None,
             folder_name: None,
@@ -1070,8 +1079,41 @@ impl App {
             Message::DragEnd => {
                 self.dragging = None;
                 self.dragging_section = None;
+                self.dragging_folder = None;
             }
             Message::SectionDragStart(id) => self.dragging_section = Some(id),
+            Message::FolderDragStart(id) => self.dragging_folder = Some(id),
+            Message::DropFolder(target, place) => {
+                use organiser_ui::iad::primitives::drag::Place;
+                if let Some(moved) = self.dragging_folder.take() {
+                    let ids: Vec<i64> = self.folders.iter().map(|s| s.folder.id).collect();
+                    // Before the target, or before what follows it (last when nothing does).
+                    let before = match place {
+                        Place::After => ids
+                            .iter()
+                            .skip_while(|i| **i != target)
+                            .skip(1)
+                            .find(|i| **i != moved)
+                            .copied(),
+                        _ => Some(target),
+                    };
+                    if moved != target
+                        && let Err(e) = lifecycle::move_folder(&mut self.db, moved, before)
+                    {
+                        self.fail(e);
+                    }
+                    self.reload();
+                }
+            }
+            Message::DropInFolder(folder) => {
+                if let Some(id) = self.dragging.take() {
+                    if let Err(e) = lifecycle::move_note(&mut self.db, id, folder) {
+                        self.fail(e);
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
             Message::DropInSection(section) => {
                 // A section dropped on another takes its place.
                 if let Some(moved) = self.dragging_section.take() {

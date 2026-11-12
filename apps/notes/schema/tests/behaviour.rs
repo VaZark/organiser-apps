@@ -628,3 +628,24 @@ fn a_section_can_be_moved_to_another_place() {
     assert_eq!(order(&db), ["B", "A", "C"]);
     let _ = b;
 }
+
+#[test]
+fn a_folder_can_be_moved_before_another_and_the_default_stays_last() {
+    use notes_schema::lifecycle::{create_folder, move_folder};
+    use notes_schema::views::folders;
+    let mut db = db();
+    let a = create_folder(&mut db, "A", false).unwrap();
+    let b = create_folder(&mut db, "B", false).unwrap();
+    let c = create_folder(&mut db, "C", false).unwrap();
+    let order = |db: &Db| -> Vec<String> {
+        folders(db).unwrap().into_iter().map(|s| s.folder.title).collect()
+    };
+    let user: Vec<String> = order(&db).into_iter().filter(|t| ["A", "B", "C"].contains(&t.as_str())).collect();
+    assert_eq!(user, ["A", "B", "C"]);
+    move_folder(&mut db, c.id, Some(a.id)).unwrap();
+    let now = order(&db);
+    assert_eq!(&now[..3], ["C", "A", "B"]);
+    move_folder(&mut db, c.id, None).unwrap();
+    assert_eq!(&order(&db)[..3], ["A", "B", "C"]);
+    let _ = (a, b);
+}

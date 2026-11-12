@@ -350,3 +350,25 @@ pub fn delete_section(db: &mut Db, id: i64) -> Result<()> {
     db.delete(id)?;
     Ok(())
 }
+
+/// Move a folder before `before` (another folder), or last when there is none: the others keep
+/// their order. (The default folder is always listed last whatever its place.)
+pub fn move_folder(db: &mut Db, id: i64, before: Option<i64>) -> Result<()> {
+    if db.get(id)?.kind != FOLDER {
+        return Err(Error::Invalid(format!("item {id} is not a folder")));
+    }
+    match before.filter(|b| *b != id) {
+        Some(b) => {
+            let next = db.get(b)?;
+            if next.kind != FOLDER {
+                return Err(Error::Invalid(format!("item {b} is not a folder")));
+            }
+            db.move_item(id, None, Some(next.position))?;
+        }
+        None if before.is_some() => {}
+        None => {
+            db.move_item(id, None, None)?;
+        }
+    }
+    Ok(())
+}

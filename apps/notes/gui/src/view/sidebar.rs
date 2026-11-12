@@ -33,6 +33,15 @@ impl App {
                 .icon(icons::named(s.folder.icon.as_deref()))
                 .icon_color(self.folder_color(&s.folder))
                 .selected(self.scope == Scope::Folder(s.folder.id));
+            // Press and hold a folder to move it; the default one stays last.
+            if !s.folder.is_default {
+                let id = s.folder.id;
+                item = item.reorder(
+                    Message::FolderDragStart(id),
+                    "Move here",
+                    move |place| Message::DropFolder(id, place),
+                );
+            }
             if first {
                 item = item.divider_above();
                 first = false;
@@ -47,6 +56,7 @@ impl App {
         SidebarList::new(items)
             .style(SidebarStyle::List)
             .fixed_top(places)
+            .dragging(self.dragging_folder.is_some())
             .into()
     }
 }

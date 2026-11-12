@@ -1551,7 +1551,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iad-icons"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=19f924386b446e0cf90db1a2439be6d22f425ddb#19f924386b446e0cf90db1a2439be6d22f425ddb"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=98c68525b511eeef293c070061032db4db010183#98c68525b511eeef293c070061032db4db010183"
 
 [[package]]
 name = "iana-time-zone"
@@ -1597,7 +1597,7 @@ dependencies = [
 [[package]]
 name = "iced-adaptive-design"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=19f924386b446e0cf90db1a2439be6d22f425ddb#19f924386b446e0cf90db1a2439be6d22f425ddb"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=98c68525b511eeef293c070061032db4db010183#98c68525b511eeef293c070061032db4db010183"
 dependencies = [
  "iad-icons",
  "iced",

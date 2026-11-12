@@ -37,6 +37,14 @@ impl App {
                 item = item.icon_color(c);
             }
 
+            // Press and hold an epic to move it: the others take it before or after themselves.
+            let id = s.epic.id;
+            item = item.reorder(
+                Message::EpicDragStart(id),
+                "Move here",
+                move |place| Message::DropEpic(id, place),
+            );
+
             if first {
                 item = item.divider_above();
                 first = false;
@@ -53,6 +61,7 @@ impl App {
         SidebarList::new(items)
             .style(SidebarStyle::List)
             .fixed_top(2)
+            .dragging(self.dragging_epic.is_some())
             .into()
     }
 }

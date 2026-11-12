@@ -1085,3 +1085,27 @@ fn a_section_can_be_moved_to_another_place() {
     assert_eq!(order(&db), ["A", "C", "B"]);
     let _ = (a, b, c);
 }
+
+#[test]
+fn an_epic_can_be_moved_before_another() {
+    use todo_schema::lifecycle::move_epic;
+    let mut db = db();
+    let a = create_epic(&mut db, "A").unwrap();
+    let b = create_epic(&mut db, "B").unwrap();
+    let c = create_epic(&mut db, "C").unwrap();
+    let order = |db: &Db| -> Vec<String> {
+        epics(db).unwrap().into_iter().map(|s| s.epic.title).collect()
+    };
+    assert_eq!(order(&db), ["A", "B", "C"]);
+    move_epic(&mut db, c.id, Some(a.id)).unwrap();
+    assert_eq!(order(&db), ["C", "A", "B"]);
+    move_epic(&mut db, c.id, None).unwrap();
+    assert_eq!(order(&db), ["A", "B", "C"]);
+    move_epic(&mut db, a.id, Some(c.id)).unwrap();
+    assert_eq!(order(&db), ["B", "A", "C"]);
+    // Before itself changes nothing.
+    move_epic(&mut db, a.id, Some(a.id)).unwrap();
+    assert_eq!(order(&db), ["B", "A", "C"]);
+    assert!(move_epic(&mut db, a.id, Some(999)).is_err());
+    let _ = b;
+}

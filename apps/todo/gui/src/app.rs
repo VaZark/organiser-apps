@@ -66,6 +66,12 @@ pub enum Message {
     DragEnd,
     /// The task being dragged was dropped on a section of its epic, or (`None`) on no section.
     DropInSection(Option<i64>),
+    /// An epic of the sidebar is picked up, to move it.
+    EpicDragStart(i64),
+    /// The picked-up epic is dropped before or after this one.
+    DropEpic(i64, organiser_ui::iad::primitives::drag::Place),
+    /// A task dropped on an epic's group (or on "Unassigned", `None`): it moves to that epic.
+    DropInEpic(Option<i64>),
     /// A section was picked up by its name, to put it in another place.
     SectionDragStart(i64),
     /// The task being dragged was dropped on another task: it becomes that task's subtask.
@@ -330,6 +336,8 @@ pub struct App {
     pub dragging: Option<i64>,
     /// The section being dragged to another place.
     pub dragging_section: Option<i64>,
+    /// The epic being carried to another place in the sidebar.
+    pub dragging_epic: Option<i64>,
     /// An epic with tasks that is about to be deleted, waiting for the answer to what becomes of
     /// its tasks.
     pub confirm_epic_delete: Option<i64>,
@@ -411,6 +419,7 @@ impl App {
             epic_choices: Vec::new(),
             dragging: None,
             dragging_section: None,
+            dragging_epic: None,
             confirm_epic_delete: None,
             drag_blocked: Default::default(),
             epic_sections: HashMap::new(),
@@ -1042,8 +1051,49 @@ impl App {
             Message::DragEnd => {
                 self.dragging = None;
                 self.dragging_section = None;
+                self.dragging_epic = None;
             }
             Message::SectionDragStart(id) => self.dragging_section = Some(id),
+            Message::EpicDragStart(id) => self.dragging_epic = Some(id),
+            Message::DropEpic(target, place) => {
+                use organiser_ui::iad::primitives::drag::Place;
+                if let Some(moved) = self.dragging_epic.take() {
+                    let ids: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
+                    // Before the target, or before what follows it (last when nothing does).
+                    let before = match place {
+                        Place::After => ids
+                            .iter()
+                            .skip_while(|i| **i != target)
+                            .skip(1)
+                            .find(|i| **i != moved)
+                            .copied(),
+                        _ => Some(target),
+                    };
+                    if moved != target
+                        && let Err(e) = lifecycle::move_epic(&mut self.db, moved, before)
+                    {
+                        self.fail(e);
+                    }
+                    self.reload();
+                }
+            }
+            Message::DropInEpic(epic) => {
+                if let Some(id) = self.dragging.take() {
+                    // Dropped on an epic it stands alone there, and its subtasks go with it.
+                    if let Err(e) = lifecycle::reparent(&mut self.db, id, None) {
+                        return self.fail_with(e);
+                    }
+                    let edit = Edit {
+                        epic: Some(epic),
+                        ..Edit::default()
+                    };
+                    if let Err(e) = lifecycle::edit(&mut self.db, id, &edit) {
+                        return self.fail_with(e);
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
             Message::DropOnTask(parent) => {
                 if let Some(id) = self.dragging.take() {
                     match lifecycle::reparent(&mut self.db, id, Some(parent)) {

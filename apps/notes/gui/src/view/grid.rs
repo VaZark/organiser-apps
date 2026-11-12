@@ -130,6 +130,7 @@ impl App {
             // each a place to drop a note dragged from another.
             if let Some(sections) = sectioned {
                 let dragging = self.dragging.is_some();
+                let searching = !self.search.text().trim().is_empty() || self.filter_count() > 0;
                 let ids: Vec<i64> = sections.iter().map(|s| s.section.id).collect();
                 let loose: Vec<&'a Note> = self
                     .notes
@@ -154,6 +155,10 @@ impl App {
                     let id = s.section.id;
                     let mine: Vec<&'a Note> =
                         self.notes.iter().filter(|n| n.section == Some(id)).collect();
+                    // Searching or filtering shows only the sections that have a match.
+                    if mine.is_empty() && searching {
+                        continue;
+                    }
                     let mut group = column![self.section_header(s)].spacing(8);
                     if !self.folded_sections.contains(&id) {
                         group = group.push(if mine.is_empty() {
@@ -188,8 +193,17 @@ impl App {
                 let order: Vec<i64> = self.folders.iter().map(|s| s.folder.id).collect();
                 let home = self.default_folder_id();
                 for (folder, notes) in group_by(others, |n| n.folder_id.or(home), &order) {
-                    page = page.push(self.folder_header(folder, notes.len()));
-                    page = page.push(block(&notes));
+                    // The heading and its notes are one place to drop: a note dropped there moves
+                    // to the folder.
+                    let label = match folder.and_then(|id| self.folders.iter().find(|s| s.folder.id == id)) {
+                        Some(s) => format!("Move to {}", s.folder.title),
+                        None => "Take out of its folder".to_string(),
+                    };
+                    let group = column![self.folder_header(folder, notes.len()), block(&notes)].spacing(8);
+                    page = page.push(
+                        drop_zone(group, self.dragging.is_some(), Message::DropInFolder(folder))
+                            .hint(DropHint::new(label)),
+                    );
                 }
             } else if !others.is_empty() {
                 if !pinned.is_empty() {
@@ -355,7 +369,7 @@ impl App {
 
     /// A note that can be picked up, on a page of sections, to carry it to another.
     fn draggable<'a>(&self, note: &Note, e: Element<'a, Message>) -> Element<'a, Message> {
-        if self.sections_here().is_some() {
+        if self.sections_here().is_some() || self.grouped_by_folder() {
             drag_source(e, Message::DragStart(note.id)).into()
         } else {
             e
@@ -430,7 +444,7 @@ impl App {
         }
         // Press and hold the name to carry the section to another place.
         head.push(
-            container(drag_source(name, Message::SectionDragStart(id))).width(Length::Fill),
+            container(drag_source(name, Message::SectionDragStart(id)).ghost_padding([4, 10])).width(Length::Fill),
         )
             .push(caption(s.notes.to_string()))
             .push(tooltip(

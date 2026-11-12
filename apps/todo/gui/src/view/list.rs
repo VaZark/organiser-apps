@@ -154,6 +154,7 @@ impl App {
             groups[at].1.push(self.dnd_row(r, stacked));
         }
         let dragging = self.dragging.is_some();
+        let searching = !self.search.text().trim().is_empty() || self.filter_count() > 0;
         let mut col = column![].spacing(16).width(Length::Fill);
         for (id, items) in groups {
             let Some(sec) = id.and_then(|id| sections.iter().find(|s| s.section.id == id)) else {
@@ -176,6 +177,10 @@ impl App {
                 }
                 continue;
             };
+            // Searching or filtering shows only the sections that have a match.
+            if items.is_empty() && searching {
+                continue;
+            }
             let sid = sec.section.id;
             let folded = self.folded_sections.contains(&sid);
             let header = row![
@@ -190,7 +195,7 @@ impl App {
                                 .size(11)
                                 .style(organiser_ui::iad::styles::text::dim));
                     }
-                    container(drag_source(name, Message::SectionDragStart(sid)))
+                    container(drag_source(name, Message::SectionDragStart(sid)).ghost_padding([4, 10]))
                         .width(Length::Fill)
                 },
                 caption(format!("{}/{}", sec.total - sec.open, sec.total)),
@@ -373,8 +378,21 @@ impl App {
             let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
             for (epic, items) in group_by(rest, |r| r.0, &order) {
                 let tasks = items.iter().filter(|r| r.1).count();
-                col = col.push(self.epic_group_header(epic, Some(tasks)));
-                col = col.push(self.open_ground(items.into_iter().map(|r| r.2).collect()));
+                // The heading and its tasks are one place to drop: a task dropped there joins
+                // the epic, on its own.
+                let label = match epic.and_then(|id| self.epic_titles.get(&id)) {
+                    Some(title) => format!("Move to {}", ellipsize(title, 28)),
+                    None => "Take out of its epic".to_string(),
+                };
+                let group = column![
+                    self.epic_group_header(epic, Some(tasks)),
+                    boxed_list(items.into_iter().map(|r| r.2).collect::<Vec<_>>()),
+                ]
+                .spacing(8);
+                col = col.push(
+                    drop_zone(group, self.dragging.is_some(), Message::DropInEpic(epic))
+                        .hint(DropHint::new(label)),
+                );
             }
         } else if !rest.is_empty() {
             col = col.push(caption("Others")).push(self.open_ground(rest.into_iter().map(|r| r.2).collect()));

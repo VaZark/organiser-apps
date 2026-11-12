@@ -326,3 +326,25 @@ pub fn delete_section(db: &mut Db, id: i64) -> Result<()> {
     db.delete(id)?;
     Ok(())
 }
+
+/// Move an epic before `before` (another epic), or last when there is none: the others keep
+/// their order.
+pub fn move_epic(db: &mut Db, id: i64, before: Option<i64>) -> Result<()> {
+    if db.get(id)?.kind != EPIC {
+        return Err(Error::Invalid(format!("item {id} is not an epic")));
+    }
+    match before.filter(|b| *b != id) {
+        Some(b) => {
+            let next = db.get(b)?;
+            if next.kind != EPIC {
+                return Err(Error::Invalid(format!("item {b} is not an epic")));
+            }
+            db.move_item(id, None, Some(next.position))?;
+        }
+        None if before.is_some() => {}
+        None => {
+            db.move_item(id, None, None)?;
+        }
+    }
+    Ok(())
+}
