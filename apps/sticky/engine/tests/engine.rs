@@ -224,7 +224,7 @@ fn the_apps_own_colour_shows_until_sticky_picks_one() {
 }
 
 #[test]
-fn what_sticky_kept_is_forgotten_when_the_app_unflags_or_is_unregistered() {
+fn what_sticky_kept_is_forgotten_when_the_app_unflags_the_item() {
     let sb = Sandbox::new("forget");
     let case = &cases()[0];
     let path = link_to(&sb, case);
@@ -255,19 +255,6 @@ fn what_sticky_kept_is_forgotten_when_the_app_unflags_or_is_unregistered() {
     e.set_show_on_desktop(&key, false).unwrap();
     e.set_linked(case.spec.meta.id, false).unwrap();
     assert_eq!(store::load_local().unwrap().items.len(), 1);
-    // ...but unregistering clears it, for this app only.
-    let mut other = store::load_local().unwrap();
-    other.set_show_on_desktop("org.example.Other", 7, false);
-    store::save_local(&other).unwrap();
-    let link = Link {
-        db_path: path.to_string_lossy().into_owned(),
-        ..store::link_for(case.spec)
-    };
-    organiser_sticky::register::register(&link).unwrap();
-    e.unregister(case.spec.meta.id).unwrap();
-    let left = store::load_local().unwrap();
-    assert_eq!(left.items.len(), 1, "only the other app's entry is left");
-    assert_eq!(left.items[0].app_id, "org.example.Other");
     assert!(e.items().is_empty());
     assert!(
         flag::is_sticky(&db.get(id).unwrap()),

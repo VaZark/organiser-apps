@@ -33,9 +33,14 @@ pub enum Message {
     Closed(window::Id),
     Title(window::Id, String),
     Body(window::Id, text_editor::Action),
-    /// A colour typed in, or chosen with the picker or a swatch, in a sticky's colour popover.
+    /// A colour chosen from the palette in a sticky's menu.
     ColorText(window::Id, String),
-    ColorPick(window::Id, Hsva),
+    /// Open Sticky Notes' main window, with every sticky (closing the sticky's menu).
+    OpenManager(window::Id),
+    /// Open an app (by its app id) on its create page; chosen in a sticky's "+" menu.
+    New(window::Id, String),
+    /// Show the colour page of a sticky's menu (true) or its first page (false).
+    MenuColours(window::Id, bool),
     /// Take the sticky off the desktop: it stays in Sticky Notes' window, and in its app.
     Hide(window::Id),
     /// Show a sticky on the desktop (true) or only in Sticky Notes' window (false).
@@ -117,6 +122,11 @@ pub struct Sticky {
     pub color: Option<String>,
     /// What the colour popover's entry shows, kept so typing is not interrupted.
     pub color_text: String,
+    /// The "⋮" menu is on its colour page.
+    pub menu_colours: bool,
+    /// Flips each time the menu should close: the popover cannot be closed from outside, but it
+    /// is rebuilt (and so closed) when the shape of the view changes.
+    pub menu_flip: bool,
 }
 
 impl Sticky {
@@ -132,6 +142,8 @@ impl Sticky {
             show_on_desktop: true,
             color: None,
             color_text: String::new(),
+            menu_colours: false,
+            menu_flip: false,
         };
         s.load(item);
         s
@@ -327,9 +339,20 @@ impl App {
         self.engine.links()
     }
 
+    /// Ask the compositor to bring a window forward: `gain_focus` where the windowing system lets
+    /// an app do that (X11), and an xdg-activation request (`request_user_attention`) on Wayland,
+    /// where the compositor decides whether to raise it or only mark it as wanting attention.
+    fn raise(id: window::Id) -> Task<Message> {
+        Task::batch([
+            window::gain_focus(id),
+            window::request_user_attention(id, Some(window::UserAttention::Informational)),
+        ])
+    }
+
+    /// Show the main window: open it, or bring the open one forward.
     fn open_manager(&mut self) -> Task<Message> {
         if let Some(id) = self.manager {
-            return window::gain_focus(id);
+            return Self::raise(id);
         }
         let (id, open) = window::open(window::Settings {
             min_size: Some(Size::new(360.0, 300.0)),
@@ -503,7 +526,26 @@ impl App {
                     self.set_color(id, h);
                 }
             }
-            Message::ColorPick(id, h) => self.set_color(id, hex_of(h)),
+            Message::OpenManager(id) => {
+                self.close_menu(id);
+                return self.open_manager();
+            }
+            Message::New(id, app_id) => {
+                self.close_menu(id);
+                let slug = self
+                    .links()
+                    .get(&app_id)
+                    .map(|l| l.slug.clone())
+                    .unwrap_or_default();
+                if let Err(e) = organiser_sticky::discover::open_new(&slug, &app_id) {
+                    self.fail(e);
+                }
+            }
+            Message::MenuColours(id, on) => {
+                if let Some(s) = self.sticky_mut(id) {
+                    s.menu_colours = on;
+                }
+            }
             Message::Hide(id) => {
                 if let Some(key) = self.key_of(id) {
                     return self.set_desktop(&key, false);
@@ -596,8 +638,10 @@ impl App {
                     .find(|s| s.key == key)
                     .and_then(|s| s.win)
                 {
-                    return window::gain_focus(w);
+                    return Self::raise(w);
                 }
+                // Hidden from the desktop: pressing its card puts it back.
+                return self.set_desktop(&key, true);
             }
             Message::Autostart(on) => match autostart::set_enabled(on) {
                 Ok(()) => self.autostart = on,
@@ -606,6 +650,14 @@ impl App {
             Message::DismissToast => self.toast = None,
         }
         Task::none()
+    }
+
+    /// Close a sticky's menu and bring it back to its first page.
+    fn close_menu(&mut self, win: window::Id) {
+        if let Some(s) = self.sticky_mut(win) {
+            s.menu_colours = false;
+            s.menu_flip = !s.menu_flip;
+        }
     }
 
     /// Paint a sticky and write it back.

@@ -83,13 +83,6 @@ impl Local {
         self.tidy();
     }
 
-    /// Forget everything about an app (it was unregistered); whether there was anything.
-    pub fn clear_app(&mut self, app_id: &str) -> bool {
-        let n = self.items.len();
-        self.items.retain(|i| i.app_id != app_id);
-        self.items.len() != n
-    }
-
     /// Keep an app's entries only for the items still flagged in it (`ids`): an item that stopped
     /// being a sticky starts afresh, with the defaults, if it becomes one again.
     pub fn retain_flagged(&mut self, app_id: &str, ids: &HashSet<i64>) -> bool {
@@ -134,18 +127,6 @@ mod tests {
         assert_eq!(l.items.len(), 1, "still hidden");
         l.set_show_on_desktop("a", 1, true);
         assert!(l.items.is_empty());
-    }
-
-    #[test]
-    fn unregistering_an_app_clears_only_its_entries() {
-        let mut l = Local::default();
-        l.set_show_on_desktop("a", 1, false);
-        l.set_color("a", 2, Some("#00ff00".into()));
-        l.set_show_on_desktop("b", 1, false);
-        assert!(l.clear_app("a"));
-        assert!(!l.clear_app("a"));
-        assert_eq!(l.items.len(), 1);
-        assert!(!l.show_on_desktop("b", 1));
     }
 
     #[test]

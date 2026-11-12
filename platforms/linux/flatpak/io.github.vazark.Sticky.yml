@@ -34,7 +34,7 @@ modules:
       - install -Dm755 target/release/sticky-gui /app/bin/sticky-gui
       - install -Dm755 platforms/linux/flatpak/sticky-gui-launch /app/bin/sticky-gui-launch
       - install -Dm644 platforms/linux/icon/io.github.vazark.Sticky.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Sticky.svg
-      - mkdir -p /app/share/applications && target/release/sticky-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=sticky-gui-launch/' > /app/share/applications/io.github.vazark.Sticky.desktop
+      - mkdir -p /app/share/applications && target/release/sticky-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=sticky-gui-launch %u/' > /app/share/applications/io.github.vazark.Sticky.desktop
       - install -Dm644 platforms/linux/flatpak/io.github.vazark.Sticky.metainfo.xml /app/share/metainfo/io.github.vazark.Sticky.metainfo.xml
     sources:
       - type: dir

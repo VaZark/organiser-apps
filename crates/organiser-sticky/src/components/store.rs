@@ -47,51 +47,9 @@ pub fn save_local(local: &Local) -> Result<(), String> {
     write_atomic(&p, &local.render()?)
 }
 
-/// The folder third-party apps drop a registration file in: `<shared config>/sticky.d/<app id>.toml`,
-/// one `[[link]]`-shaped file per app (see [`crate::register`]). Nothing needs to be compiled in:
-/// Sticky Notes reads whatever is there.
-pub fn dropin_dir() -> PathBuf {
-    dir().join("sticky.d")
-}
-
-/// Read the registry: the links file (which holds the switches) with every drop-in registration
-/// merged in. A missing file or folder is an empty registry.
+/// Read the registry: a missing file is an empty registry.
 pub fn load() -> Result<Links, String> {
-    load_merged(&path(), &dropin_dir())
-}
-
-/// [`load`] from given places. A drop-in says what an app is (its database, its kinds) and wins
-/// over the links file on that; the switch is the links file's, off for an app only a drop-in knows.
-/// A drop-in that cannot be read is left out rather than hiding the others.
-pub fn load_merged(links: &Path, dropins: &Path) -> Result<Links, String> {
-    let mut all = load_from(links)?;
-    let Ok(read) = std::fs::read_dir(dropins) else {
-        return Ok(all);
-    };
-    let mut files: Vec<PathBuf> = read
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
-        .collect();
-    files.sort();
-    for f in files {
-        let Ok(text) = std::fs::read_to_string(&f) else {
-            continue;
-        };
-        let Ok(parsed) = Links::parse(&text) else {
-            continue;
-        };
-        for link in parsed.links {
-            if link.app_id.is_empty() {
-                continue;
-            }
-            all.publish(Link {
-                enabled: false,
-                ..link
-            });
-        }
-    }
-    Ok(all)
+    load_from(&path())
 }
 
 pub fn load_from(path: &Path) -> Result<Links, String> {
@@ -129,7 +87,7 @@ pub fn link_for(spec: &StickySpec) -> Link {
 /// about itself. Apps call this at start; nothing is written unless something changed.
 pub fn publish(spec: &StickySpec) -> Result<(), String> {
     let p = path();
-    let mut links = load_merged(&p, &dropin_dir())?;
+    let mut links = load_from(&p)?;
     if links.publish(link_for(spec)) {
         save_to(&p, &links)?;
     }
@@ -149,7 +107,7 @@ pub fn set_linked(spec: &StickySpec, on: bool) -> Result<(), String> {
 /// Switch a published app on or off, adding `link` first if it is new.
 pub fn set_enabled(link: &Link, on: bool) -> Result<(), String> {
     let p = path();
-    let mut links = load_merged(&p, &dropin_dir())?;
+    let mut links = load_from(&p)?;
     links.publish(link.clone());
     links.set_enabled(&link.app_id, on);
     save_to(&p, &links)
@@ -158,7 +116,7 @@ pub fn set_enabled(link: &Link, on: bool) -> Result<(), String> {
 /// Switch a published app on or off by its id (from Sticky Notes' own preferences).
 pub fn set_enabled_by_id(app_id: &str, on: bool) -> Result<(), String> {
     let p = path();
-    let mut links = load_merged(&p, &dropin_dir())?;
+    let mut links = load_from(&p)?;
     if links.set_enabled(app_id, on) {
         save_to(&p, &links)?;
     }

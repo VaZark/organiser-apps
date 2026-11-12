@@ -31,6 +31,28 @@ pub fn desktop_entry(meta: &AppMeta, exec: &str) -> String {
     .render()
 }
 
+/// The URI scheme an app handles so Sticky Notes can open it on its create page from inside a
+/// Flatpak sandbox (through the desktop portal): `organiser-<slug>`.
+pub fn scheme(meta: &AppMeta) -> String {
+    format!("organiser-{}", meta.slug)
+}
+
+/// The `.desktop` file text of an app Sticky Notes can open: the command takes `%u`, and the
+/// entry declares the app's URI scheme (see [`scheme`]).
+pub fn linked_desktop_entry(meta: &AppMeta, bin: &str) -> String {
+    let entry = desktop_entry(meta, &format!("{bin} %u"));
+    format!("{}\nMimeType=x-scheme-handler/{};\n", entry.trim_end(), scheme(meta))
+}
+
+/// Whether the command line asks for the create page: `--new`, or the URI the desktop portal passes
+/// when Sticky Notes opens `organiser-<slug>://new`.
+pub fn wants_new(meta: &AppMeta) -> bool {
+    let prefix = format!("{}:", scheme(meta));
+    std::env::args()
+        .skip(1)
+        .any(|a| a == "--new" || a.starts_with(&prefix))
+}
+
 /// The toolkit theme for the desktop scheme and the user's override.
 pub fn theme(dark: bool) -> iad::Theme {
     if dark {

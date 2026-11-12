@@ -1,14 +1,13 @@
 //! Cross-app checks of the linking logic: every app's offer is consistent with its own schema,
 //! switches are independent, republishing never loses a switch, and Sticky sees exactly what the
-//! apps flag, through the registry only. Also a third-party registration, with nothing compiled in.
+//! apps flag, through the registry only.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use organiser_core::sticky::StickySpec;
 use organiser_engine::{Db, FieldType, ItemPatch, NewItem, Schema};
-use organiser_sticky::register::{self, parse_kind};
-use organiser_sticky::{Link, STICKY, STICKY_COLOR, flag, store};
+use organiser_sticky::{STICKY, STICKY_COLOR, flag, store};
 
 /// The registry is read from `XDG_CONFIG_HOME`: one test at a time may point it somewhere.
 static ENV: Mutex<()> = Mutex::new(());
@@ -84,17 +83,12 @@ fn every_offer_matches_the_apps_own_schema() {
                 Some(FieldType::Text),
                 "{slug}"
             );
-            assert!(
-                register::valid_name(k.kind) && register::valid_name(k.body),
-                "{slug}"
-            );
         }
     }
     // Apps must not collide in the registry.
     let ids: std::collections::HashSet<_> = apps().iter().map(|(s, _)| s.meta.id).collect();
     let slugs: std::collections::HashSet<_> = apps().iter().map(|(s, _)| s.meta.slug).collect();
     assert_eq!((ids.len(), slugs.len()), (3, 3));
-    assert!(apps().iter().all(|(s, _)| register::valid_id(s.meta.id)));
 }
 
 #[test]
@@ -245,135 +239,6 @@ fn an_edit_through_sticky_leaves_the_app_able_to_read_and_search_the_item() {
             .update(id, ItemPatch::default().title("again"))
             .unwrap();
     }
-}
-
-#[test]
-fn a_third_party_registers_and_links_with_nothing_compiled_in() {
-    let sb = Sandbox::new("third");
-    // Their database: any program that keeps items in the engine's layout. Here the layout is
-    // made with the engine, standing in for it.
-    let path = sb.db("tasks3p");
-    let mut db = Db::open(&path, &todo_schema::SCHEMA).unwrap();
-    let id = make(&mut db, &todo_schema::STICKY, "ship it", "to do");
-    flag::set_sticky(&mut db, id, true).unwrap();
-
-    // Not offered until registered.
-    assert!(store::load().unwrap().links.is_empty());
-
-    let link = Link {
-        app_id: "org.example.Tasks".into(),
-        name: "Example Tasks".into(),
-        slug: "tasks".into(),
-        db_path: path.to_string_lossy().into_owned(),
-        kinds: vec![parse_kind("task=notes").unwrap()],
-        enabled: true, // ignored: a registration is only an offer
-    };
-    let file = register::register(&link).unwrap();
-    assert!(file.starts_with(store::dropin_dir()));
-    let links = store::load().unwrap();
-    assert!(links.get("org.example.Tasks").is_some());
-    assert!(
-        !links.is_linked("org.example.Tasks"),
-        "registering does not link"
-    );
-
-    // Linking is the switch; it persists and the app is shown by what the registration says.
-    store::set_enabled_by_id("org.example.Tasks", true).unwrap();
-    let links = store::load().unwrap();
-    let ours = links.enabled().next().unwrap();
-    let loose = Db::open_loose(&ours.db_path).unwrap();
-    assert_eq!(loose.flagged_loose("task", STICKY).unwrap().len(), 1);
-
-    // A moved database is a new registration: the path changes, the switch stays.
-    let moved = Link {
-        db_path: "/elsewhere/tasks.db".into(),
-        ..link.clone()
-    };
-    register::register(&moved).unwrap();
-    let links = store::load().unwrap();
-    assert_eq!(
-        links.get("org.example.Tasks").unwrap().db_path,
-        "/elsewhere/tasks.db"
-    );
-    assert!(links.is_linked("org.example.Tasks"));
-
-    // Unregistering removes it everywhere.
-    register::unregister("org.example.Tasks").unwrap();
-    assert!(store::load().unwrap().links.is_empty());
-    assert!(!register::unregister_in(&store::dropin_dir(), "org.example.Tasks").unwrap());
-}
-
-#[test]
-fn bad_registrations_are_refused_and_bad_files_are_ignored() {
-    let sb = Sandbox::new("bad");
-    let ok = Link {
-        app_id: "org.example.Ok".into(),
-        db_path: "/x.db".into(),
-        kinds: vec![parse_kind("note=body").unwrap()],
-        ..Link::default()
-    };
-    let dir = store::dropin_dir();
-    for (what, bad) in [
-        (
-            "path in the id",
-            Link {
-                app_id: "../evil".into(),
-                ..ok.clone()
-            },
-        ),
-        (
-            "hidden id",
-            Link {
-                app_id: ".hidden".into(),
-                ..ok.clone()
-            },
-        ),
-        (
-            "no database",
-            Link {
-                db_path: String::new(),
-                ..ok.clone()
-            },
-        ),
-        (
-            "no kinds",
-            Link {
-                kinds: vec![],
-                ..ok.clone()
-            },
-        ),
-        (
-            "odd kind",
-            Link {
-                kinds: vec![parse_kind("a-b=body").unwrap()],
-                ..ok.clone()
-            },
-        ),
-        (
-            "odd field",
-            Link {
-                kinds: vec![parse_kind("note=$.x").unwrap()],
-                ..ok.clone()
-            },
-        ),
-    ] {
-        assert!(
-            register::register_in(&dir, &bad).is_err(),
-            "{what} must be refused"
-        );
-    }
-    assert!(register::unregister_in(&dir, "../evil").is_err());
-    assert!(parse_kind("nofield").is_err());
-
-    // A broken drop-in does not hide a good one.
-    register::register_in(&dir, &ok).unwrap();
-    std::fs::write(dir.join("broken.toml"), "this is [not toml").unwrap();
-    std::fs::write(dir.join("empty-id.toml"), "[[link]]\nname = \"x\"\n").unwrap();
-    std::fs::write(dir.join("readme.txt"), "ignored").unwrap();
-    let links = store::load().unwrap();
-    assert_eq!(links.links.len(), 1);
-    assert_eq!(links.links[0].app_id, "org.example.Ok");
-    let _ = &sb;
 }
 
 #[test]

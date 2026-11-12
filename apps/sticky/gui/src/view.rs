@@ -61,6 +61,10 @@ fn sheet<'a>(content: Element<'a, Message>, paper: Color, line: Color) -> Elemen
         .into()
 }
 
+fn label_owned<'a>(t: String, ink: Color) -> Element<'a, Message> {
+    text(t).size(14).color(ink).into()
+}
+
 fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
     let paper = color::paper(s.color.as_deref(), app.default_color());
     let ink = color::ink(paper);
@@ -89,23 +93,165 @@ fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
             TooltipPosition::Bottom,
         )
     };
-    // The colour button is a popover: the palette's swatches and a picker for any other colour.
-    let value = Hsva::parse(s.color.as_deref().unwrap_or(app.default_color()))
-        .unwrap_or_else(|| Hsva::from_rgb8(0xff, 0xf5, 0x9d));
-    let colors = ColorInput::new(
-        value,
-        &s.color_text,
-        move |t| Message::ColorText(win, t),
-        move |h| Message::ColorPick(win, h),
+    // The "⋮" menu, as in the reference Sticky Notes: every note (Sticky Notes' main window) and
+    // the paper colour on a page of its own. Drawn in the sticky's paper and ink.
+    let line = mix(paper, ink, 0.25);
+    let row_btn = |content: Element<'a, Message>, msg: Message| -> Element<'a, Message> {
+        button(content)
+            .width(Length::Fill)
+            .padding([6, 10])
+            .on_press(msg)
+            .style(move |_: &Theme, status| button::Style {
+                background: matches!(status, button::Status::Hovered)
+                    .then_some(Background::Color(Color { a: 0.12, ..ink })),
+                text_color: ink,
+                border: Border {
+                    radius: 8.0.into(),
+                    ..Border::default()
+                },
+                ..button::Style::default()
+            })
+            .into()
+    };
+    let label = |t: &'a str| text(t).size(14).color(ink);
+    let menu_page: Element<'a, Message> = if s.menu_colours {
+        let current = s.color.as_deref();
+        // The first five of the palette, one row each: a round swatch and the colour's name.
+        let rows = app.settings.sticky.palette.iter().take(5).map(|hex| {
+            let on = current.is_some_and(|c| c.eq_ignore_ascii_case(hex));
+            let fill = color::paper(Some(hex), app.default_color());
+            let swatch = container(space().width(16).height(16)).style(move |_: &Theme| {
+                container::Style {
+                    background: Some(Background::Color(fill)),
+                    border: Border {
+                        color: mix(fill, ink, 0.35),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..container::Style::default()
+                }
+            });
+            let mark: Element<'a, Message> = if on {
+                Icon::Check.colored(14.0, ink).into()
+            } else {
+                space().width(14).into()
+            };
+            row_btn(
+                row![
+                    swatch,
+                    text(color::name(hex)).size(14).color(ink),
+                    space().width(Length::Fill),
+                    mark
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into(),
+                Message::ColorText(win, hex.clone()),
+            )
+        });
+        column![
+            row_btn(
+                row![Icon::GoPrevious.colored(14.0, ink), label("Colour")]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into(),
+                Message::MenuColours(win, false)
+            ),
+            column(rows).spacing(2),
+        ]
+        .spacing(2)
+        .into()
+    } else {
+        column![
+            row_btn(label("All notes").into(), Message::OpenManager(win)),
+            row_btn(
+                row![
+                    label("Colour"),
+                    space().width(Length::Fill),
+                    Icon::GoNext.colored(14.0, ink)
+                ]
+                .align_y(Alignment::Center)
+                .into(),
+                Message::MenuColours(win, true)
+            ),
+        ]
+        .into()
+    };
+    let surface = move |page: Element<'a, Message>| {
+        container(page)
+        .width(190)
+        .padding(6)
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(paper)),
+            border: Border {
+                color: line,
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 10.0,
+            },
+            ..container::Style::default()
+        })
+    };
+    let menu: Element<'a, Message> = Popover::new(Icon::ViewMore.colored(16.0, ink), surface(menu_page))
+        .appearance(PopoverAppearance::Flat)
+        .keep_open(true)
+        .scrim(false)
+        .align(PopoverAlign::End)
+        .into();
+    // Closed by changing the shape of the view (see `Sticky::menu_flip`).
+    let more: Element<'a, Message> = if s.menu_flip {
+        container(menu).into()
+    } else {
+        menu
+    };
+
+    // "+": choose which linked app to create in.
+    let apps: Vec<Element<'a, Message>> = app
+        .links()
+        .enabled()
+        .map(|l| {
+            let name = if l.name.is_empty() {
+                l.slug.clone()
+            } else {
+                l.name.clone()
+            };
+            row_btn(label_owned(name, ink), Message::New(win, l.app_id.clone()))
+        })
+        .collect();
+    let choices: Element<'a, Message> = if apps.is_empty() {
+        container(text("Link an app in Sticky Notes first.").size(13).color(faint))
+            .padding([6, 10])
+            .into()
+    } else {
+        column(apps).spacing(2).into()
+    };
+    let add_menu: Element<'a, Message> = Popover::new(
+        Icon::ListAdd.colored(16.0, ink),
+        surface(column![
+            container(text("New in…").size(12).color(faint)).padding([4, 10]),
+            choices
+        ].into()),
     )
-    .swatches(app.settings.sticky.palette.iter())
-    .trigger(container(Icon::Palette.colored(16.0, ink)).padding(6));
+    .appearance(PopoverAppearance::Flat)
+    .keep_open(true)
+    .scrim(false)
+    .into();
+    let add: Element<'a, Message> = if s.menu_flip {
+        container(add_menu).into()
+    } else {
+        add_menu
+    };
 
     // The strip to drag the sticky by, with its tools: colours, edit/read, remove.
     let top = mouse_area(
         row![
+            add,
             space().width(Length::Fill),
-            colors,
+            more,
             tool(
                 if s.editing { Icon::Eye } else { Icon::Edit },
                 if s.editing {

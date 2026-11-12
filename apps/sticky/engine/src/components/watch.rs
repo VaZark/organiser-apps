@@ -15,21 +15,13 @@ fn stamp(p: &Path) -> Option<(u64, SystemTime)> {
 }
 
 /// A hash of the stamps of every file whose change could change what Sticky shows: the registry,
-/// the registrations in the drop-in folder, and the linked databases with their write-ahead logs
+/// Sticky's own per-item state, and the linked databases with their write-ahead logs
 /// (where an app's write lands first).
 fn fingerprint(extra_dbs: &[PathBuf]) -> u64 {
     let mut h = DefaultHasher::new();
     let links = store::path();
     stamp(&links).hash(&mut h);
     stamp(&store::local_path()).hash(&mut h);
-    let mut files: Vec<PathBuf> = std::fs::read_dir(store::dropin_dir())
-        .map(|d| d.flatten().map(|e| e.path()).collect())
-        .unwrap_or_default();
-    files.sort();
-    for f in &files {
-        f.hash(&mut h);
-        stamp(f).hash(&mut h);
-    }
     for db in extra_dbs {
         stamp(db).hash(&mut h);
         let mut wal = db.as_os_str().to_owned();

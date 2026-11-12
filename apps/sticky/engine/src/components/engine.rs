@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use organiser_engine::{Db, Item, ItemPatch};
-use organiser_sticky::{Link, Links, Local, STICKY, flag, register, store};
+use organiser_sticky::{Link, Links, Local, STICKY, flag, store};
 use serde_json::Value;
 
 use crate::primitives::item::{Changes, Key, StickyItem};
@@ -178,16 +178,6 @@ impl Engine {
     /// Switch an app on or off, then look again.
     pub fn set_linked(&mut self, app_id: &str, on: bool) -> Result<Changes, String> {
         store::set_enabled_by_id(app_id, on)?;
-        self.refresh()
-    }
-
-    /// Offer an app (see `organiser_sticky::register`); it stays off until linked.
-    pub fn register(&mut self, link: &Link) -> Result<(), String> {
-        register::register(link).map(|_| ())
-    }
-
-    pub fn unregister(&mut self, app_id: &str) -> Result<Changes, String> {
-        register::unregister(app_id)?;
         self.refresh()
     }
 }

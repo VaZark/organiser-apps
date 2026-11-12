@@ -1,7 +1,7 @@
 //! # sticky-engine
 //!
-//! Everything Sticky Notes *does*, with no UI: which apps are linked (the registry the apps and
-//! third parties write, see `organiser-sticky`), which of their items are stickies, editing one,
+//! Everything Sticky Notes *does*, with no UI: which apps are linked (the registry the apps
+//! write, see `organiser-sticky`), which of their items are stickies, editing one,
 //! and dropping one. The GUI and the command line are frontends over [`Engine`].
 //!
 //! Sticky owns no items. Each sticky is an item of a linked app's database, and the app alone says

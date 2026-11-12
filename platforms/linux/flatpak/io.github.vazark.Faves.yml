@@ -32,7 +32,7 @@ modules:
       - install -Dm755 target/release/faves-gui /app/bin/faves-gui
       - install -Dm755 platforms/linux/flatpak/faves-gui-launch /app/bin/faves-gui-launch
       - install -Dm644 platforms/linux/icon/io.github.vazark.Faves.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Faves.svg
-      - mkdir -p /app/share/applications && target/release/faves-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=faves-gui-launch/' > /app/share/applications/io.github.vazark.Faves.desktop
+      - mkdir -p /app/share/applications && target/release/faves-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=faves-gui-launch %u/' > /app/share/applications/io.github.vazark.Faves.desktop
       - install -Dm644 platforms/linux/flatpak/io.github.vazark.Faves.metainfo.xml /app/share/metainfo/io.github.vazark.Faves.metainfo.xml
     sources:
       - type: dir

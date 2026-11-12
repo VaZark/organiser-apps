@@ -32,7 +32,7 @@ modules:
       - install -Dm755 target/release/notes-gui /app/bin/notes-gui
       - install -Dm755 platforms/linux/flatpak/notes-gui-launch /app/bin/notes-gui-launch
       - install -Dm644 platforms/linux/icon/io.github.vazark.Notes.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Notes.svg
-      - mkdir -p /app/share/applications && target/release/notes-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=notes-gui-launch/' > /app/share/applications/io.github.vazark.Notes.desktop
+      - mkdir -p /app/share/applications && target/release/notes-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=notes-gui-launch %u/' > /app/share/applications/io.github.vazark.Notes.desktop
       - install -Dm644 platforms/linux/flatpak/io.github.vazark.Notes.metainfo.xml /app/share/metainfo/io.github.vazark.Notes.metainfo.xml
     sources:
       - type: dir

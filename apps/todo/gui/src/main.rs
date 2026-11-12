@@ -9,7 +9,7 @@ use organiser_ui::shell;
 
 fn main() -> iced::Result {
     if std::env::args().nth(1).as_deref() == Some("--print-desktop-entry") {
-        print!("{}", shell::desktop_entry(&todo_schema::META, "todo-gui"));
+        print!("{}", shell::linked_desktop_entry(&todo_schema::META, "todo-gui"));
         return Ok(());
     }
     shell::init();

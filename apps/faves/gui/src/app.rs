@@ -13,6 +13,7 @@ use organiser_ui::iad::primitives::rich_text as rt;
 use organiser_ui::iad::primitives::tag_groups::{GroupEvent, TagGroups};
 use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::scheme::Mode;
+use organiser_ui::shell;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
@@ -294,7 +295,7 @@ impl App {
                 0,
             );
         }
-        if std::env::var_os("FAVES_GUI_NEW").is_some() {
+        if std::env::var_os("FAVES_GUI_NEW").is_some() || shell::wants_new(&faves_schema::META) {
             let _ = app.update(Message::New);
         }
         if let Ok(page) = std::env::var("FAVES_GUI_PREFS") {

@@ -65,9 +65,8 @@ pub const DEFAULT_PALETTE: [&str; 10] = [
 ];
 
 /// The paper colours Sticky Notes offers, until its palette is changed.
-pub const DEFAULT_STICKY_PALETTE: [&str; 7] = [
-    "#fff59d", "#c5e1a5", "#90caf9", "#f8bbd0", "#ffcc80", "#ce93d8", "#e0e0e0",
-];
+pub const DEFAULT_STICKY_PALETTE: [&str; 5] =
+    ["#fff59d", "#c5e1a5", "#90caf9", "#f8bbd0", "#ffcc80"];
 
 /// How long a note stays in the trash, unless changed.
 pub const DEFAULT_TRASH_DAYS: u32 = 30;

@@ -13,7 +13,7 @@
 pub mod components;
 pub mod primitives;
 
-pub use components::{autostart, discover, flag, register, store};
+pub use components::{autostart, discover, flag, store};
 pub use primitives::local::{Local, LocalItem};
 pub use primitives::registry::{KindSpec, Link, Links};
 

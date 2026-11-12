@@ -145,6 +145,35 @@ pub fn launch() -> Result<(), String> {
         .map_err(|e| format!("cannot start Sticky Notes: {e}"))
 }
 
+/// Open an app on its create page, as `--new` does. In a sandbox the app is reached through the
+/// desktop portal, by the URI scheme it declares (`organiser-<slug>://new`); outside, by its
+/// binary on `PATH` (`<slug>-gui`) or its Flatpak.
+pub fn open_new(slug: &str, app_id: &str) -> Result<(), String> {
+    let mut cmd = if in_flatpak() {
+        let mut c = Command::new("xdg-open");
+        c.arg(format!("organiser-{slug}://new"));
+        c
+    } else if let Some(bin) = on_path(&format!("{slug}-gui")) {
+        let mut c = Command::new(bin);
+        c.arg("--new");
+        c
+    } else {
+        let mut c = Command::new("flatpak");
+        c.args(["run", app_id, "--new"]);
+        c
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|e| format!("cannot start {app_id}: {e}"))
+}
+
 /// Whether `args` (a command line's arguments) ask for Sticky to start in the background: the
 /// `--background` flag, or the URI the portal passes when it opens [`START_URI`].
 pub fn wants_background<S: AsRef<str>>(args: &[S]) -> bool {

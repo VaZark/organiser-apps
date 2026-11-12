@@ -16,6 +16,7 @@ use organiser_ui::iad::primitives::tag_groups::{GroupEvent, TagGroups};
 use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::expand::{Folds, flat_rows};
 use organiser_ui::primitives::scheme::Mode;
+use organiser_ui::shell;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
@@ -330,7 +331,7 @@ impl App {
         if std::env::var_os("TODO_GUI_ADD_TAG").is_some() {
             app.with_details(|d| d.adding_tag = true);
         }
-        if std::env::var_os("TODO_GUI_NEW").is_some() {
+        if std::env::var_os("TODO_GUI_NEW").is_some() || shell::wants_new(&todo_schema::META) {
             let _ = app.update(Message::New);
         }
         if let Ok(page) = std::env::var("TODO_GUI_PREFS") {

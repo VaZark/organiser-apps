@@ -32,7 +32,7 @@ modules:
       - install -Dm755 target/release/todo-gui /app/bin/todo-gui
       - install -Dm755 platforms/linux/flatpak/todo-gui-launch /app/bin/todo-gui-launch
       - install -Dm644 platforms/linux/icon/io.github.vazark.Todo.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Todo.svg
-      - mkdir -p /app/share/applications && target/release/todo-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=todo-gui-launch/' > /app/share/applications/io.github.vazark.Todo.desktop
+      - mkdir -p /app/share/applications && target/release/todo-gui --print-desktop-entry | sed 's/^Exec=.*/Exec=todo-gui-launch %u/' > /app/share/applications/io.github.vazark.Todo.desktop
       - install -Dm644 platforms/linux/flatpak/io.github.vazark.Todo.metainfo.xml /app/share/metainfo/io.github.vazark.Todo.metainfo.xml
     sources:
       - type: dir

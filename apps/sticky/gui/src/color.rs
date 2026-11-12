@@ -52,3 +52,15 @@ mod tests {
         assert_eq!(ink(Color::BLACK), Color::from_rgb8(0xf5, 0xf5, 0xf5));
     }
 }
+
+/// What to call a palette colour: its name if it is one of the presets, else its hex code.
+pub fn name(hex: &str) -> String {
+    match hex.to_ascii_lowercase().as_str() {
+        "#fff59d" => "Yellow".into(),
+        "#c5e1a5" => "Green".into(),
+        "#90caf9" => "Blue".into(),
+        "#f8bbd0" => "Pink".into(),
+        "#ffcc80" => "Orange".into(),
+        other => other.into(),
+    }
+}
