@@ -1,22 +1,24 @@
-//! The window: a sidebar (Notes, Archive, Trash) beside a Keep-style grid of cards.
+//! The window: a sidebar (All, Favorites, the folders, Archive, Trash) beside a Keep-style grid of
+//! cards, or a list.
 //! A note's details slide in over the grid.
 
 mod details;
 mod filter;
+mod folder_settings;
 mod grid;
 mod prefs;
+mod section_settings;
 mod sidebar;
 
-use notes_schema::views::Scope;
+use notes_schema::views::{Scope, Sort};
 use organiser_ui::Element;
 use organiser_ui::components::new_back::new_or_back;
-use organiser_ui::components::primary_menu::primary_menu;
 use organiser_ui::components::search;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::shortcut::Shortcuts;
 use organiser_ui::iad::windows::{Chrome, State};
-use organiser_ui::widgets::details_dock::details_dock;
+use organiser_ui::widgets::details_dock::{details_dock, details_drawer};
 use organiser_ui::widgets::responsive_dialog;
 
 use crate::app::{App, Message};
@@ -46,17 +48,28 @@ impl App {
         let radius = self.chrome().radius();
         let body: Element<'_, Message> = responsive(move |size| {
             let width = size.width;
-            let collapsed = split_collapsed(width);
+            let narrow = split_collapsed(width);
+            // A wide window can hide its sidebar too, as a narrow one has none docked.
+            let collapsed = narrow || self.sidebar_hidden;
             let side_head = header_bar()
                 .chrome(&self.chrome().edges(true, false), Message::Window)
                 .title("Notes");
             let side = toolbar_view(self.sidebar()).top_bar(side_head);
 
-            let start: Option<Element<'_, Message>> = collapsed.then(|| {
-                icon_button(Icon::Sidebar)
-                    .on_press(Message::Drawer(true))
-                    .into()
-            });
+            // The sidebar button: it opens the drawer of a narrow window, and hides or shows the
+            // docked sidebar of a wide one.
+            let start: Option<Element<'_, Message>> = Some(
+                tooltip(
+                    icon_button(Icon::Sidebar).on_press(if narrow {
+                        Message::Drawer(true)
+                    } else {
+                        Message::ToggleSidebar
+                    }),
+                    "Sidebar",
+                    TooltipPosition::Bottom,
+                )
+                .into(),
+            );
             let room = if collapsed {
                 width
             } else {
@@ -67,9 +80,22 @@ impl App {
                 self.grid_page(width),
                 self.details.is_some().then(|| self.details_pane()),
             );
+            // A folder's settings are a drawer at the side of the notes.
+            let page = details_drawer(
+                page,
+                self.folder_settings.is_some().then(|| self.folder_settings_pane()),
+                Message::CloseFolderSettings,
+            );
+            // And so are a section's.
+            let page = details_drawer(
+                page,
+                self.section_settings.is_some().then(|| self.section_settings_pane()),
+                Message::CloseSectionSettings,
+            );
             let content = toolbar_view(page).top_bar(head);
             let window: Element<'_, Message> = NavigationSplitView::new(side, content)
                 .adapt(width)
+                .collapsed(collapsed)
                 .show_sidebar(self.drawer_open)
                 .on_close_drawer(Message::Drawer(false))
                 .window_radius(radius)
@@ -82,7 +108,9 @@ impl App {
             } else {
                 None
             };
-            responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false)
+            let page = responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false);
+            // The question about a folder's notes is a small alert over everything.
+            present_dialog(page, self.folder_delete_dialog(), Some(Message::FolderDeleteCancel), radius)
         })
         .into();
         let framed = self.chrome().frame(body, Message::Window);
@@ -147,14 +175,38 @@ impl App {
             head = head.title(self.heading());
         }
         // The menu and search are all the header keeps at the end.
-        head.pack_end(primary_menu(Message::OpenPrefs))
+        head.pack_end(self.actions_menu())
             .pack_end(search::button(Message::ToggleSearch))
+    }
+
+    /// The main menu: how the notes are shown and ordered, and Preferences.
+    fn actions_menu(&self) -> Element<'_, Message> {
+        let shown = vec![MenuItem::switch(
+            "List view",
+            self.list_view,
+            Message::ListView(!self.list_view),
+        )];
+        let sort = Menu::new("Sort by").section(
+            Sort::ALL
+                .map(|s| MenuItem::select(s.label(), self.sort == s, Message::SetSort(s))),
+        );
+        let mut menu = Menu::new("Menu")
+            .section(shown)
+            .section([MenuItem::submenu("Sort by", sort)]);
+        menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);
+        menu_button(Icon::OpenMenu, menu).tooltip("Main menu").into()
     }
 
     /// The title of what the window shows.
     pub(crate) fn heading(&self) -> String {
         match self.scope {
             Scope::Notes => "Notes".into(),
+            Scope::Favorites => "Favorites".into(),
+            Scope::Folder(id) => self
+                .folders
+                .iter()
+                .find(|s| s.folder.id == id)
+                .map_or_else(|| "Folder".into(), |s| s.folder.title.clone()),
             Scope::Archive => "Archive".into(),
             Scope::Trash => "Trash".into(),
         }

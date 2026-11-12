@@ -27,6 +27,20 @@ impl App {
             .description("Start with finished tasks shown, in every view.")
             .flat(true),
             EntryRow::switch(
+                "Group by epic",
+                todo.group_by_epic,
+                Message::PrefGroupByEpic
+            )
+            .description("In the views of every task, group them by epic after the pinned ones, the tasks in no epic last.")
+            .flat(true),
+            EntryRow::switch(
+                "Group by section",
+                todo.group_by_section,
+                Message::PrefGroupBySection
+            )
+            .description("On an epic's page, group its tasks by section.")
+            .flat(true),
+            EntryRow::switch(
                 "Show subtasks",
                 todo.show_subtasks,
                 Message::PrefShowSubtasks

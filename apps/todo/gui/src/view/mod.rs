@@ -1,8 +1,9 @@
-//! The window. There are three views of the same tasks, switched from the menu:
+//! The window. There are four views of the same tasks, switched from the menu:
 //!
 //! * the **notes**: every task a note, in a grid of cards (the default);
 //! * the **board**: a kanban board, a column per status;
-//! * the **list**: the nested task list.
+//! * the **list**: the nested task list;
+//! * the **quadrants**: the Eisenhower matrix, four boxes each a compact list.
 //!
 //! All have a sidebar of All, Current tasks and epics, open a task's details beside or over
 //! them, and open the filter from the search.
@@ -13,6 +14,7 @@ mod filter;
 mod list;
 mod notes;
 mod prefs;
+mod quadrants;
 mod sidebar;
 mod statuses;
 
@@ -146,7 +148,7 @@ impl App {
         ));
         let start_buttons = usize::from(start_present) + 1;
         // Search and the menu are all that is left at the end: everything else is in the menu.
-        let end_buttons = 3;
+        let end_buttons = 2;
         if self.search.is_open() {
             head = head.pack_start(search::balance(end_buttons, start_buttons, room));
         }
@@ -160,38 +162,24 @@ impl App {
         } else {
             head.title(self.heading())
         };
-        // From the window controls inwards: the menu, then search, then the order beside it.
+        // From the window controls inwards: the menu, then search.
         head.pack_end(self.actions_menu())
             .pack_end(search::button(Message::ToggleSearch))
-            .pack_end(self.sort_menu())
     }
 
-    /// The order of the tasks: a button beside the search, lit while it is not the manual one.
-    fn sort_menu(&self) -> Element<'_, Message> {
-        let by = Menu::new("Sort by")
-            .check_style(MenuCheckStyle::Mark)
-            .section(
-                SortKey::ALL
-                    .map(|k| MenuItem::check(k.label(), self.sort == k, Message::SetSort(k))),
-            );
-        menu_button(Icon::Sort, by)
-            .tooltip(if self.sort == SortKey::Manual {
-                "Sort".to_string()
-            } else {
-                format!("Sorted by {}", self.sort.label().to_lowercase())
-            })
-            .into()
-    }
-
-    /// The view and what it shows, and Preferences: everything the header does not need a button
-    /// for. The views are a submenu; what a view shows are switches.
+    /// The view, the order and what is shown, and Preferences: everything the header does not need a
+    /// button for. The views and the orders are submenus; what is shown are switches.
     fn actions_menu(&self) -> Element<'_, Message> {
         let views = Menu::new("View")
-            .check_style(MenuCheckStyle::Mark)
             .section(
                 View::ALL
-                    .map(|v| MenuItem::check(v.label(), self.view == v, Message::SetView(v))),
+                    .map(|v| MenuItem::select(v.label(), self.view == v, Message::SetView(v))),
             );
+        // The order of the tasks (pinned ones are always first): a submenu, one order ticked.
+        let sort = Menu::new("Sort by").section(
+            SortKey::ALL
+                .map(|k| MenuItem::select(k.label(), self.sort == k, Message::SetSort(k))),
+        );
         let mut shows = vec![
             MenuItem::switch(
                 "Show closed tasks",
@@ -212,7 +200,10 @@ impl App {
         menu_button(
             Icon::OpenMenu,
             Menu::new("Menu")
-                .section([MenuItem::submenu("View", views)])
+                .section([
+                    MenuItem::submenu("View", views),
+                    MenuItem::submenu("Sort by", sort),
+                ])
                 .section(shows)
                 .section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]),
         )
@@ -245,18 +236,29 @@ impl App {
     // ---- the window: a sidebar of All, current tasks and epics, beside the board or the list ----
 
     fn shell(&self, width: f32) -> Element<'_, Message> {
-        let collapsed = split_collapsed(width);
+        let narrow = split_collapsed(width);
+        // A wide window can hide its sidebar too, as a narrow one has none docked.
+        let collapsed = narrow || self.sidebar_hidden;
         let radius = self.chrome().radius();
         let side_head = header_bar()
             .chrome(&self.chrome().edges(true, false), Message::Window)
             .title("Todo");
         let side = toolbar_view(self.sidebar()).top_bar(side_head);
 
-        let start: Option<Element<'_, Message>> = collapsed.then(|| {
-            icon_button(Icon::Sidebar)
-                .on_press(Message::Drawer(true))
-                .into()
-        });
+        // The sidebar button: it opens the drawer of a narrow window, and hides or shows the
+        // docked sidebar of a wide one.
+        let start: Option<Element<'_, Message>> = Some(
+            tooltip(
+                icon_button(Icon::Sidebar).on_press(if narrow {
+                    Message::Drawer(true)
+                } else {
+                    Message::ToggleSidebar
+                }),
+                "Sidebar",
+                TooltipPosition::Bottom,
+            )
+            .into(),
+        );
         // The header spans what the sidebar leaves: a quarter of the window, from 180 to 280.
         let room = if collapsed {
             width
@@ -268,6 +270,7 @@ impl App {
         let page: Element<'_, Message> = match self.view {
             View::Notes => self.notes_page(room),
             View::Board => self.board_page(width),
+            View::Quadrants => self.quadrants_page(room),
             View::List => page(self.list_page(width < STACK_BELOW))
                 .maximum_size(1000.0)
                 .into(),
@@ -275,6 +278,7 @@ impl App {
         let content = toolbar_view(self.over_details(page, width)).top_bar(head);
         NavigationSplitView::new(side, content)
             .adapt(width)
+            .collapsed(collapsed)
             .show_sidebar(self.drawer_open)
             .on_close_drawer(Message::Drawer(false))
             .window_radius(radius)
@@ -293,6 +297,7 @@ impl App {
             (Scope::All, View::Notes) => "Notes".into(),
             (Scope::All, View::Board) => "Board".into(),
             (Scope::All, View::List) => "All tasks".into(),
+            (Scope::All, View::Quadrants) => "Quadrants".into(),
         }
     }
 }

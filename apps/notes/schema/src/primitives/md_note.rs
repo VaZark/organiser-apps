@@ -34,10 +34,14 @@ mod tests {
     fn note(title: &str, body: &str) -> Note {
         Note {
             id: 1,
+            folder_id: None,
+            section: None,
             title: title.into(),
             body: body.into(),
             color: None,
             pinned: false,
+            favorite: false,
+            rating: None,
             sticky: false,
             archived: false,
             trashed: None,

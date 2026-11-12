@@ -8,10 +8,12 @@ use organiser_cli_kit::{Extension, Output};
 use organiser_engine::{Db, Error, Node, Result, TagFilter};
 use serde_json::json;
 use todo_schema::due::label;
-use todo_schema::lifecycle::{create_epic, create_section, delete_epic, delete_section, reparent, set_status};
+use todo_schema::lifecycle::{
+    create_epic, create_section, delete_epic, delete_section, edit_epic, reparent, set_status,
+};
 use todo_schema::status::Statuses;
 use todo_schema::statuses::{self, StatusEdit, ensure_defaults};
-use todo_schema::task::{EpicSummary, Task};
+use todo_schema::task::{Edit, EpicSummary, Task};
 use todo_schema::views::{Filter, Scope, epics, forest, tasks, today};
 
 struct Todo;
@@ -141,14 +143,13 @@ fn tasks_out(v: &[Task], st: &Statuses) -> Output {
     }
 }
 
-fn epics_out(v: &[EpicSummary], st: &Statuses) -> Output {
+fn epics_out(v: &[EpicSummary]) -> Output {
     let human = v
         .iter()
         .map(|s| {
             let e = &s.epic;
             let mut l = format!(
-                "{} {:>4}  {}  {}/{} done",
-                mark(st, e.status),
+                "{:>4}  {}  {}/{} done",
                 e.id,
                 e.title,
                 s.total - s.open,
@@ -190,12 +191,12 @@ impl Extension for Todo {
             list_args(
                 Command::new("current").about("Tasks whose start-to-due span includes today"),
             ),
-            Command::new("epics")
-                .about("List epics with progress")
-                .arg(Arg::new("all").long("all").action(ArgAction::SetTrue)),
+            Command::new("epics").about("List epics with progress"),
             Command::new("epic-new")
                 .about("Create an epic")
-                .arg(Arg::new("title").required(true)),
+                .arg(Arg::new("title").required(true))
+                .arg(Arg::new("color").long("color").help("#rrggbb"))
+                .arg(Arg::new("icon").long("icon").help("an icon name (heart, star, home…)")),
             Command::new("epic-rm")
                 .about("Delete an epic; its tasks stay")
                 .arg(id()),
@@ -338,14 +339,30 @@ impl Extension for Todo {
                     json: json!(flat),
                 })
             })),
-            "epics" => Some(epics(db, m.get_flag("all")).map(|v| epics_out(&v, &st))),
+            "epics" => Some(epics(db).map(|v| epics_out(&v))),
             "epic-new" => Some(
-                create_epic(db, m.get_one::<String>("title").map_or("", String::as_str)).map(|e| {
-                    Output::Custom {
+                create_epic(db, m.get_one::<String>("title").map_or("", String::as_str))
+                    .and_then(|e| {
+                        // A colour and an icon given at the start.
+                        let (color, icon) =
+                            (m.get_one::<String>("color"), m.get_one::<String>("icon"));
+                        if color.is_none() && icon.is_none() {
+                            return Ok(e);
+                        }
+                        edit_epic(
+                            db,
+                            e.id,
+                            &Edit {
+                                color: color.map(|c| Some(c.clone())),
+                                icon: icon.map(|i| Some(i.clone())),
+                                ..Edit::default()
+                            },
+                        )
+                    })
+                    .map(|e| Output::Custom {
                         human: format!("created epic {} ({})", e.id, e.title),
                         json: json!(e),
-                    }
-                }),
+                    }),
             ),
             "section-new" => Some(
                 create_section(db, id, m.get_one::<String>("title").map_or("", String::as_str))

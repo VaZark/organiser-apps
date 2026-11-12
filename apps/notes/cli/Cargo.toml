@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color"] }
 organiser-cli-kit.workspace = true
+organiser-core.workspace = true
 organiser-engine.workspace = true
 serde_json.workspace = true
 notes-schema.workspace = true

@@ -413,7 +413,7 @@ impl App {
         let mut apps = column![].spacing(12);
         if self.links().links.is_empty() {
             apps = apps.push(caption(
-                "No app has offered stickies yet. Open Notes, Todo or Faves once and it will appear here.",
+                "No app has offered stickies yet. Open Notes or Todo once and it will appear here.",
             ));
         }
         for link in &self.links().links {

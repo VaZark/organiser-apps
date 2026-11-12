@@ -37,9 +37,55 @@ pub fn snippet(s: &str, lines: usize, max: usize) -> String {
     }
 }
 
+/// The first line of Markdown that says something, as plain text for a one-line preview: without
+/// its heading marks, quote mark, bullet, number or task box, and without emphasis and code
+/// marks, cut to `max` characters with an ellipsis. Empty text gives an empty line.
+pub fn plain_line(markdown: &str, max: usize) -> String {
+    let line = markdown
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.chars().all(|c| matches!(c, '-' | '*' | '_' | '=' | '`')))
+        .unwrap_or_default();
+    let mut s = line.trim_start_matches(['#', '>']).trim_start();
+    // A bullet or a number, then a task box.
+    if let Some(rest) = s
+        .strip_prefix("- ")
+        .or_else(|| s.strip_prefix("* "))
+        .or_else(|| s.strip_prefix("+ "))
+    {
+        s = rest.trim_start();
+    } else if let Some((n, rest)) = s.split_once(". ")
+        && !n.is_empty()
+        && n.chars().all(|c| c.is_ascii_digit())
+    {
+        s = rest.trim_start();
+    }
+    for boxed in ["[ ] ", "[x] ", "[X] "] {
+        if let Some(rest) = s.strip_prefix(boxed) {
+            s = rest;
+        }
+    }
+    let plain: String = s.chars().filter(|c| !matches!(c, '*' | '`' | '~')).collect();
+    ellipsize(plain.trim(), max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_preview_line_loses_its_markdown_marks() {
+        assert_eq!(plain_line("## Day 1\nmore", 80), "Day 1");
+        assert_eq!(plain_line("- [x] Milk\n- [ ] Eggs", 80), "Milk");
+        assert_eq!(plain_line("> The best way", 80), "The best way");
+        assert_eq!(plain_line("3. Third item", 80), "Third item");
+        assert_eq!(plain_line("A habit tracker that *never* nags.", 80), "A habit tracker that never nags.");
+        assert_eq!(plain_line("Network: `casa-5g`.", 80), "Network: casa-5g.");
+        // A rule or blank lines first are skipped; nothing at all is empty.
+        assert_eq!(plain_line("\n---\nText", 80), "Text");
+        assert_eq!(plain_line("", 80), "");
+        assert_eq!(plain_line("abcdefghij", 5), "abcd…");
+    }
 
     #[test]
     fn short_text_is_untouched_and_long_text_ends_in_an_ellipsis() {

@@ -27,11 +27,10 @@ impl App {
         for s in self
             .epics
             .iter()
-            .filter(|s| self.statuses.is_open(s.epic.status))
         {
             let title = format!("{}  ({}/{})", s.epic.title, s.total - s.open, s.total);
             let mut item = SidebarItem::new(title, Message::SetEpic(Some(s.epic.id)))
-                .icon(icons::folder())
+                .icon(icons::named(s.epic.icon.as_deref()))
                 .selected(self.scope == Scope::All && self.epic_filter == Some(s.epic.id));
             // The folder wears the epic's colour.
             if let Some(c) = self.epic_color(s.epic.id) {
@@ -50,6 +49,10 @@ impl App {
         }
         items.push(new_epic);
 
-        SidebarList::new(items).style(SidebarStyle::List).into()
+        // All and Current tasks stay in view; the epics scroll beneath them.
+        SidebarList::new(items)
+            .style(SidebarStyle::List)
+            .fixed_top(2)
+            .into()
     }
 }

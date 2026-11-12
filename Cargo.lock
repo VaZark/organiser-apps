@@ -1097,41 +1097,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
-name = "faves-cli"
-version = "0.0.1"
-dependencies = [
- "clap",
- "faves-schema",
- "organiser-cli-kit",
- "organiser-engine",
- "serde_json",
-]
-
-[[package]]
-name = "faves-gui"
-version = "0.0.1"
-dependencies = [
- "faves-schema",
- "iced",
- "organiser-core",
- "organiser-engine",
- "organiser-markdown",
- "organiser-sticky",
- "organiser-ui",
- "serde_json",
-]
-
-[[package]]
-name = "faves-schema"
-version = "0.0.1"
-dependencies = [
- "organiser-core",
- "organiser-engine",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "fax"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1586,7 +1551,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iad-icons"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=bd83737e85e8c1640b900f937b0531d52c529c7e#bd83737e85e8c1640b900f937b0531d52c529c7e"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=19f924386b446e0cf90db1a2439be6d22f425ddb#19f924386b446e0cf90db1a2439be6d22f425ddb"
 
 [[package]]
 name = "iana-time-zone"
@@ -1632,7 +1597,7 @@ dependencies = [
 [[package]]
 name = "iced-adaptive-design"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=bd83737e85e8c1640b900f937b0531d52c529c7e#bd83737e85e8c1640b900f937b0531d52c529c7e"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=19f924386b446e0cf90db1a2439be6d22f425ddb#19f924386b446e0cf90db1a2439be6d22f425ddb"
 dependencies = [
  "iad-icons",
  "iced",
@@ -2564,6 +2529,7 @@ dependencies = [
  "clap",
  "notes-schema",
  "organiser-cli-kit",
+ "organiser-core",
  "organiser-engine",
  "serde_json",
 ]
@@ -3105,7 +3071,6 @@ dependencies = [
 name = "organiser-sticky"
 version = "0.0.1"
 dependencies = [
- "faves-schema",
  "notes-schema",
  "organiser-core",
  "organiser-engine",
@@ -4159,7 +4124,6 @@ dependencies = [
 name = "sticky-engine"
 version = "0.0.1"
 dependencies = [
- "faves-schema",
  "notes-schema",
  "organiser-core",
  "organiser-engine",

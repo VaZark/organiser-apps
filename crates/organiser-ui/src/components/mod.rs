@@ -3,10 +3,14 @@
 pub mod action;
 pub mod card;
 pub mod chip;
+pub mod color_pick;
 pub mod dot;
 pub mod empty;
 pub mod heart;
+pub mod group_header;
+pub mod icon_pick;
 pub mod icons;
+pub mod list_item;
 pub mod new_back;
 pub mod page_switcher;
 pub mod pie;

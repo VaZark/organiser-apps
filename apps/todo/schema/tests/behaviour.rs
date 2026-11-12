@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use organiser_engine::{Db, TagFilter};
 use todo_schema::SCHEMA;
 use todo_schema::lifecycle::{
-    NewTask, create, create_epic, delete_epic, edit, set_epic_status, set_status, set_tags,
+    NewTask, create, create_epic, delete_epic, edit, set_status, set_tags,
 };
 use todo_schema::priority::Priority;
 use todo_schema::status::Status;
@@ -286,20 +286,16 @@ fn epics_group_tasks_and_report_progress() {
     };
     assert_eq!(titles(&all(&db, &f)), ["flights", "hotel"]);
     set_status(&mut db, a.id, DONE).unwrap();
-    let list = epics(&db, false).unwrap();
+    let list = epics(&db).unwrap();
     let holiday = list.iter().find(|s| s.epic.id == e.id).unwrap();
     assert_eq!(
         (holiday.open, holiday.total, holiday.progress()),
         (1, 2, 0.5)
     );
 
-    set_epic_status(&mut db, other.id, DONE).unwrap();
-    assert_eq!(
-        epics(&db, false).unwrap().len(),
-        1,
-        "closed epics are hidden"
-    );
-    assert_eq!(epics(&db, true).unwrap().len(), 2);
+    // An epic has no status, so none is ever hidden for being finished.
+    assert_eq!(epics(&db).unwrap().len(), 2);
+    let _ = other;
 }
 
 #[test]
@@ -453,10 +449,6 @@ fn task_status_commands_refuse_epics() {
     let mut db = db();
     let e = create_epic(&mut db, "E").unwrap();
     assert!(set_status(&mut db, e.id, DONE).is_err());
-    assert_eq!(
-        set_epic_status(&mut db, e.id, DONE).unwrap().status,
-        Some(DONE)
-    );
 }
 
 #[test]
@@ -611,8 +603,9 @@ fn data_from_before_custom_statuses_is_moved_over_by_name() {
     let id = |n: &str| Some(all.by_name(n).unwrap().id);
     assert_eq!(Task::from(&db.get(a).unwrap()).status, id("Done"));
     assert_eq!(Task::from(&db.get(b).unwrap()).status, id("In progress"));
+    // An epic no longer has a status, but one stored by an older version is still migrated.
     assert_eq!(
-        todo_schema::task::Epic::from(&db.get(e).unwrap()).status,
+        db.get(e).unwrap().fields.get("status").and_then(|v| v.as_i64()),
         id("Won't do")
     );
     drop(db);
@@ -963,6 +956,57 @@ fn reparenting_joins_the_new_parents_place() {
 }
 
 #[test]
+fn subtasks_follow_their_task_to_another_epic_and_section() {
+    use todo_schema::lifecycle::{create_section, set_pinned};
+    let mut db = db();
+    let a = create_epic(&mut db, "A").unwrap();
+    let b = create_epic(&mut db, "B").unwrap();
+    let sa = create_section(&mut db, a.id, "SA").unwrap();
+    let sb = create_section(&mut db, b.id, "SB").unwrap();
+    let mk = |db: &mut Db, title: &str, parent: Option<i64>| {
+        create(
+            db,
+            &NewTask {
+                epic: Some(a.id),
+                section: Some(sa.id),
+                parent,
+                ..NewTask::new(title)
+            },
+        )
+        .unwrap()
+    };
+    let parent = mk(&mut db, "parent", None);
+    let child = mk(&mut db, "child", Some(parent.id));
+    let grandchild = mk(&mut db, "grandchild", Some(child.id));
+    let place = |db: &Db, id: i64| {
+        let t = all(db, &Filter::default()).into_iter().find(|t| t.id == id).unwrap();
+        (t.epic, t.section)
+    };
+
+    // A new epic: the section is cleared, for the task and for its subtasks.
+    let to_b = Edit {
+        epic: Some(Some(b.id)),
+        ..Edit::default()
+    };
+    edit(&mut db, parent.id, &to_b).unwrap();
+    for id in [parent.id, child.id, grandchild.id] {
+        assert_eq!(place(&db, id), (Some(b.id), None));
+    }
+    // A section of that epic: they follow into it.
+    let into = Edit {
+        section: Some(Some(sb.id)),
+        ..Edit::default()
+    };
+    edit(&mut db, parent.id, &into).unwrap();
+    for id in [parent.id, child.id, grandchild.id] {
+        assert_eq!(place(&db, id), (Some(b.id), Some(sb.id)));
+    }
+    // Other edits leave the subtasks alone.
+    set_pinned(&mut db, parent.id, true).unwrap();
+    assert_eq!(place(&db, child.id), (Some(b.id), Some(sb.id)));
+}
+
+#[test]
 fn deleting_an_epic_keeps_or_deletes_its_tasks() {
     use todo_schema::lifecycle::delete_epic_and_tasks;
     let mut db = db();
@@ -1015,4 +1059,29 @@ fn pinned_tasks_come_first() {
     set_pinned(&mut db, b.id, false).unwrap();
     assert_eq!(titles(&all(&db, &Filter::default())), ["a", "b", "c"]);
     let _ = a;
+}
+
+#[test]
+fn a_section_can_be_moved_to_another_place() {
+    use todo_schema::lifecycle::{create_section, move_section};
+    use todo_schema::views::sections;
+    let mut db = db();
+    let e = create_epic(&mut db, "E").unwrap();
+    let a = create_section(&mut db, e.id, "A").unwrap();
+    let b = create_section(&mut db, e.id, "B").unwrap();
+    let c = create_section(&mut db, e.id, "C").unwrap();
+    let order = |db: &Db| -> Vec<String> {
+        sections(db, e.id).unwrap().into_iter().map(|s| s.section.title).collect()
+    };
+    assert_eq!(order(&db), ["A", "B", "C"]);
+    move_section(&mut db, c.id, 0).unwrap();
+    assert_eq!(order(&db), ["C", "A", "B"]);
+    move_section(&mut db, c.id, 2).unwrap();
+    assert_eq!(order(&db), ["A", "B", "C"]);
+    move_section(&mut db, a.id, 1).unwrap();
+    assert_eq!(order(&db), ["B", "A", "C"]);
+    // Past the end is the end.
+    move_section(&mut db, b.id, 99).unwrap();
+    assert_eq!(order(&db), ["A", "C", "B"]);
+    let _ = (a, b, c);
 }

@@ -8,9 +8,10 @@ use iced::{Alignment, Length};
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{hashtag, more};
-use organiser_ui::components::dot::color_from_hex;
+use organiser_ui::components::dot::{color_from_hex, dot};
 use organiser_ui::components::icons;
 use organiser_ui::iad::prelude::*;
+use organiser_ui::primitives::groups::group_by;
 use organiser_ui::primitives::tags::collapse;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::board::{COLUMN_WIDTH, board_column};
@@ -37,12 +38,21 @@ impl App {
             let mut cards: Vec<Element<'_, Message>> = Vec::new();
             if !pinned.is_empty() {
                 cards.push(caption("Pinned").into());
-                cards.extend(pinned.into_iter().map(|t| self.card(t)));
-                if !others.is_empty() {
+                cards.extend(pinned.iter().map(|t| self.card(t)));
+            }
+            if self.grouped_by_epic() {
+                // Then a group for each epic, and the tasks in none last, "Unassigned".
+                let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
+                for (epic, tasks) in group_by(others, |t| t.epic, &order) {
+                    cards.push(self.epic_group_header(epic, None));
+                    cards.extend(tasks.into_iter().map(|t| self.card(t)));
+                }
+            } else if !others.is_empty() {
+                if !pinned.is_empty() {
                     cards.push(caption("Others").into());
                 }
+                cards.extend(others.into_iter().map(|t| self.card(t)));
             }
-            cards.extend(others.into_iter().map(|t| self.card(t)));
             let accent = status.color.as_deref().and_then(color_from_hex);
             drop_zone(
                 board_column(&status.name, accent, count, cards, column_width),
@@ -61,6 +71,13 @@ impl App {
                 .height(Length::Fill)
                 .into()
         };
+        let body: Element<'_, Message> = match self.all_page_menu() {
+            Some(menu) => column![container(menu).padding([0, 4]), body]
+                .spacing(8)
+                .height(Length::Fill)
+                .into(),
+            None => body,
+        };
         container(body)
             .padding([12, 16])
             .height(Length::Fill)
@@ -76,6 +93,7 @@ impl App {
             .and_then(|s| s.color.as_deref())
             .and_then(color_from_hex);
 
+        // No status dot: the column is the status.
         let mut body = column![text(t.title.clone()).size(15)].spacing(6);
         if let Some(parent) = t.parent_id.and_then(|id| self.task_titles.get(&id)) {
             body = body.push(caption(format!("in {}", ellipsize(parent, 40))));
@@ -122,23 +140,15 @@ impl App {
         let mut place = row![].spacing(8).align_y(Alignment::Center);
         let mut any = false;
         if self.epic_filter.is_none()
+            && !self.grouped_by_epic()
             && let Some(id) = t.epic
             && let Some(name) = self.epic_titles.get(&id)
         {
-            place = place.push(icons::epic_chip(name, self.epic_color(id)));
+            place = place.push(icons::folder_chip(name, self.epic_color(id), self.epic_icon(id)));
             any = true;
         }
-        if let Some(epic) = t.epic
-            && let Some(sec) = self
-                .epic_sections
-                .get(&epic)
-                .and_then(|v| v.iter().find(|s| Some(s.section.id) == t.section))
-        {
-            let chip = Chip::new(ellipsize(&sec.section.title, 24)).size(ChipSize::Small);
-            place = place.push(match sec.section.color.as_deref().and_then(color_from_hex) {
-                Some(c) => chip.color(c),
-                None => chip.role(Role::Neutral),
-            });
+        if let Some(chip) = self.section_chip(t) {
+            place = place.push(chip);
             any = true;
         }
         any.then(|| place.wrap().into())
@@ -157,6 +167,48 @@ impl App {
                 TooltipPosition::Bottom,
             )
             .into()
+        })
+    }
+
+    /// A task's status as a dot in its colour; `None` when its status has no colour.
+    pub(super) fn status_dot<'a>(&'a self, t: &'a Task) -> Option<Element<'a, Message>> {
+        self.statuses
+            .resolve(t.status)
+            .and_then(|s| s.color.as_deref())
+            .and_then(color_from_hex)
+            .map(|c| dot(c, 9.0))
+    }
+
+    /// A card's title with the status dot at its right edge. The title wraps within the room the
+    /// dot leaves, so a long one never runs under it.
+    pub(super) fn titled<'a>(
+        &'a self,
+        lead: Option<Element<'a, Message>>,
+        t: &'a Task,
+    ) -> Element<'a, Message> {
+        let mut line = row![].spacing(6).align_y(Alignment::Start);
+        if let Some(l) = lead {
+            line = line.push(l);
+        }
+        line = line.push(text(t.title.clone()).size(15).width(Length::Fill));
+        if let Some(d) = self.status_dot(t) {
+            // Level with the first line of the title, not the middle of a wrapped one.
+            line = line.push(container(d).padding(iced::Padding::default().top(6.0)));
+        }
+        line.into()
+    }
+
+    /// The section a task is in, as a chip in its colour; `None` when it is in none.
+    pub(super) fn section_chip<'a>(&'a self, t: &'a Task) -> Option<Element<'a, Message>> {
+        let epic = t.epic?;
+        let sec = self
+            .epic_sections
+            .get(&epic)
+            .and_then(|v| v.iter().find(|s| Some(s.section.id) == t.section))?;
+        let chip = Chip::new(ellipsize(&sec.section.title, 24)).size(ChipSize::Small);
+        Some(match sec.section.color.as_deref().and_then(color_from_hex) {
+            Some(c) => chip.color(c).into(),
+            None => chip.role(Role::Neutral).into(),
         })
     }
 }

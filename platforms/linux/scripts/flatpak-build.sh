@@ -2,7 +2,7 @@
 # Builds the Flatpaks in parallel, each with its own build directory and flatpak-builder state
 # directory (a shared one makes concurrent builds clobber each other).
 #
-#   flatpak-build.sh [--install] [--jobs N] [--cache DIR | --no-cache] [Todo|Faves|Notes|Recipes|Sticky|all]...
+#   flatpak-build.sh [--install] [--jobs N] [--cache DIR | --no-cache] [Todo|Notes|Recipes|Sticky|all]...
 #
 # No app (or `all`) means every app. Output goes to build-dir/<App>; logs to build-dir/<App>.log.
 # --jobs caps concurrent builds (default: 2).
@@ -28,12 +28,12 @@ while [ $# -gt 0 ]; do
     --cache) cache=${2:?--cache needs a directory}; shift 2 ;;
     --cache=*) cache=${1#--cache=}; shift ;;
     --no-cache) no_cache=1; shift ;;
-    all) apps="$apps Todo Faves Notes Recipes Sticky"; shift ;;
-    Todo|Faves|Notes|Recipes|Sticky) apps="$apps $1"; shift ;;
-    *) echo "usage: flatpak-build.sh [--install] [--jobs N] [--cache DIR | --no-cache] [Todo|Faves|Notes|Recipes|Sticky|all]..." >&2; exit 2 ;;
+    all) apps="$apps Todo Notes Recipes Sticky"; shift ;;
+    Todo|Notes|Recipes|Sticky) apps="$apps $1"; shift ;;
+    *) echo "usage: flatpak-build.sh [--install] [--jobs N] [--cache DIR | --no-cache] [Todo|Notes|Recipes|Sticky|all]..." >&2; exit 2 ;;
   esac
 done
-[ -n "$apps" ] || apps="Todo Faves Notes Recipes Sticky"
+[ -n "$apps" ] || apps="Todo Notes Recipes Sticky"
 apps=$(printf '%s\n' $apps | awk '!seen[$0]++')
 cd "$root"
 mkdir -p build-dir .flatpak-builder

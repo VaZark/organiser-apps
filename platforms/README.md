@@ -4,12 +4,12 @@ Everything here is for Linux. The GUIs are Wayland only.
 
 ```
 platforms/linux/
-  icon/       one SVG per app (Todo, Faves, Notes, Recipes)
+  icon/       one SVG per app (Todo, Notes, Recipes)
   flatpak/    a manifest, AppStream metainfo and a launcher per app
   scripts/    install.sh and uninstall.sh, for a plain install without Flatpak
 ```
 
-The app ids are `io.github.vazark.Todo`, `.Faves`, `.Notes` and `.Recipes`. The `.desktop` file of
+The app ids are `io.github.vazark.Todo`, `.Notes` and `.Recipes`. The `.desktop` file of
 each is not written by hand: `<app>-gui --print-desktop-entry`
 renders it from the app's metadata (`META` in its schema crate), so its name, comment, categories
 and icon cannot drift from the app.
@@ -31,7 +31,7 @@ flatpak-builder --user --install --force-clean build-dir platforms/linux/flatpak
 flatpak run io.github.vazark.Todo
 ```
 
-(`Faves`, `Notes` or `Recipes` in place of `Todo` for the others.) To build without installing, leave out `--install`.
+(`Notes` or `Recipes` in place of `Todo` for the others.) To build without installing, leave out `--install`.
 
 To build several at once, use the helper, which gives each app its own build and state directory
 (sharing `build-dir` or `.flatpak-builder` between concurrent builds makes them clobber each other):
@@ -47,14 +47,13 @@ Output is in `build-dir/<App>`, logs in `build-dir/<App>.log`.
   `iced-libadwaita` from GitHub at the revisions pinned in `Cargo.lock`, so it needs network
   access (`--share=network` in the manifest). Flathub itself builds offline, so publishing there
   would need the dependencies vendored with `flatpak-cargo-generator`.
-- **Data.** The launcher points the app at your real data directory (`~/.local/share/todo`, `faves`,
-  `notes`, `recipes`), so the Flatpak GUI and a command-line `todo` or `faves` installed on the
+- **Data.** The launcher points the app at your real data directory (`~/.local/share/todo`, `notes`, `recipes`), so the Flatpak GUI and a command-line `todo` or `notes` installed on the
   host use the same database.
 - **Permissions.** Wayland, the GPU, that one data directory, and read-only access to
   `~/.config/iced-adaptive-design` (the toolkit's desktop-wide settings). Nothing else.
 - **SQLite** is built in: the apps need its full-text search and JSON support.
 - Only the GUI is in the Flatpak. Install the command line with `cargo install --path apps/todo/cli`
-  (or `faves`), or with the script below.
+  (or `notes`), or with the script below.
 
 ## Building all four on GitHub
 

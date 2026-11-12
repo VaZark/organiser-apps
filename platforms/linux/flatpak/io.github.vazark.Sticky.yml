@@ -13,7 +13,6 @@ finish-args:
   # the sandbox's own would hide them.
   - --filesystem=xdg-data/notes
   - --filesystem=xdg-data/todo
-  - --filesystem=xdg-data/faves
   # The list of linked apps, shared by every app.
   - --filesystem=xdg-config/organiser
   # "Start on login" goes through the Background portal, which needs no permission.

@@ -25,6 +25,11 @@ pub trait Extension {
     fn default_kind(&self) -> Option<&'static str> {
         None
     }
+    /// Called once the database is open, before any command: set up what the app needs to exist
+    /// (its default rows, say).
+    fn opened(&self, _db: &mut Db) -> Result<()> {
+        Ok(())
+    }
     /// Handle a subcommand, or return `None` if it is not one of yours.
     fn run(&self, db: &mut Db, name: &str, args: &ArgMatches) -> Option<Result<Output>>;
 }
@@ -49,6 +54,7 @@ pub fn run(meta: &AppMeta, schema: &'static Schema, ext: &dyn Extension) -> Exit
         .get_one::<String>("db")
         .map_or_else(|| paths::db_path(meta), std::path::PathBuf::from);
     let result = Db::open(&path, schema).and_then(|mut db| {
+        ext.opened(&mut db)?;
         let (name, sub) = matches.subcommand().expect("subcommand is required");
         match ext.run(&mut db, name, sub) {
             Some(r) => r,

@@ -45,10 +45,12 @@ pub enum StartView {
     Notes,
     Board,
     List,
+    /// The Eisenhower matrix: four boxes, each a compact list.
+    Quadrants,
 }
 
 impl StartView {
-    pub const ALL: [StartView; 3] = [Self::Notes, Self::Board, Self::List];
+    pub const ALL: [StartView; 4] = [Self::Notes, Self::Board, Self::List, Self::Quadrants];
 }
 
 impl std::fmt::Display for StartView {
@@ -57,6 +59,7 @@ impl std::fmt::Display for StartView {
             Self::Notes => "Notes",
             Self::Board => "Kanban board",
             Self::List => "List",
+            Self::Quadrants => "Quadrants",
         })
     }
 }
@@ -107,6 +110,11 @@ pub struct TodoSettings {
     /// List subtasks as entries of their own, in every view. Off, only top-level tasks are
     /// listed (their subtasks are still counted and shown in their details).
     pub show_subtasks: bool,
+    /// In the views of every task, group them by epic after the pinned ones, the tasks in no epic
+    /// last under "Unassigned".
+    pub group_by_epic: bool,
+    /// On an epic's page, group its tasks by section.
+    pub group_by_section: bool,
 }
 
 impl Default for TodoSettings {
@@ -116,6 +124,8 @@ impl Default for TodoSettings {
             show_closed: false,
             details_in_drawer: true,
             show_subtasks: true,
+            group_by_epic: true,
+            group_by_section: true,
         }
     }
 }
@@ -125,12 +135,21 @@ impl Default for TodoSettings {
 pub struct NotesSettings {
     /// Days a note stays in the trash before it is deleted for good.
     pub trash_days: u32,
+    /// Show the notes as a list instead of cards.
+    pub list_view: bool,
+    /// In the views of every note (All, Favorites, Archive, Trash), group them by folder.
+    pub group_by_folder: bool,
+    /// On a folder's page, group its notes by section.
+    pub group_by_section: bool,
 }
 
 impl Default for NotesSettings {
     fn default() -> Self {
         Self {
             trash_days: DEFAULT_TRASH_DAYS,
+            list_view: false,
+            group_by_folder: true,
+            group_by_section: true,
         }
     }
 }
@@ -155,13 +174,6 @@ impl Default for StickySettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct FavesSettings {
-    /// One compact line per entry instead of cards.
-    pub compact: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct RecipesSettings {
     /// One compact line per recipe instead of cards.
     pub compact: bool,
@@ -174,7 +186,6 @@ pub struct Settings {
     pub tags: TagSettings,
     pub todo: TodoSettings,
     pub notes: NotesSettings,
-    pub faves: FavesSettings,
     pub recipes: RecipesSettings,
     pub sticky: StickySettings,
 }
@@ -314,7 +325,6 @@ mod tests {
         s.todo.start_view = StartView::List;
         s.todo.show_closed = true;
         s.notes.trash_days = 7;
-        s.faves.compact = true;
         s.tags.palette = vec!["#112233".into(), "#aabbcc".into()];
         s.save_to(&path).unwrap();
         assert!(

@@ -119,8 +119,9 @@ pub fn subtasks(db: &Db, id: i64) -> Result<Vec<Task>> {
     Ok(db.children(Some(id))?.iter().map(Task::from).collect())
 }
 
-/// Epics with how many of their tasks are still open. Closed epics only with `show_closed`.
-pub fn epics(db: &Db, show_closed: bool) -> Result<Vec<EpicSummary>> {
+/// Epics with how many of their tasks are still open. An epic has no status of its own: its
+/// progress is how far its tasks are.
+pub fn epics(db: &Db) -> Result<Vec<EpicSummary>> {
     let q = Query {
         kind: Some(EPIC.into()),
         archived: Some(false),
@@ -130,9 +131,6 @@ pub fn epics(db: &Db, show_closed: bool) -> Result<Vec<EpicSummary>> {
     let all = statuses::load(db)?;
     let mut out = Vec::new();
     for item in db.list(&q)? {
-        if !show_closed && all.is_closed(Epic::from(&item).status) {
-            continue;
-        }
         let linked = db.list(&Query {
             kind: Some(TASK.into()),
             archived: Some(false),

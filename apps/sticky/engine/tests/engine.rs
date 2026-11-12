@@ -40,7 +40,7 @@ struct Case {
     schema: &'static Schema,
 }
 
-fn cases() -> [Case; 3] {
+fn cases() -> [Case; 2] {
     [
         Case {
             spec: &notes_schema::STICKY,
@@ -50,20 +50,12 @@ fn cases() -> [Case; 3] {
             spec: &todo_schema::STICKY,
             schema: &todo_schema::SCHEMA,
         },
-        Case {
-            spec: &faves_schema::STICKY,
-            schema: &faves_schema::SCHEMA,
-        },
     ]
 }
 
 fn make(db: &mut Db, spec: &StickySpec, title: &str) -> i64 {
     let k = &spec.kinds[0];
-    let mut new = NewItem::new(k.kind, title).field(k.body, "first");
-    if spec.meta.slug == "faves" {
-        let list = db.create(NewItem::new(faves_schema::LIST, "list")).unwrap();
-        new = new.parent(list.id);
-    }
+    let new = NewItem::new(k.kind, title).field(k.body, "first");
     db.create(new).unwrap().id
 }
 

@@ -5,6 +5,7 @@ use iced::widget::{column, row};
 use organiser_ui::Element;
 use organiser_ui::components::action::action_button;
 use organiser_ui::components::dot::{color_from_hex, dot};
+use organiser_ui::components::icon_pick::icon_color_picker;
 use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::color_picker::Hsva;
@@ -37,7 +38,7 @@ impl App {
         };
         let (kind, status_id) = match &d.subject {
             Subject::Task(t) => ("Task", t.status),
-            Subject::Epic(e) => ("Epic", e.status),
+            Subject::Epic(_) => ("Epic", None),
             Subject::Section(_) => ("Section", None),
         };
         let section = matches!(d.subject, Subject::Section(_));
@@ -48,7 +49,9 @@ impl App {
                 entry("Title", d.title.as_str())
                     .on_input(Message::DTitle)
                     .width(Length::Fill),
-                self.color_input(d.id(), color),
+                // An epic's icon and colour in one picker, at the end of the title; a section has
+                // a colour only.
+                self.icon_color_input(d, color),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
@@ -92,17 +95,19 @@ impl App {
                     &|t| Message::DTagRemove(t),
                 ),
             );
-            col = col.push(match &d.subject {
-                Subject::Task(t) => row![
-                    field("Status", self.status_picker(status_id)),
-                    field(
-                        "Priority",
-                        dropdown(&Priority::ALL, Some(t.priority), Message::DPriority),
-                    ),
-                ]
-                .spacing(12),
-                _ => row![field("Status", self.status_picker(status_id))],
-            });
+            // Only a task has a status and a priority: an epic has its progress.
+            if let Subject::Task(t) = &d.subject {
+                col = col.push(
+                    row![
+                        field("Status", self.status_picker(status_id)),
+                        field(
+                            "Priority",
+                            dropdown(&Priority::ALL, Some(t.priority), Message::DPriority),
+                        ),
+                    ]
+                    .spacing(12),
+                );
+            }
         }
         // How far along, across the whole page.
         if let Some(p) = self.progress_of(d) {
@@ -295,9 +300,8 @@ impl App {
             let mut placement = vec![MenuItem::submenu(
                 "Move to epic",
                 Menu::new("Move to epic")
-                    .check_style(MenuCheckStyle::Mark)
                     .section(self.epic_choices.iter().map(|c| {
-                        MenuItem::check(c.title.clone(), c.id == t.epic, Message::DEpic(c.clone()))
+                        MenuItem::select(c.title.clone(), c.id == t.epic, Message::DEpic(c.clone()))
                     })),
             )];
             // Sections belong to an epic.
@@ -306,7 +310,7 @@ impl App {
                 .and_then(|e| self.epic_sections.get(&e))
                 .filter(|v| !v.is_empty())
             {
-                let none = MenuItem::check(
+                let none = MenuItem::select(
                     "No section",
                     t.section.is_none(),
                     Message::DSection(None),
@@ -314,9 +318,8 @@ impl App {
                 placement.push(MenuItem::submenu(
                     "Move to section",
                     Menu::new("Move to section")
-                        .check_style(MenuCheckStyle::Mark)
                         .section(std::iter::once(none).chain(sections.iter().map(|s| {
-                            MenuItem::check(
+                            MenuItem::select(
                                 s.section.title.clone(),
                                 t.section == Some(s.section.id),
                                 Message::DSection(Some(s.section.id)),
@@ -327,6 +330,23 @@ impl App {
             menu = menu.section(placement);
         }
         menu_button(Icon::ViewMore, menu).tooltip("More").into()
+    }
+
+    /// The picker at the end of the title: an epic's icon and colour together; a section's colour.
+    fn icon_color_input<'a>(&'a self, d: &'a Details, hex: &'a str) -> Element<'a, Message> {
+        let Subject::Epic(e) = &d.subject else {
+            return self.color_input(d.id(), hex);
+        };
+        let rgb = color_from_hex(hex).unwrap_or(organiser_ui::components::color_pick::UNSET);
+        icon_color_picker(
+            e.icon.as_deref(),
+            rgb,
+            self.status_text.get(&d.id()).map_or(hex, String::as_str),
+            22.0,
+            Message::DIcon,
+            Message::DColorText,
+            Message::DColor,
+        )
     }
 
     /// A colour swatch to pick or type a colour from, for the epic or section `id`.

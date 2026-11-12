@@ -9,10 +9,22 @@ use super::color::Color;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     pub id: i64,
+    /// The folder it is filed in, if any.
+    #[serde(default)]
+    pub folder_id: Option<i64>,
+    /// The section of that folder it is in.
+    #[serde(default)]
+    pub section: Option<i64>,
     pub title: String,
     pub body: String,
     pub color: Option<Color>,
     pub pinned: bool,
+    #[serde(default)]
+    pub favorite: bool,
+    /// 1 to 5 stars, as stored; only meaningful in a folder that is rated (`views::notes` gives
+    /// `None` for a note whose folder is not).
+    #[serde(default)]
+    pub rating: Option<u8>,
     /// Shown as a desktop sticky by the Sticky app.
     #[serde(default)]
     pub sticky: bool,
@@ -35,6 +47,8 @@ impl From<&Item> for Note {
         let f = &i.fields;
         Self {
             id: i.id,
+            folder_id: i.parent_id,
+            section: f.get("section").and_then(Value::as_i64),
             title: i.title.clone(),
             body: f.get("body").and_then(Value::as_str).unwrap_or("").into(),
             color: f
@@ -42,6 +56,8 @@ impl From<&Item> for Note {
                 .and_then(Value::as_str)
                 .and_then(Color::parse),
             pinned: f.get("pinned").and_then(Value::as_bool).unwrap_or(false),
+            favorite: f.get("favorite").and_then(Value::as_bool).unwrap_or(false),
+            rating: f.get("rating").and_then(Value::as_u64).map(|r| r as u8),
             sticky: f.get("sticky").and_then(Value::as_bool).unwrap_or(false),
             archived: i.archived,
             trashed: f.get("trashed").and_then(Value::as_i64),
@@ -58,6 +74,11 @@ pub struct Edit {
     pub title: Option<String>,
     pub body: Option<String>,
     pub color: Option<Option<Color>>,
+    pub favorite: Option<bool>,
+    /// `Some(None)` clears the rating.
+    pub rating: Option<Option<u8>>,
+    /// Only meaningful with a folder: `lifecycle::edit` checks it is one of that folder's.
+    pub section: Option<Option<i64>>,
 }
 
 impl Edit {
@@ -79,6 +100,15 @@ impl Edit {
         }
         if let Some(c) = self.color {
             p = p.field("color", c.map_or(Value::Null, |c| c.hex().into()));
+        }
+        if let Some(f) = self.favorite {
+            p = p.field("favorite", if f { Value::Bool(true) } else { Value::Null });
+        }
+        if let Some(r) = self.rating {
+            p = p.field("rating", r.map_or(Value::Null, Value::from));
+        }
+        if let Some(s) = self.section {
+            p = p.field("section", s.map_or(Value::Null, Value::from));
         }
         p
     }

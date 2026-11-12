@@ -106,13 +106,12 @@ pub struct Epic {
     pub id: i64,
     pub title: String,
     pub notes: String,
-    /// The status this is in (see [`Statuses`](super::status::Statuses)); `None` counts as the
-    /// first open one.
-    pub status: Option<i64>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
     /// `#rrggbb`.
     pub color: Option<String>,
+    /// The name of its icon; none is the folder.
+    pub icon: Option<String>,
     pub tags: Vec<String>,
     pub created: i64,
     pub updated: i64,
@@ -124,12 +123,16 @@ impl From<&Item> for Epic {
             id: i.id,
             title: i.title.clone(),
             notes: text(i, "notes"),
-            status: status(i),
             start: date(i, "start"),
             due: date(i, "due"),
             color: i
                 .fields
                 .get("color")
+                .and_then(Value::as_str)
+                .map(String::from),
+            icon: i
+                .fields
+                .get("icon")
                 .and_then(Value::as_str)
                 .map(String::from),
             tags: i.tags.clone(),
@@ -223,6 +226,8 @@ pub struct Edit {
     pub section: Option<Option<i64>>,
     /// An epic's colour, `#rrggbb`; `Some(None)` clears it.
     pub color: Option<Option<String>>,
+    /// An epic's icon name; `Some(None)` clears it.
+    pub icon: Option<Option<String>>,
     pub archived: Option<bool>,
 }
 
@@ -260,6 +265,10 @@ impl Edit {
             p.fields
                 .insert("color".into(), c.clone().map_or(Value::Null, Value::from));
         }
+        if let Some(i) = &self.icon {
+            p.fields
+                .insert("icon".into(), i.clone().map_or(Value::Null, Value::from));
+        }
         if let Some(sec) = self.section {
             p.fields
                 .insert("section".into(), sec.map_or(Value::Null, Value::from));
@@ -278,10 +287,10 @@ mod tests {
             id: 1,
             title: "e".into(),
             notes: String::new(),
-            status: None,
             start: None,
             due: None,
             color: None,
+            icon: None,
             tags: vec![],
             created: 0,
             updated: 0,

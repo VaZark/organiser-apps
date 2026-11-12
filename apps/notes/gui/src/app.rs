@@ -7,10 +7,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use iced::widget::text_editor;
 use iced::{Color as IcedColor, Subscription, Task};
 use notes_schema::color::Color;
+use notes_schema::folder::{Folder, FolderEdit, FolderSummary};
 use notes_schema::lifecycle::{self, NewNote};
 use notes_schema::md_tasks;
 use notes_schema::note::{Edit, Note};
-use notes_schema::views::{self, Filter, Scope};
+use notes_schema::section::{SectionEdit, SectionSummary};
+use notes_schema::views::{self, Filter, Scope, Sort};
 use organiser_core::paths;
 use organiser_engine::{Db, Filters, Tag};
 use organiser_ui::components::tag_query::{count as tag_count, engine_filter, retain_existing};
@@ -32,6 +34,8 @@ pub enum Message {
     Quit,
     /// Open or close the sidebar drawer when the window is too narrow to show it.
     Drawer(bool),
+    /// Hide or show the docked sidebar of a wide window.
+    ToggleSidebar,
     SetScope(Scope),
     /// The tag filter's groups changed.
     TagGroups(GroupEvent<String>),
@@ -47,6 +51,67 @@ pub enum Message {
     Pref(PrefMsg),
     /// Notes' own setting: days a note stays in the trash.
     PrefTrashDays(u32),
+    /// Notes' own setting: cards, or a list.
+    PrefListView(bool),
+    /// Cards, or a list.
+    ListView(bool),
+    /// Notes' own settings: group by folder in the views of every note; by section on a folder's
+    /// page.
+    PrefGroupByFolder(bool),
+    PrefGroupBySection(bool),
+    /// Group by folder in the views of every note.
+    GroupByFolder(bool),
+    /// Group by section on a folder's page.
+    GroupBySection(bool),
+    SetSort(Sort),
+    // Folders.
+    NewFolder,
+    OpenFolderSettings(i64),
+    CloseFolderSettings,
+    SetFolderTitle(String),
+    SetFolderRated(bool),
+    /// What the folder is for.
+    SetFolderNotes(String),
+    /// The folder's icon, by name; none is the folder.
+    SetFolderIcon(Option<&'static str>),
+    /// The folder's colour, picked or typed.
+    SetFolderColor(Hsva),
+    SetFolderColorText(String),
+    /// Delete the folder being set up: asks what becomes of its notes when it has some.
+    FolderDeleteAsk,
+    FolderDeleteKeep,
+    FolderDeleteAll,
+    FolderDeleteCancel,
+    /// The heart of a card or row: favourite it, or not.
+    Fave(i64),
+    DFavorite(bool),
+    /// A star was pressed: that rating, or none.
+    DRating(Option<u8>),
+    /// Filed in this folder, or none.
+    DFolder(FolderChoice),
+    /// In this section of its folder, or none.
+    DSection(SectionChoice),
+    // Sections of a folder.
+    NewSection(i64),
+    OpenSectionSettings(i64),
+    CloseSectionSettings,
+    SetSectionTitle(String),
+    SetSectionNotes(String),
+    SetSectionColor(Hsva),
+    SetSectionColorText(String),
+    DeleteSection,
+    /// Fold a section of the folder's page, or open it again.
+    SectionFold(i64),
+    /// A new note in this section of the folder being viewed.
+    NewInSection(i64),
+    /// A note was picked up.
+    DragStart(i64),
+    /// The pointer button went up: whatever was being dragged is let go.
+    DragEnd,
+    /// The note being dragged was dropped on this section of its folder, or (`None`) on none.
+    DropInSection(Option<i64>),
+    /// A section was picked up by its name, to put it in another place.
+    SectionDragStart(i64),
     /// Link (true) or unlink this app to the Sticky Notes app.
     PrefStickyLink(bool),
     ToggleSearch,
@@ -68,8 +133,6 @@ pub enum Message {
     DTask(usize, bool),
     /// A link in the drawn note was pressed.
     OpenLink(String),
-    /// A colour from a swatch, or `None` for the default card.
-    DColor(Option<Color>),
     /// Text typed in the custom colour entry.
     DColorText(String),
     /// A colour dragged in the custom picker.
@@ -89,6 +152,32 @@ pub enum Message {
     DismissToast,
     /// A development screenshot was saved (or failed); the app then quits.
     Captured,
+}
+
+/// A folder, or none, for the "file in" dropdown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FolderChoice {
+    pub id: Option<i64>,
+    pub title: String,
+}
+
+impl std::fmt::Display for FolderChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&organiser_ui::primitives::text::ellipsize(&self.title, 30))
+    }
+}
+
+/// A section of the open note's folder, or none, for the "in section" dropdown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionChoice {
+    pub id: Option<i64>,
+    pub title: String,
+}
+
+impl std::fmt::Display for SectionChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&organiser_ui::primitives::text::ellipsize(&self.title, 30))
+    }
 }
 
 /// The selected note. The text fields hold what the person typed; each edit is saved at once, so
@@ -139,6 +228,40 @@ pub struct App {
     pub tags: Vec<Tag>,
     pub tag_names: Vec<String>,
     pub drawer_open: bool,
+    /// The sidebar of a wide window is hidden.
+    pub sidebar_hidden: bool,
+    /// A list of the notes instead of cards.
+    pub list_view: bool,
+    /// Group by folder in the views of every note.
+    pub group_by_folder: bool,
+    /// Group by section on a folder's page.
+    pub group_by_section: bool,
+    pub sort: Sort,
+    pub folders: Vec<FolderSummary>,
+    pub folder_choices: Vec<FolderChoice>,
+    /// The sections of each folder, by folder id.
+    pub folder_sections: HashMap<i64, Vec<SectionSummary>>,
+    /// The sections of the open note's folder, to choose from.
+    pub section_choices: Vec<SectionChoice>,
+    /// Sections folded shut on a folder's page.
+    pub folded_sections: std::collections::HashSet<i64>,
+    /// The section whose settings are open, and what is typed in its name, description and colour.
+    pub section_settings: Option<i64>,
+    pub section_name: Option<String>,
+    pub section_notes: Option<String>,
+    pub section_color_text: Option<String>,
+    /// The note being dragged between sections.
+    pub dragging: Option<i64>,
+    /// The section being dragged to another place.
+    pub dragging_section: Option<i64>,
+    /// The folder whose settings are open.
+    pub folder_settings: Option<i64>,
+    /// The folder being deleted, waiting for the answer to what becomes of its notes.
+    pub confirm_folder_delete: Option<i64>,
+    /// What is typed in the folder's name and colour, while it is not a valid one yet.
+    pub folder_name: Option<String>,
+    pub folder_notes: Option<String>,
+    pub folder_color_text: Option<String>,
     pub details: Option<Details>,
     pub toast: Option<String>,
     pub desktop_dark: bool,
@@ -156,9 +279,14 @@ pub fn paint(c: Color) -> IcedColor {
     IcedColor::from_rgb8(c.r, c.g, c.b)
 }
 
-fn hsva(c: Option<Color>) -> Hsva {
-    let c = c.unwrap_or(Color::rgb(0x6a, 0xa5, 0xe8));
-    Hsva::from_rgb8(c.r, c.g, c.b)
+/// `#rrggbb` of an iced colour.
+fn paint_hex(c: IcedColor) -> String {
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (c.r * 255.0).round() as u8,
+        (c.g * 255.0).round() as u8,
+        (c.b * 255.0).round() as u8
+    )
 }
 
 impl App {
@@ -176,7 +304,15 @@ impl App {
             eprintln!("error: cannot open {}: {e}", path.display());
             std::process::exit(1);
         });
+        // The default folder, "Unassigned", exists and holds the notes that are in no other.
+        if let Err(e) = lifecycle::ensure_default_folder(&mut db) {
+            eprintln!("error: cannot set up the default folder: {e}");
+            std::process::exit(1);
+        }
         let prefs = Preferences::load();
+        let list_view = prefs.settings.notes.list_view;
+        let group_by_folder = prefs.settings.notes.group_by_folder;
+        let group_by_section = prefs.settings.notes.group_by_section;
         let mode = Mode::from(prefs.settings.appearance.theme);
         // Housekeeping: notes past their time in the trash go for good.
         if let Err(e) = lifecycle::purge_expired(&mut db, now(), prefs.settings.notes.trash_days) {
@@ -198,6 +334,27 @@ impl App {
             tags: Vec::new(),
             tag_names: Vec::new(),
             drawer_open: false,
+            sidebar_hidden: false,
+            list_view: list_view || std::env::var_os("NOTES_GUI_LIST").is_some(),
+            group_by_folder,
+            group_by_section,
+            sort: Sort::default(),
+            folders: Vec::new(),
+            folder_choices: Vec::new(),
+            folder_sections: HashMap::new(),
+            section_choices: Vec::new(),
+            folded_sections: Default::default(),
+            section_settings: None,
+            section_name: None,
+            section_notes: None,
+            section_color_text: None,
+            dragging: None,
+            dragging_section: None,
+            folder_settings: None,
+            confirm_folder_delete: None,
+            folder_name: None,
+            folder_notes: None,
+            folder_color_text: None,
             details: None,
             toast: None,
             desktop_dark: false,
@@ -207,7 +364,18 @@ impl App {
         match std::env::var("NOTES_GUI_SCOPE").as_deref() {
             Ok("archive") => app.scope = Scope::Archive,
             Ok("trash") => app.scope = Scope::Trash,
+            Ok("favorites") => app.scope = Scope::Favorites,
             _ => {}
+        }
+        if let Some(id) = std::env::var("NOTES_GUI_FOLDER").ok().and_then(|v| v.parse().ok()) {
+            app.scope = Scope::Folder(id);
+            if std::env::var_os("NOTES_GUI_FOLDER_SETTINGS").is_some() {
+                app.folder_settings = Some(id);
+            }
+        }
+        if std::env::var_os("NOTES_GUI_UNGROUPED").is_some() {
+            app.group_by_folder = false;
+            app.group_by_section = false;
         }
         if let Ok(q) = std::env::var("NOTES_GUI_SEARCH") {
             app.search.toggle();
@@ -218,6 +386,14 @@ impl App {
                 TagGroups::from_parts(vec![t.split(',').map(String::from).collect()], 0);
         }
         app.reload();
+        // Settings opened at start show the folder's colour in the picker, as opening them does.
+        if let Some(id) = app.folder_settings {
+            app.folder_color_text = app
+                .folders
+                .iter()
+                .find(|s| s.folder.id == id)
+                .map(|s| paint_hex(app.folder_color(&s.folder)));
+        }
         if let Some(id) = std::env::var("NOTES_GUI_SELECT")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -270,7 +446,16 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        iad::utils::follow_theme().map(Message::SystemTheme)
+        Subscription::batch([
+            iad::utils::follow_theme().map(Message::SystemTheme),
+            // Letting go anywhere ends a drag. The section it landed on has already been told.
+            iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::DragEnd),
+                _ => None,
+            }),
+        ])
     }
 
     fn filter(&self) -> Filter {
@@ -281,6 +466,7 @@ impl App {
             fields: self.filters.clone(),
             // A search looks in the archive too, so an old note is still found.
             include_archived: self.search.query().is_some(),
+            sort: self.sort,
         }
     }
 
@@ -296,6 +482,38 @@ impl App {
                 self.notes = v;
             }
             Err(e) => self.toast = Some(e.to_string()),
+        }
+        match views::folders(&self.db) {
+            Ok(f) => {
+                // A note is always in a folder: the default one, "Unassigned", when no other.
+                self.folder_choices = f
+                    .iter()
+                    .map(|s| FolderChoice {
+                        id: Some(s.folder.id),
+                        title: s.folder.title.clone(),
+                    })
+                    .collect();
+                self.folders = f;
+            }
+            Err(e) => self.toast = Some(e.to_string()),
+        }
+        self.folder_sections = self
+            .folders
+            .iter()
+            .filter_map(|s| {
+                views::sections(&self.db, s.folder.id)
+                    .ok()
+                    .map(|v| (s.folder.id, v))
+            })
+            .collect();
+        self.refresh_section_choices();
+        // A folder that no longer exists falls back to all the notes.
+        if let Scope::Folder(id) = self.scope
+            && !self.folders.iter().any(|s| s.folder.id == id)
+        {
+            self.scope = Scope::Notes;
+            self.reload();
+            return;
         }
         // Every tag has a colour of its own, drawn the same everywhere.
         let _ = self.db.ensure_tag_colors(&self.prefs.settings.palette());
@@ -318,9 +536,52 @@ impl App {
         self.toast = Some(e.to_string());
     }
 
+    /// A folder's colour: its own, or one made from its name, so folders are told apart at a
+    /// glance.
+    pub fn folder_color(&self, folder: &Folder) -> IcedColor {
+        folder.color.map(paint).unwrap_or_else(|| {
+            if folder.is_default {
+                // The default folder is plain unless it has been given a colour.
+                organiser_ui::components::color_pick::UNSET
+            } else {
+                organiser_ui::components::chip::color_of(&folder.title)
+            }
+        })
+    }
+
+    /// The default folder, "Unassigned".
+    pub fn default_folder_id(&self) -> Option<i64> {
+        self.folders.iter().find(|s| s.folder.is_default).map(|s| s.folder.id)
+    }
+
+    /// The section a note is in.
+    pub fn section_of(&self, note: &Note) -> Option<&notes_schema::section::Section> {
+        let id = note.section?;
+        self.folder_sections.get(&note.folder_id?)?.iter().map(|s| &s.section).find(|s| s.id == id)
+    }
+
+    /// The folder a note is filed in.
+    pub fn folder_of(&self, note: &Note) -> Option<&Folder> {
+        let id = note.folder_id?;
+        self.folders.iter().map(|s| &s.folder).find(|f| f.id == id)
+    }
+
+    /// A note's colour: its own, else its folder's, else none (the default card).
+    pub fn note_tint(&self, note: &Note) -> Option<IcedColor> {
+        note.color
+            .map(paint)
+            .or_else(|| self.folder_of(note).map(|f| self.folder_color(f)))
+    }
+
+    /// The folder whose settings are open.
+    pub fn settings_folder(&self) -> Option<&FolderSummary> {
+        let id = self.folder_settings?;
+        self.folders.iter().find(|s| s.folder.id == id)
+    }
+
     /// The pinned notes, then the rest. Pinning only groups the live notes.
     pub fn pinned(&self) -> (Vec<&Note>, Vec<&Note>) {
-        if self.scope == Scope::Notes {
+        if matches!(self.scope, Scope::Notes | Scope::Favorites | Scope::Folder(_)) {
             self.notes.iter().partition(|n| n.pinned)
         } else {
             (Vec::new(), self.notes.iter().collect())
@@ -345,6 +606,7 @@ impl App {
             tag_text: String::new(),
             error: None,
         });
+        self.refresh_section_choices();
     }
 
     /// Re-read the selected note (pin, colour, tags) without touching what is typed.
@@ -358,10 +620,7 @@ impl App {
             }
             Err(_) => self.details = None,
         }
-    }
-
-    pub fn color_value(&self) -> Hsva {
-        hsva(self.details.as_ref().and_then(|d| d.note.color))
+        self.refresh_section_choices();
     }
 
     fn with_details(&mut self, f: impl FnOnce(&mut Details)) -> bool {
@@ -435,6 +694,55 @@ impl App {
         self.with_details(|d| d.color_text = c.map(|c| c.hex()).unwrap_or_default());
     }
 
+    /// The sections of the open note's folder, with "No section" first.
+    fn refresh_section_choices(&mut self) {
+        let folder = self.details.as_ref().and_then(|d| d.note.folder_id);
+        self.section_choices = match folder.and_then(|f| self.folder_sections.get(&f)) {
+            Some(v) if !v.is_empty() => std::iter::once(SectionChoice {
+                id: None,
+                title: "No section".into(),
+            })
+            .chain(v.iter().map(|s| SectionChoice {
+                id: Some(s.section.id),
+                title: s.section.title.clone(),
+            }))
+            .collect(),
+            _ => Vec::new(),
+        };
+    }
+
+    fn edit_section(&mut self, id: i64, edit: SectionEdit) {
+        if let Err(e) = lifecycle::edit_section(&mut self.db, id, &edit) {
+            self.fail(e);
+        }
+        self.reload();
+    }
+
+    fn edit_folder(&mut self, id: i64, edit: FolderEdit) {
+        if let Err(e) = lifecycle::edit_folder(&mut self.db, id, &edit) {
+            self.fail(e);
+        }
+        self.refresh_details();
+        self.reload();
+    }
+
+    /// Delete a folder, keeping its notes (filed in none) or deleting them with it.
+    fn delete_folder(&mut self, id: i64, with_notes: bool) {
+        let result = if with_notes {
+            lifecycle::delete_folder_and_notes(&mut self.db, id)
+                .map(|n| format!("Deleted the folder and {n} note{}", if n == 1 { "" } else { "s" }))
+        } else {
+            lifecycle::delete_folder(&mut self.db, id).map(|()| "Deleted the folder; its notes stay".into())
+        };
+        match result {
+            Ok(m) => self.toast = Some(m),
+            Err(e) => self.fail(e),
+        }
+        self.folder_settings = None;
+        self.details = None;
+        self.reload();
+    }
+
     fn set_tags(&mut self, f: impl FnOnce(&mut Vec<String>)) {
         let Some(d) = &self.details else { return };
         let mut tags = d.note.tags.clone();
@@ -467,6 +775,7 @@ impl App {
             Message::Window(a) => return iced::window::oldest().and_then(move |id| a.perform(id)),
             Message::Quit => return iced::exit(),
             Message::Drawer(open) => self.drawer_open = open,
+            Message::ToggleSidebar => self.sidebar_hidden = !self.sidebar_hidden,
             Message::SetScope(s) => {
                 self.scope = s;
                 self.drawer_open = false;
@@ -499,6 +808,320 @@ impl App {
                 Ok(Changed::Palette | Changed::Nothing) => {}
                 Err(e) => self.fail(e),
             },
+            Message::ListView(on) => self.list_view = on,
+            Message::GroupByFolder(on) => self.group_by_folder = on,
+            Message::GroupBySection(on) => self.group_by_section = on,
+            Message::PrefGroupBySection(on) => {
+                self.prefs.settings.notes.group_by_section = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
+            Message::PrefGroupByFolder(on) => {
+                self.prefs.settings.notes.group_by_folder = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
+            Message::SetSort(sort) => {
+                self.sort = sort;
+                self.reload();
+            }
+            Message::NewFolder => match lifecycle::create_folder(&mut self.db, "New folder", false) {
+                Ok(f) => {
+                    self.scope = Scope::Folder(f.id);
+                    self.drawer_open = false;
+                    self.details = None;
+                    self.reload();
+                    // Name it at once.
+                    self.folder_settings = Some(f.id);
+                    self.folder_name = None;
+                    self.folder_notes = None;
+                    self.folder_color_text = self
+                        .folders
+                        .iter()
+                        .find(|s| s.folder.id == f.id)
+                        .map(|s| paint_hex(self.folder_color(&s.folder)));
+                }
+                Err(e) => self.fail(e),
+            },
+            Message::OpenFolderSettings(id) => {
+                self.folder_settings = Some(id);
+                self.folder_name = None;
+                self.folder_notes = None;
+                self.folder_color_text = self
+                    .folders
+                    .iter()
+                    .find(|s| s.folder.id == id)
+                    .map(|s| paint_hex(self.folder_color(&s.folder)));
+            }
+            Message::CloseFolderSettings => {
+                self.folder_settings = None;
+                self.folder_name = None;
+            }
+            Message::SetFolderTitle(t) => {
+                if let Some(id) = self.folder_settings {
+                    // An empty name waits for more typing; the old one stays until then.
+                    if !t.trim().is_empty() {
+                        self.edit_folder(id, FolderEdit {
+                            title: Some(t.trim().to_string()),
+                            ..FolderEdit::default()
+                        });
+                    }
+                    self.folder_name = Some(t);
+                }
+            }
+            Message::SetFolderNotes(t) => {
+                if let Some(id) = self.folder_settings {
+                    self.edit_folder(id, FolderEdit {
+                        notes: Some(t.clone()),
+                        ..FolderEdit::default()
+                    });
+                    self.folder_notes = Some(t);
+                }
+            }
+            Message::SetFolderRated(on) => {
+                if let Some(id) = self.folder_settings {
+                    self.edit_folder(id, FolderEdit {
+                        rated: Some(on),
+                        ..FolderEdit::default()
+                    });
+                }
+            }
+            Message::SetFolderIcon(name) => {
+                if let Some(id) = self.folder_settings {
+                    self.edit_folder(id, FolderEdit {
+                        icon: Some(name.map(String::from)),
+                        ..FolderEdit::default()
+                    });
+                }
+            }
+            Message::SetFolderColor(h) => {
+                if let Some(id) = self.folder_settings {
+                    let [r, g, b] = h.to_rgb8();
+                    self.folder_color_text = Some(Color::rgb(r, g, b).hex());
+                    self.edit_folder(id, FolderEdit {
+                        color: Some(Some(Color::rgb(r, g, b))),
+                        ..FolderEdit::default()
+                    });
+                }
+            }
+            Message::SetFolderColorText(text) => {
+                if let Some(id) = self.folder_settings {
+                    let parsed = Hsva::parse(&text).map(|h| {
+                        let [r, g, b] = h.to_rgb8();
+                        Color::rgb(r, g, b)
+                    });
+                    self.folder_color_text = Some(text);
+                    if let Some(c) = parsed {
+                        self.edit_folder(id, FolderEdit {
+                            color: Some(Some(c)),
+                            ..FolderEdit::default()
+                        });
+                    }
+                }
+            }
+            Message::FolderDeleteAsk => {
+                if let Some(id) = self.folder_settings {
+                    // A folder with notes asks what becomes of them first.
+                    if self.folders.iter().any(|s| s.folder.id == id && s.notes > 0) {
+                        self.confirm_folder_delete = Some(id);
+                    } else {
+                        self.delete_folder(id, false);
+                    }
+                }
+            }
+            Message::FolderDeleteCancel => self.confirm_folder_delete = None,
+            Message::FolderDeleteKeep | Message::FolderDeleteAll => {
+                let all = matches!(message, Message::FolderDeleteAll);
+                if let Some(id) = self.confirm_folder_delete.take() {
+                    self.delete_folder(id, all);
+                }
+            }
+            Message::Fave(id) => {
+                let now_fave = self.notes.iter().find(|n| n.id == id).is_some_and(|n| n.favorite);
+                if let Err(e) = lifecycle::set_favorite(&mut self.db, id, !now_fave) {
+                    self.fail(e);
+                }
+                self.refresh_details();
+                self.reload();
+            }
+            Message::DFavorite(on) => {
+                if self.details.as_ref().is_some_and(Details::is_new) {
+                    self.with_details(|d| d.note.favorite = on);
+                } else {
+                    self.act(|db, id| lifecycle::set_favorite(db, id, on).map(|_| ()));
+                }
+            }
+            Message::DRating(r) => {
+                if self.details.as_ref().is_some_and(Details::is_new) {
+                    self.with_details(|d| d.note.rating = r);
+                } else {
+                    self.act(|db, id| {
+                        lifecycle::edit(
+                            db,
+                            id,
+                            &Edit {
+                                rating: Some(r),
+                                ..Edit::default()
+                            },
+                        )
+                        .map(|_| ())
+                    });
+                }
+            }
+            Message::DSection(choice) => {
+                if self.details.as_ref().is_some_and(Details::is_new) {
+                    self.with_details(|d| d.note.section = choice.id);
+                } else {
+                    self.act(|db, id| lifecycle::set_section(db, id, choice.id).map(|_| ()));
+                }
+            }
+            Message::NewSection(folder) => {
+                match lifecycle::create_section(&mut self.db, folder, "New section") {
+                    Ok(s) => {
+                        self.reload();
+                        // Name it at once.
+                        let _ = self.update(Message::OpenSectionSettings(s.id));
+                    }
+                    Err(e) => self.fail(e),
+                }
+            }
+            Message::OpenSectionSettings(id) => {
+                self.section_settings = Some(id);
+                self.section_name = None;
+                self.section_notes = None;
+                self.section_color_text = self
+                    .folder_sections
+                    .values()
+                    .flatten()
+                    .find(|s| s.section.id == id)
+                    .and_then(|s| s.section.color.map(|c| c.hex()));
+            }
+            Message::CloseSectionSettings => self.section_settings = None,
+            Message::SetSectionTitle(t) => {
+                if let Some(id) = self.section_settings {
+                    if !t.trim().is_empty() {
+                        self.edit_section(id, SectionEdit {
+                            title: Some(t.trim().to_string()),
+                            ..SectionEdit::default()
+                        });
+                    }
+                    self.section_name = Some(t);
+                }
+            }
+            Message::SetSectionNotes(t) => {
+                if let Some(id) = self.section_settings {
+                    self.edit_section(id, SectionEdit {
+                        notes: Some(t.clone()),
+                        ..SectionEdit::default()
+                    });
+                    self.section_notes = Some(t);
+                }
+            }
+            Message::SetSectionColor(h) => {
+                if let Some(id) = self.section_settings {
+                    let [r, g, b] = h.to_rgb8();
+                    let c = Color::rgb(r, g, b);
+                    self.section_color_text = Some(c.hex());
+                    self.edit_section(id, SectionEdit {
+                        color: Some(Some(c)),
+                        ..SectionEdit::default()
+                    });
+                }
+            }
+            Message::SetSectionColorText(text) => {
+                if let Some(id) = self.section_settings {
+                    let parsed = Hsva::parse(&text).map(|h| {
+                        let [r, g, b] = h.to_rgb8();
+                        Color::rgb(r, g, b)
+                    });
+                    self.section_color_text = Some(text);
+                    if let Some(c) = parsed {
+                        self.edit_section(id, SectionEdit {
+                            color: Some(Some(c)),
+                            ..SectionEdit::default()
+                        });
+                    }
+                }
+            }
+            Message::DeleteSection => {
+                if let Some(id) = self.section_settings.take() {
+                    match lifecycle::delete_section(&mut self.db, id) {
+                        Ok(()) => self.toast = Some("Deleted the section; its notes stay".into()),
+                        Err(e) => self.fail(e),
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
+            Message::SectionFold(id) => {
+                if !self.folded_sections.remove(&id) {
+                    self.folded_sections.insert(id);
+                }
+            }
+            Message::NewInSection(section) => {
+                let _ = self.update(Message::New);
+                if let Some(d) = &mut self.details {
+                    d.note.section = Some(section);
+                }
+            }
+            Message::DragStart(id) => self.dragging = Some(id),
+            Message::DragEnd => {
+                self.dragging = None;
+                self.dragging_section = None;
+            }
+            Message::SectionDragStart(id) => self.dragging_section = Some(id),
+            Message::DropInSection(section) => {
+                // A section dropped on another takes its place.
+                if let Some(moved) = self.dragging_section.take() {
+                    if let Some(target) = section {
+                        let place = self
+                            .folder_sections
+                            .values()
+                            .find_map(|v| v.iter().position(|s| s.section.id == target));
+                        if let Some(at) = place
+                            && target != moved
+                            && let Err(e) = lifecycle::move_section(&mut self.db, moved, at)
+                        {
+                            self.fail(e);
+                        }
+                        self.reload();
+                    }
+                    return Task::none();
+                }
+                if let Some(id) = self.dragging.take() {
+                    if let Err(e) = lifecycle::set_section(&mut self.db, id, section) {
+                        self.fail(e);
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
+            Message::DFolder(choice) => {
+                if self.details.as_ref().is_some_and(Details::is_new) {
+                    self.with_details(|d| {
+                        if d.note.folder_id != choice.id {
+                            d.note.section = None;
+                        }
+                        d.note.folder_id = choice.id;
+                    });
+                    self.refresh_section_choices();
+                } else {
+                    self.act(|db, id| lifecycle::move_note(db, id, choice.id).map(|_| ()));
+                    // It left this folder's page; follow it, so it does not vanish from view.
+                    if matches!(self.scope, Scope::Folder(_)) {
+                        self.scope = choice.id.map_or(Scope::Notes, Scope::Folder);
+                        self.reload();
+                    }
+                }
+            }
+            Message::PrefListView(on) => {
+                self.prefs.settings.notes.list_view = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
             Message::PrefTrashDays(d) => {
                 self.prefs.settings.notes.trash_days = d;
                 if let Err(e) = self.prefs.save() {
@@ -532,6 +1155,12 @@ impl App {
                     // Back from a page to the list of pages (a narrow window).
                 } else if self.prefs.open {
                     self.prefs.open = false;
+                } else if self.confirm_folder_delete.is_some() {
+                    self.confirm_folder_delete = None;
+                } else if self.section_settings.is_some() {
+                    self.section_settings = None;
+                } else if self.folder_settings.is_some() {
+                    self.folder_settings = None;
                 } else if self.filter_open {
                     self.filter_open = false;
                 } else if self.drawer_open {
@@ -552,10 +1181,20 @@ impl App {
                 self.details = Some(Details {
                     note: Note {
                         id: 0,
+                        // In a folder's page, a new note goes in that folder.
+                        // In a folder's page, a new note goes in that folder; elsewhere, in the
+                        // default one.
+                        folder_id: match self.scope {
+                            Scope::Folder(id) => Some(id),
+                            _ => self.default_folder_id(),
+                        },
+                        section: None,
                         title: String::new(),
                         body: String::new(),
                         color: None,
                         pinned: false,
+                        favorite: matches!(self.scope, Scope::Favorites),
+                        rating: None,
                         sticky: false,
                         archived: false,
                         trashed: None,
@@ -584,11 +1223,20 @@ impl App {
                     self.with_details(|d| d.error = Some("Give the note a title first.".into()));
                     return Task::none();
                 }
+                // A rating is kept only where the folder offers them.
+                let rated = d
+                    .note
+                    .folder_id
+                    .is_some_and(|id| self.folders.iter().any(|s| s.folder.id == id && s.folder.rated));
                 let new = NewNote {
                     title: d.title.trim().to_string(),
                     body: d.body.text().trim_end().to_string(),
                     color: d.note.color,
                     tags: d.note.tags.clone(),
+                    folder: d.note.folder_id,
+                    section: d.note.section,
+                    favorite: d.note.favorite,
+                    rating: d.note.rating.filter(|_| rated),
                 };
                 let pinned = d.note.pinned;
                 let created = lifecycle::create(&mut self.db, &new).and_then(|n| {
@@ -599,8 +1247,11 @@ impl App {
                 });
                 match created {
                     Ok(n) => {
-                        // A new note belongs in the notes, whatever the page was showing.
-                        self.scope = Scope::Notes;
+                        // A new note belongs in the notes, whatever the page was showing; in a
+                        // folder's own page it stays there.
+                        if !matches!(self.scope, Scope::Folder(_) | Scope::Favorites) {
+                            self.scope = Scope::Notes;
+                        }
                         self.reload();
                         self.open(n.id);
                     }
@@ -645,7 +1296,6 @@ impl App {
                     self.toast = Some(e);
                 }
             }
-            Message::DColor(c) => self.set_color(c),
             Message::DColorText(s) => {
                 // A readable colour applies as it is typed; anything else waits for more text.
                 let parsed = Hsva::parse(&s).map(|h| {

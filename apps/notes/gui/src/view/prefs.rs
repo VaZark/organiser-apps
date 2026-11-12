@@ -27,8 +27,29 @@ impl App {
         )
         .description("A note is deleted for good after this long in the trash.")
         .flat(true);
-        let page =
-            iced::widget::column![trash, self.sticky.row(Message::PrefStickyLink)].spacing(12);
+        let list_view = EntryRow::switch(
+            "List view",
+            self.prefs.settings.notes.list_view,
+            Message::PrefListView,
+        )
+        .description("Show the notes as a list instead of cards.")
+        .flat(true);
+        let group = EntryRow::switch(
+            "Group by folder",
+            self.prefs.settings.notes.group_by_folder,
+            Message::PrefGroupByFolder,
+        )
+        .description("In All, Favorites, Archive and Trash, show the notes in groups, one for each folder.")
+        .flat(true);
+        let group_sections = EntryRow::switch(
+            "Group by section",
+            self.prefs.settings.notes.group_by_section,
+            Message::PrefGroupBySection,
+        )
+        .description("On a folder's page, show the notes in its sections.")
+        .flat(true);
+        let page = iced::widget::column![list_view, group, group_sections, trash, self.sticky.row(Message::PrefStickyLink)]
+            .spacing(12);
         self.prefs.view(
             wide,
             "Notes",

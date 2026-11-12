@@ -1,6 +1,6 @@
 # organiser-sticky: linking apps with Sticky Notes
 
-Sticky Notes shows items of the organiser apps (Notes, Todo, Faves) as desktop stickies. Each app
+Sticky Notes shows items of the organiser apps (Notes, Todo) as desktop stickies. Each app
 **publishes** what it is to a shared registry at start, and the person **links** it (the switch, in
 the app's Preferences or in Sticky Notes'). The registry is `$XDG_CONFIG_HOME/organiser/sticky-links.toml`
 (`~/.config/organiser/`). Only the apps in this repository are supported: there is no registration

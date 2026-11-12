@@ -1,4 +1,4 @@
-//! Recipes as Faves-style entries: favourites, ratings, search, and tag filters.
+//! Recipes as entries: favourites, ratings, search, and tag filters.
 
 use organiser_engine::{Db, TagFilter};
 use recipes_schema::SCHEMA;

@@ -14,7 +14,7 @@ use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
 pub use components::{lifecycle, statuses, views};
-pub use primitives::{board, due, priority, quick, sort, status, task};
+pub use primitives::{board, due, priority, quadrant, quick, sort, status, task};
 
 pub const META: AppMeta = AppMeta {
     id: "io.github.vazark.Todo",
@@ -91,9 +91,13 @@ pub static SCHEMA: Schema = Schema {
             fields: &[
                 // `#rrggbb`: the epic's own colour, wherever it is named.
                 Field::new("color", FieldType::Text),
+                // The name of its icon in the catalogue (`organiser_ui::components::icons`); none
+                // is the folder. Only the name is stored.
+                Field::new("icon", FieldType::Text),
                 Field::new("notes", FieldType::Markdown).searchable(),
-                // The id of one of the person's statuses (see `statuses`).
-                Field::new("status", FieldType::Reference(STATUS)).indexed(),
+                // An epic has no status of its own (its progress is how far its tasks are). The
+                // field stays so that databases that stored one still validate; it is not used.
+                Field::new("status", FieldType::Reference(STATUS)).internal(),
                 Field::new("start", FieldType::Date).indexed(),
                 Field::new("due", FieldType::Date).indexed(),
             ],

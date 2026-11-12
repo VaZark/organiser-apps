@@ -5,8 +5,9 @@ use iced::widget::{column, row};
 use organiser_engine::Row;
 use organiser_ui::Element;
 use organiser_ui::components::chip::{chip, more, pill};
-use organiser_ui::components::dot::{color_from_hex, dot_label};
+use organiser_ui::components::dot::color_from_hex;
 use organiser_ui::components::empty::empty;
+use organiser_ui::components::group_header::{UNASSIGNED, group_header};
 use organiser_ui::components::icons;
 use organiser_ui::components::row::selectable;
 use organiser_ui::components::tag_groups::tag_groups;
@@ -15,6 +16,7 @@ use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::primitives::drag::DropHint;
 use organiser_ui::iad::primitives::tag_groups::GroupEvent;
 use organiser_ui::primitives::expand::plain_rows;
+use organiser_ui::primitives::groups::group_by;
 use organiser_ui::primitives::tags::collapse;
 use organiser_ui::primitives::text::ellipsize;
 use organiser_ui::widgets::schema_filters::{Choice, active_filters};
@@ -47,7 +49,9 @@ impl App {
             empty(Icon::Check, title, text)
         } else {
             match self.epic_filter.filter(|_| self.scope == Scope::All) {
-                Some(epic) => self.epic_sections_list(epic, &rows, stacked),
+                Some(epic) if self.group_by_section => self.epic_sections_list(epic, &rows, stacked),
+                // Not in sections: the tasks, pinned first, as anywhere else.
+                Some(_) => self.pinned_and_rest(&rows, stacked),
                 None if self.scope == Scope::All => self.pinned_and_rest(&rows, stacked),
                 None => self.open_ground(rows.iter().map(|r| self.dnd_row(r, stacked)).collect()),
             }
@@ -55,6 +59,9 @@ impl App {
         let mut col = column![].spacing(12).width(Length::Fill);
         if let Some(epic) = self.epic_filter.filter(|_| self.scope == Scope::All) {
             col = col.push(self.epic_header(epic));
+        }
+        if let Some(menu) = self.all_page_menu() {
+            col = col.push(menu);
         }
         if let Some(strip) = self.active_filters() {
             col = col.push(strip);
@@ -69,13 +76,22 @@ impl App {
             return space().into();
         };
         let mut title = row![icons::tinted(
-            icons::folder(),
+            icons::named(s.epic.icon.as_deref()),
             22.0,
             s.epic.color.as_deref().and_then(color_from_hex),
         )]
         .spacing(8)
         .align_y(iced::Alignment::Center);
         title = title.push(text(s.epic.title.clone()).size(20).width(Length::Fill));
+        // The deadline, if it has one, beside the edit button.
+        if let Some(d) = s.epic.due {
+            let role = match bucket(d, self.today) {
+                Bucket::Overdue => Role::Error,
+                Bucket::Today => Role::Warning,
+                _ => Role::Accent,
+            };
+            title = title.push(pill(&label(d, self.today), role));
+        }
         title = title.push(tooltip(
             icon_button(Icon::Edit).on_press(Message::EditEpic(id)),
             "Edit epic",
@@ -84,10 +100,13 @@ impl App {
         title = title.push(
             menu_button(
                 Icon::ViewMore,
-                Menu::new("Epic").section([MenuItem::action(
-                    "Add section",
-                    Message::NewSection(id),
-                )]),
+                Menu::new("Epic")
+                    .section([MenuItem::switch(
+                        "Group by section",
+                        self.group_by_section,
+                        Message::GroupBySection(!self.group_by_section),
+                    )])
+                    .section([MenuItem::action("Add section", Message::NewSection(id))]),
             )
             .tooltip("More"),
         );
@@ -162,7 +181,8 @@ impl App {
             let header = row![
                 icon_button(if folded { Icon::GoNext } else { Icon::GoDown })
                     .on_press(Message::SectionFold(sid)),
-                // Read only: the name, and under it what the section is for, small.
+                // Read only: the name, and under it what the section is for, small. Press and
+                // hold it to carry the section to another place.
                 {
                     let mut name = column![text(sec.section.title.clone()).size(15)].spacing(1);
                     if let Some(line) = sec.section.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
@@ -170,7 +190,8 @@ impl App {
                                 .size(11)
                                 .style(organiser_ui::iad::styles::text::dim));
                     }
-                    container(name).width(Length::Fill)
+                    container(drag_source(name, Message::SectionDragStart(sid)))
+                        .width(Length::Fill)
                 },
                 caption(format!("{}/{}", sec.total - sec.open, sec.total)),
                 tooltip(
@@ -195,9 +216,19 @@ impl App {
                     boxed_list(items)
                 });
             }
+            // A task or a section can be dropped here.
+            let hint = if self.dragging_section.is_some() {
+                format!("Place it at {}", sec.section.title)
+            } else {
+                format!("Move to {}", sec.section.title)
+            };
             col = col.push(
-                drop_zone(group, dragging, Message::DropInSection(Some(sid)))
-                    .hint(DropHint::new(format!("Move to {}", sec.section.title))),
+                drop_zone(
+                    group,
+                    dragging || self.dragging_section.is_some_and(|m| m != sid),
+                    Message::DropInSection(Some(sid)),
+                )
+                .hint(DropHint::new(hint)),
             );
         }
         col.into()
@@ -265,31 +296,88 @@ impl App {
             .into()
     }
 
-    /// `rows` with the pinned tasks in a "Pinned" section on top, under their own heading, and
-    /// the rest under "Others". A task's subtasks stay with it. Without pinned tasks, just the
-    /// list.
+    /// The `⋯` at the top right of the pages of every task: how they are grouped. `None` on an
+    /// epic's page (which has its own) and on Current tasks.
+    pub(super) fn all_page_menu(&self) -> Option<Element<'_, Message>> {
+        if self.scope != Scope::All || self.epic_filter.is_some() || self.epics.is_empty() {
+            return None;
+        }
+        Some(
+            row![
+                space().width(Length::Fill),
+                menu_button(
+                    Icon::ViewMore,
+                    Menu::new("Page").section([MenuItem::switch(
+                        "Group by epic",
+                        self.group_by_epic,
+                        Message::GroupByEpic(!self.group_by_epic),
+                    )]),
+                )
+                .tooltip("More"),
+            ]
+            .align_y(iced::Alignment::Center)
+            .into(),
+        )
+    }
+
+    /// The heading of a group of tasks: the epic's icon in its colour and its name, with how many
+    /// tasks (and a button to open the epic) when `count` is given; or "Unassigned" for the tasks
+    /// in no epic.
+    pub(super) fn epic_group_header(&self, epic: Option<i64>, count: Option<usize>) -> Element<'_, Message> {
+        match epic.and_then(|id| self.epics.iter().find(|s| s.epic.id == id)) {
+            Some(s) => group_header(
+                Some((
+                    icons::named(s.epic.icon.as_deref()),
+                    s.epic.color.as_deref().and_then(color_from_hex),
+                )),
+                &s.epic.title,
+                s.epic.notes.lines().map(str::trim).find(|l| !l.is_empty()),
+                count,
+                Some((Message::EditEpic(s.epic.id), "Edit epic")),
+            ),
+            None => group_header(None, UNASSIGNED, None, count, None),
+        }
+    }
+
+    /// `rows` with the pinned tasks in a "Pinned" section on top, under their own heading. Then,
+    /// when the page is grouped by epic, a group for each epic and the tasks in none last under
+    /// "Unassigned"; otherwise the rest under "Others". A task's subtasks stay with it. Without
+    /// pinned tasks or groups, just the list.
     fn pinned_and_rest<'a>(&'a self, rows: &[Row<'a, Task>], stacked: bool) -> Element<'a, Message> {
-        let (mut pinned, mut rest) = (Vec::new(), Vec::new());
-        let mut in_pinned = false;
+        // The rest, each row with the epic of the top-level task it belongs to, and whether it is
+        // that top-level task.
+        let (mut pinned, mut rest): (Vec<Element<'a, Message>>, Vec<(Option<i64>, bool, Element<'a, Message>)>) =
+            (Vec::new(), Vec::new());
+        let (mut in_pinned, mut epic) = (false, None);
         for r in rows {
             if r.depth == 0 {
                 in_pinned = r.value.pinned;
+                epic = r.value.epic;
             }
             let row = self.dnd_row(r, stacked);
             if in_pinned {
                 pinned.push(row);
             } else {
-                rest.push(row);
+                rest.push((epic, r.depth == 0, row));
             }
         }
-        if pinned.is_empty() {
-            return self.open_ground(rest);
+        let grouped = self.grouped_by_epic();
+        if pinned.is_empty() && !grouped {
+            return self.open_ground(rest.into_iter().map(|r| r.2).collect());
         }
-        let mut col = column![caption("Pinned"), self.open_ground(pinned)]
-            .spacing(8)
-            .width(Length::Fill);
-        if !rest.is_empty() {
-            col = col.push(caption("Others")).push(self.open_ground(rest));
+        let mut col = column![].spacing(8).width(Length::Fill);
+        if !pinned.is_empty() {
+            col = col.push(caption("Pinned")).push(self.open_ground(pinned));
+        }
+        if grouped {
+            let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
+            for (epic, items) in group_by(rest, |r| r.0, &order) {
+                let tasks = items.iter().filter(|r| r.1).count();
+                col = col.push(self.epic_group_header(epic, Some(tasks)));
+                col = col.push(self.open_ground(items.into_iter().map(|r| r.2).collect()));
+            }
+        } else if !rest.is_empty() {
+            col = col.push(caption("Others")).push(self.open_ground(rest.into_iter().map(|r| r.2).collect()));
         }
         col.into()
     }
@@ -337,10 +425,8 @@ impl App {
         if let Some(s) = status
             && self.statuses.first_open().map(|f| f.id) != Some(s.id)
         {
-            push(dot_label(
-                &s.name,
-                s.color.as_deref().and_then(color_from_hex),
-            ));
+            // The colour is the dot before the chips; here just the name.
+            push(text(s.name.clone()).size(13).style(organiser_ui::iad::styles::text::dim).into());
         }
         if t.priority.is_urgent() {
             let role = if t.priority == Priority::Highest {
@@ -364,12 +450,27 @@ impl App {
         let title = title.width(Length::Fill).padding([6, 8]);
 
         // On the side, always when set: the epic, the person's own tags, then the due date, last.
-        let mut side = row![].spacing(4);
+        let mut side = row![].spacing(4).align_y(iced::Alignment::Center);
+        // The status as a dot, before the chips.
+        if let Some(d) = self.status_dot(t) {
+            side = side.push(d);
+        }
         if let Some(flags) = self.flags_row(t) {
             side = side.push(flags);
         }
-        if let Some(e) = t.epic.and_then(|id| self.epic_titles.get(&id)) {
-            side = side.push(icons::epic_chip(e, t.epic.and_then(|id| self.epic_color(id))));
+        // On an epic's own page, or in an epic's group, every task is in that epic: no chip to say
+        // so.
+        if self.epic_filter.is_none()
+            && !self.grouped_by_epic()
+            && let Some(e) = t.epic.and_then(|id| self.epic_titles.get(&id))
+        {
+            side = side.push(icons::folder_chip(e, t.epic.and_then(|id| self.epic_color(id)), t.epic.and_then(|id| self.epic_icon(id))));
+        }
+        // The section as a chip, unless the epic's page shows it as a heading.
+        if !(self.epic_filter.is_some() && self.group_by_section)
+            && let Some(sec) = self.section_chip(t)
+        {
+            side = side.push(sec);
         }
         let tags = collapse(&t.tags, 2);
         for g in &tags.shown {

@@ -1,12 +1,13 @@
 //! The details of the selected note: title, text, colour, tags. Every edit is saved as it is made.
 
-use iced::widget::{button, column, row};
-use iced::{Alignment, Background, Border, Length};
+use iced::widget::{column, row};
+use iced::{Alignment, Length};
 use notes_schema::color::{Color, PRESETS};
 use organiser_ui::Element;
 use organiser_ui::components::action::action_button;
+use organiser_ui::components::color_pick::color_swatch_with;
+use organiser_ui::components::heart::heart;
 use organiser_ui::components::toggle::IconToggle;
-use organiser_ui::iad::Theme;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::widgets::markdown_field::MarkdownField;
 use organiser_ui::widgets::tag_editor::tag_editor;
@@ -17,28 +18,6 @@ fn field<'a>(label: &'a str, control: impl Into<Element<'a, Message>>) -> Elemen
     column![caption(label), control.into()]
         .spacing(4)
         .width(Length::Fill)
-        .into()
-}
-
-/// A round colour button; `None` is the default card, drawn as an outline.
-fn swatch<'a>(color: Option<Color>, active: bool) -> Element<'a, Message> {
-    let size = 28.0;
-    button(space().width(size).height(size))
-        .padding(0)
-        .on_press(Message::DColor(color))
-        .style(move |theme: &Theme, _| button::Style {
-            background: color.map(|c| Background::Color(paint(c))),
-            border: Border {
-                color: if active {
-                    theme.semantic.swatch(Role::Accent).color
-                } else {
-                    theme.semantic.swatch(Role::Neutral).color
-                },
-                width: if active { 3.0 } else { 1.0 },
-                radius: (size / 2.0).into(),
-            },
-            ..button::Style::default()
-        })
         .into()
 }
 
@@ -91,7 +70,16 @@ impl App {
             ]
             .spacing(8)
             .align_y(Alignment::Center),
-            entry("Title", d.title.as_str()).on_input(Message::DTitle),
+            row![
+                entry("Title", d.title.as_str())
+                    .on_input(Message::DTitle)
+                    .width(Length::Fill),
+                heart(n.favorite, Message::DFavorite(!n.favorite)),
+                // The note's own colour, at the end of the title.
+                self.colour_at_title_end(n.color, &d.color_text),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
             tag_editor(
                 &n.tags,
                 d.adding_tag,
@@ -102,6 +90,7 @@ impl App {
                 &|t| Message::DTagAdd(t),
                 &|t| Message::DTagRemove(t),
             ),
+            self.filing(n),
             MarkdownField::new(
                 "Note",
                 &d.body,
@@ -114,7 +103,6 @@ impl App {
             .placeholder("Write in Markdown…  # heading, **bold**, - [ ] task")
             .on_task(Message::DTask)
             .on_link(Message::OpenLink),
-            field("Colour", self.colors(n.color, &d.color_text)),
         ]
         .spacing(14)
         .width(Length::Fill);
@@ -152,27 +140,58 @@ impl App {
         .into()
     }
 
-    /// Preset swatches, "none", and a picker for any other colour.
-    fn colors<'a>(&'a self, current: Option<Color>, text: &'a str) -> Element<'a, Message> {
-        let mut swatches = row![swatch(None, current.is_none())].spacing(8);
-        for (_, hex) in PRESETS {
-            let c = Color::parse(hex);
-            swatches = swatches.push(swatch(c, c.is_some() && c == current));
+    /// Where the note is filed, and, in a folder that rates its notes, its stars.
+    fn filing<'a>(&'a self, n: &'a notes_schema::note::Note) -> Element<'a, Message> {
+        let mut col = column![].spacing(14).width(Length::Fill);
+        let folder = self.folder_of(n);
+        // The extras are the folder's choice: nothing to rate where ratings are off.
+        if folder.is_some_and(|f| f.rated) {
+            let mut stars = row![].spacing(2).align_y(Alignment::Center);
+            for k in 1..=5u8 {
+                let on = n.rating.is_some_and(|r| k <= r);
+                // Pressing the star that is already the rating clears it.
+                let next = if n.rating == Some(k) { None } else { Some(k) };
+                stars = stars.push(
+                    flat_button(text(if on { "★" } else { "☆" }).size(22))
+                        .on_press(Message::DRating(next)),
+                );
+            }
+            col = col.push(field("Rating", stars));
         }
-        let custom = ColorInput::new(
-            self.color_value(),
-            text,
+        let here = self
+            .folder_choices
+            .iter()
+            .find(|c| c.id == n.folder_id)
+            .cloned();
+        col = col.push(field(
+            "Folder",
+            dropdown(&self.folder_choices, here, Message::DFolder),
+        ));
+        // The folder's sections, when it has any.
+        if !self.section_choices.is_empty() {
+            let current = self
+                .section_choices
+                .iter()
+                .find(|c| c.id == n.section)
+                .cloned();
+            col = col.push(field(
+                "Section",
+                dropdown(&self.section_choices, current, Message::DSection),
+            ));
+        }
+        col.into()
+    }
+
+    /// The colour swatch that ends the title row: a picker with the presets, for any colour. A
+    /// note without one has the default card, shown as the default swatch.
+    fn colour_at_title_end<'a>(&'a self, current: Option<Color>, typed: &'a str) -> Element<'a, Message> {
+        color_swatch_with(
+            current.map_or(organiser_ui::components::color_pick::UNSET, paint),
+            typed,
+            22.0,
+            PRESETS.iter().map(|(_, h)| *h),
             Message::DColorText,
             Message::DColorPick,
         )
-        .swatches(PRESETS.iter().map(|(_, h)| *h));
-        column![
-            swatches.wrap(),
-            row![custom, caption("Any colour")]
-                .spacing(8)
-                .align_y(Alignment::Center)
-        ]
-        .spacing(8)
-        .into()
     }
 }

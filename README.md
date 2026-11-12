@@ -8,10 +8,9 @@ Tags come from [weaver](https://github.com/VaZark/weaver).
 | App                           | Status                                                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------------------------- |
 | **Todo** (GTG, Jira, Planify) | Working: kanban board and list, nested tasks, epics, your own coloured statuses, Markdown notes, tags, search, CLI and GUI |
-| **Faves**                     | Working: lists of anything you track, with optional ratings and notes, CLI and GUI                |
-| **Notes** (Keep-style)         | Working: coloured cards with Markdown, pinning, archive and trash, CLI and GUI (packaging planned) |
+| **Notes** (Keep-style)         | Working: coloured cards or a list, Markdown, pinning, favourites, folders (with ratings) and their sections, archive and trash, CLI and GUI |
 | **Recipes**                   | Working: ingredients (optional or required), ordered steps, photos, read mode, a log of what you cooked, a fridge with expiry dates, shopping lists from recipes and portions that you can copy into Todo, CLI and GUI |
-| **Sticky Notes**              | Working: shows items of Notes, Todo, Faves and any compliant-app as coloured desktop stickies. It holds no data of its own, only a list of linked apps and flags per entry. Sticky Notes decides whether a sticky is a desktop window or only listed in its own window. GUI and CLI (`sticky`); it can start on login |
+| **Sticky Notes**              | Working: shows items of Notes, Todo and any compliant-app as coloured desktop stickies. It holds no data of its own, only a list of linked apps and flags per entry. Sticky Notes decides whether a sticky is a desktop window or only listed in its own window. GUI and CLI (`sticky`); it can start on login |
 
 ## Quick start
 
@@ -73,40 +72,29 @@ In both views:
   Dates accept `2026-12-01`, `today`, `tomorrow`, `+3d` or a weekday name. With an epic selected,
   new tasks go into it.
 
-### Faves
+### Notes: folders, favourites and ratings
 
-Keep lists of anything you follow: movies, cars, animals, books. Each **list** chooses its own
-extras, so what an entry can have depends on the list it is in:
+Notes can be filed in **folders** (each with a name, an icon, a colour and a description), and a
+folder can have **sections**. The folders choose their own extras: **ratings** (up to five stars) on
+or off. Every note can be a **favourite**. In All, Favorites, Archive and Trash the notes can be
+grouped by folder, and a folder's page by section; the notes in no folder are under "Unassigned".
 
-- **Ratings** (up to five stars): on for movies and cars, off for animals, say.
-- Every entry can have **notes or an opinion**, **tags**, and a **favourite** heart. The
-  **Favorites** view collects the hearts of every list.
-
-The rules hold everywhere, not just in the GUI: the engine refuses a rating on an entry whose list
-has ratings off, and switching ratings off for a list removes the ratings its entries had. Deleting
-a list deletes its entries. Moving an entry to another list drops what the new list does not offer.
-
-In the GUI the sidebar has **All**, **Favorites** and your lists (with counts). The cards of the
-selected list are laid out like Google Keep's notes. The **settings** icon opens the list's name
-and its Ratings switch. Click a card for its details: title, tags, the stars the list offers,
-which list it is in, and notes. Every edit is saved as you make it, and **+** starts a new entry on
-the same page.
+The rules hold everywhere, not just in the GUI. Switching ratings off for a folder hides its
+ratings and keeps them for when it is back on. Deleting a folder keeps its notes (or deletes them
+with it, if asked).
 
 ```sh
-faves list-new Movies --rated                      # prints the list's id, say 1
-faves list-new Animals                             # no ratings
-faves add "Alien" -p 1 -s rating=5 -t scifi
-faves add "Otter" -p 2 -s notes="Holds hands while sleeping."
-faves fave 3                                       # mark a favourite
-faves favorites --sort rating                      # favourites from every list
-faves lists                                        # lists with their counts
-faves list-set 1 --rated off                       # removes the ratings in that list
-faves move 3 2                                     # move an entry to list 2
-faves list -p 1 --sort rating:desc                 # a list's entries, best first
+notes folder-new Films --rated --icon play         # prints the folder's id, say 1
+notes add "Alien" -s body="Spooky."                # a note
+notes move 3 1                                     # file note 3 in folder 1
+notes rate 3 5                                     # five stars (the folder must rate)
+notes fave 3                                       # mark a favourite
+notes ls --favorites --sort rating                 # favourites, best rated first
+notes folders                                      # folders with their counts
+notes section-new 1 Classics --color '#f2d45c'     # a section of folder 1
+notes import-faves                                 # copy what the old Faves app held
 ```
 
-Every command takes `--json`. The generic commands (`add list show edit rm mv tag untag tags
-tag-new tag-parent tag-rm`) are the same as in Todo.
 
 On the command line, the generic commands are the same for every app: `add list show edit rm mv
 tag untag tags tag-new tag-parent tag-rm`. Todo adds `start done dismiss reopen tree current

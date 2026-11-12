@@ -3,13 +3,14 @@
 //! the details as they read (clipped), how far its subtasks are, its tags, where it belongs and
 //! its due date. Pressing a card opens its details. A note takes its epic's colour.
 
-use iced::widget::{column, row};
-use iced::{Alignment, Length};
+use iced::widget::column;
+use iced::Length;
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
 use organiser_ui::components::chip::pill;
 use organiser_ui::components::empty::empty;
 use organiser_ui::iad::prelude::*;
+use organiser_ui::primitives::groups::group_by;
 use organiser_ui::widgets::masonry::{PAGE_PADDING, columns_for, masonry};
 use todo_schema::due::{Bucket, bucket, label};
 use todo_schema::task::Task;
@@ -36,6 +37,9 @@ impl App {
         if let Some(epic) = self.epic_filter.filter(|_| self.scope == todo_schema::views::Scope::All)
         {
             page = page.push(self.epic_header(epic));
+        }
+        if let Some(menu) = self.all_page_menu() {
+            page = page.push(menu);
         }
         if let Some(strip) = self.active_filters() {
             page = page.push(strip);
@@ -67,13 +71,21 @@ impl App {
                 )
             };
             // Pinned notes come first, under their own heading.
-            if !pinned.is_empty() {
+            let any_pinned = !pinned.is_empty();
+            if any_pinned {
                 page = page.push(caption("Pinned")).push(grid(pinned));
-                if !others.is_empty() {
+            }
+            if self.grouped_by_epic() {
+                // Then a group for each epic, and the tasks in none last, "Unassigned".
+                let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
+                for (epic, tasks) in group_by(others, |t| t.epic, &order) {
+                    page = page.push(self.epic_group_header(epic, Some(tasks.len())));
+                    page = page.push(grid(tasks));
+                }
+            } else if !others.is_empty() {
+                if any_pinned {
                     page = page.push(caption("Others"));
                 }
-            }
-            if !others.is_empty() {
                 page = page.push(grid(others));
             }
         }
@@ -89,13 +101,10 @@ impl App {
         // The note takes its epic's colour, as a Keep note takes its colour.
         let tint = t.epic.and_then(|e| self.epic_color(e));
 
-        let title = row![
-            check_button("", closed).on_toggle(move |_| Message::Toggle(id)),
-            text(t.title.clone()).size(15).width(Length::Fill),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![title].spacing(6);
+        let check: Element<'_, Message> = check_button("", closed)
+            .on_toggle(move |_| Message::Toggle(id))
+            .into();
+        let mut body = column![self.titled(Some(check), t)].spacing(6);
         if let Some(doc) = self.docs.get(&t.id) {
             // The details as they read, clipped: a card is a preview, not the whole task.
             body = body.push(

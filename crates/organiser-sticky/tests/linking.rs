@@ -39,23 +39,17 @@ impl Drop for Sandbox {
     }
 }
 
-fn apps() -> [(&'static StickySpec, &'static Schema); 3] {
+fn apps() -> [(&'static StickySpec, &'static Schema); 2] {
     [
         (&notes_schema::STICKY, &notes_schema::SCHEMA),
         (&todo_schema::STICKY, &todo_schema::SCHEMA),
-        (&faves_schema::STICKY, &faves_schema::SCHEMA),
     ]
 }
 
 /// Make one item of the app's sticky kind, with `text` in its text field.
 fn make(db: &mut Db, spec: &StickySpec, title: &str, text: &str) -> i64 {
     let k = &spec.kinds[0];
-    let mut new = NewItem::new(k.kind, title).field(k.body, text);
-    if spec.meta.slug == "faves" {
-        // A fave's entry lives in a list.
-        let list = db.create(NewItem::new(faves_schema::LIST, "list")).unwrap();
-        new = new.parent(list.id);
-    }
+    let new = NewItem::new(k.kind, title).field(k.body, text);
     db.create(new).unwrap().id
 }
 
@@ -88,7 +82,7 @@ fn every_offer_matches_the_apps_own_schema() {
     // Apps must not collide in the registry.
     let ids: std::collections::HashSet<_> = apps().iter().map(|(s, _)| s.meta.id).collect();
     let slugs: std::collections::HashSet<_> = apps().iter().map(|(s, _)| s.meta.slug).collect();
-    assert_eq!((ids.len(), slugs.len()), (3, 3));
+    assert_eq!((ids.len(), slugs.len()), (2, 2));
 }
 
 #[test]
@@ -104,7 +98,6 @@ fn publishing_is_off_by_default_and_switches_are_independent() {
         !store::is_linked(&todo_schema::STICKY),
         "linking Notes leaves Todo alone"
     );
-    assert!(!store::is_linked(&faves_schema::STICKY));
 
     // Apps start again and publish again: the switch survives, and nothing is rewritten.
     let before = std::fs::read_to_string(store::path()).unwrap();
@@ -119,15 +112,15 @@ fn publishing_is_off_by_default_and_switches_are_independent() {
 
     // Sticky's side: it switches by id, and an app sees it.
     store::set_enabled_by_id(notes_schema::META.id, false).unwrap();
-    store::set_enabled_by_id(faves_schema::META.id, true).unwrap();
+    store::set_enabled_by_id(todo_schema::META.id, true).unwrap();
     assert!(!store::is_linked(&notes_schema::STICKY));
-    assert!(store::is_linked(&faves_schema::STICKY));
+    assert!(store::is_linked(&todo_schema::STICKY));
     // An id nobody published changes nothing and invents nothing.
     store::set_enabled_by_id("org.example.Nobody", true).unwrap();
-    assert_eq!(store::load().unwrap().links.len(), 3);
+    assert_eq!(store::load().unwrap().links.len(), 2);
 
-    // Linking an app that never published (switching from the app's side first) publishes it.
-    store::set_linked(&todo_schema::STICKY, true).unwrap();
+    // Switching Notes back on from the app's side leaves Todo as it was.
+    store::set_linked(&notes_schema::STICKY, true).unwrap();
     assert_eq!(store::load().unwrap().enabled().count(), 2);
 }
 
@@ -144,7 +137,7 @@ fn sticky_sees_exactly_what_the_linked_apps_flag() {
         // The registry carries this app's database, wherever it is.
         let mut link = store::link_for(spec);
         link.db_path = path.to_string_lossy().into_owned();
-        store::set_enabled(&link, spec.meta.slug != "faves").unwrap();
+        store::set_enabled(&link, spec.meta.slug != "todo").unwrap();
         flagged.push((spec, a));
     }
 
@@ -163,16 +156,16 @@ fn sticky_sees_exactly_what_the_linked_apps_flag() {
     seen.sort();
     assert_eq!(
         seen,
-        ["notes", "todo"],
-        "Faves is off, so its sticky is not shown"
+        ["notes"],
+        "Todo is off, so its sticky is not shown"
     );
 
-    // Switching Faves on shows it; the apps' own typed reads agree about the flag.
-    store::set_enabled_by_id(faves_schema::META.id, true).unwrap();
-    let faves = store::load().unwrap();
-    let link = faves.get(faves_schema::META.id).unwrap();
+    // Switching Todo on shows it; the apps' own typed reads agree about the flag.
+    store::set_enabled_by_id(todo_schema::META.id, true).unwrap();
+    let registry = store::load().unwrap();
+    let link = registry.get(todo_schema::META.id).unwrap();
     let loose = Db::open_loose(&link.db_path).unwrap();
-    assert_eq!(loose.flagged_loose("entry", STICKY).unwrap().len(), 1);
+    assert_eq!(loose.flagged_loose("task", STICKY).unwrap().len(), 1);
     for (spec, id) in flagged {
         let typed = Db::open(
             sb.db(spec.meta.slug),

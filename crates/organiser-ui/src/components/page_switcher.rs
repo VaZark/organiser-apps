@@ -2,7 +2,7 @@
 //! In a narrow window the sidebar is gone and this takes its place in the header bar. Two forms
 //! share one look:
 //!
-//! * [`title_button`]: a press opens something of the app's own (Faves opens its lists dialog);
+//! * [`title_button`]: a press opens something of the app's own (an app can open its own dialog);
 //! * [`page_switcher`]: a press opens a popover with the pages to choose from, the current one
 //!   ticked (Recipes: Recipes, Log, Fridge).
 

@@ -84,7 +84,8 @@ fn check_section(db: &Db, section: i64, epic: i64) -> Result<()> {
 }
 
 /// Edit a task. A section always belongs to the task's epic: changing or clearing the epic
-/// clears the section, unless the same edit names one of the new epic's.
+/// clears the section, unless the same edit names one of the new epic's. When the epic or the
+/// section changes, the task's subtasks follow.
 pub fn edit(db: &mut Db, id: i64, edit: &Edit) -> Result<Task> {
     let mut edit = edit.clone();
     let epic = match edit.epic {
@@ -101,7 +102,18 @@ pub fn edit(db: &mut Db, id: i64, edit: &Edit) -> Result<Task> {
         }
         _ => {}
     }
-    Ok(Task::from(&db.update(id, edit.to_patch())?))
+    let task = Task::from(&db.update(id, edit.to_patch())?);
+    // A task and its subtasks live in one place: they follow it to its new epic and section.
+    if edit.epic.is_some() || edit.section.is_some() {
+        let place = |v: Option<i64>| v.map_or(serde_json::Value::Null, serde_json::Value::from);
+        for sub in descendants(db, id)? {
+            let patch = ItemPatch::default()
+                .field("epic", place(task.epic))
+                .field("section", place(task.section));
+            db.update(sub.id, patch)?;
+        }
+    }
+    Ok(task)
 }
 
 /// Pin a task, to keep it ahead of the others in every view, or unpin it.
@@ -199,19 +211,16 @@ pub fn reparent(db: &mut Db, id: i64, parent: Option<i64>) -> Result<Task> {
             ));
         }
         let home = Task::from(&target);
-        let mut moved = vec![id];
-        moved.extend(descendants(db, id)?.into_iter().map(|t| t.id));
-        for t in moved {
-            edit(
-                db,
-                t,
-                &Edit {
-                    epic: Some(home.epic),
-                    section: Some(home.section),
-                    ..Edit::default()
-                },
-            )?;
-        }
+        // Its subtasks follow it (see `edit`).
+        edit(
+            db,
+            id,
+            &Edit {
+                epic: Some(home.epic),
+                section: Some(home.section),
+                ..Edit::default()
+            },
+        )?;
     }
     Ok(Task::from(&db.move_item(id, parent, None)?))
 }
@@ -224,17 +233,6 @@ pub fn create_epic(db: &mut Db, title: &str) -> Result<Epic> {
 
 pub fn edit_epic(db: &mut Db, id: i64, edit: &Edit) -> Result<Epic> {
     Ok(Epic::from(&db.update(id, edit.to_patch())?))
-}
-
-/// Closing an epic leaves its tasks alone: they may belong to follow-up work.
-pub fn set_epic_status(db: &mut Db, id: i64, status: i64) -> Result<Epic> {
-    if statuses::load(db)?.get(status).is_none() {
-        return Err(Error::Invalid(format!("there is no status {status}")));
-    }
-    Ok(Epic::from(&db.update(
-        id,
-        ItemPatch::default().field("status", status),
-    )?))
 }
 
 /// Delete an epic. The engine unlinks its tasks, which stay, no longer in any epic.
@@ -297,6 +295,27 @@ pub fn rename_section(db: &mut Db, id: i64, title: &str) -> Result<Section> {
             ..ItemPatch::default()
         },
     )?))
+}
+
+/// Move a section to place `to` (0 is first) among its epic's sections, the others keeping their
+/// order. A place past the last is the last.
+pub fn move_section(db: &mut Db, id: i64, to: usize) -> Result<()> {
+    let item = db.get(id)?;
+    if item.kind != SECTION {
+        return Err(Error::Invalid(format!("item {id} is not a section")));
+    }
+    let parent = item.parent_id;
+    let others: Vec<_> = db
+        .children(parent)?
+        .into_iter()
+        .filter(|i| i.kind == SECTION && i.id != id)
+        .collect();
+    match others.get(to) {
+        // Before the section now in that place.
+        Some(next) => db.move_item(id, parent, Some(next.position))?,
+        None => db.move_item(id, parent, None)?,
+    };
+    Ok(())
 }
 
 /// Delete a section. Its tasks stay in the epic, in no section.
