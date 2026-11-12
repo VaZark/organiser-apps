@@ -1,5 +1,10 @@
-//! Starting Sticky on login: an XDG autostart entry that runs `sticky-gui --background`, which
-//! shows the flagged items and ends at once if there are none.
+//! Starting Sticky on login, as `sticky-gui --background`, which shows the stickies for the desktop
+//! and ends at once if there are none.
+//!
+//! Outside a sandbox that is an XDG autostart entry. Inside a Flatpak the app may not write the
+//! host's `~/.config/autostart`, so it asks the Background portal (`RequestBackground` with
+//! `autostart`); the desktop may ask the person to confirm. The portal's answer arrives later and
+//! cannot be read back, so what was asked is remembered in a small marker file.
 
 use std::path::{Path, PathBuf};
 
@@ -39,12 +44,54 @@ fn exec() -> String {
     }
 }
 
+/// What was last asked of the Background portal (inside a sandbox, where nothing can be read
+/// back).
+fn marker_path() -> PathBuf {
+    crate::components::store::dir().join("sticky-autostart")
+}
+
 pub fn is_enabled() -> bool {
-    entry_path().exists()
+    if in_flatpak() {
+        marker_path().exists()
+    } else {
+        entry_path().exists()
+    }
+}
+
+/// The options of `RequestBackground`, as `gdbus` writes a variant dictionary.
+pub fn portal_options(on: bool) -> String {
+    if on {
+        "{'autostart': <true>, 'commandline': <['sticky-gui-launch', '--background']>, \
+         'reason': <'Show your stickies when you log in'>}"
+            .into()
+    } else {
+        "{'autostart': <false>}".into()
+    }
 }
 
 pub fn set_enabled(on: bool) -> Result<(), String> {
-    set_enabled_at(&entry_path(), &exec(), on)
+    if !in_flatpak() {
+        return set_enabled_at(&entry_path(), &exec(), on);
+    }
+    crate::components::discover::portal(
+        "org.freedesktop.portal.Background.RequestBackground",
+        &["", &portal_options(on)],
+    )?;
+    let marker = marker_path();
+    if on {
+        if let Some(dir) = marker.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
+        std::fs::write(&marker, "requested\n")
+            .map_err(|e| format!("cannot write {}: {e}", marker.display()))
+    } else {
+        match std::fs::remove_file(&marker) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("cannot remove {}: {e}", marker.display())),
+        }
+    }
 }
 
 pub fn set_enabled_at(path: &Path, exec: &str, on: bool) -> Result<(), String> {
@@ -67,6 +114,14 @@ pub fn set_enabled_at(path: &Path, exec: &str, on: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_portal_options_are_a_variant_dictionary() {
+        let on = portal_options(true);
+        assert!(on.starts_with("{'autostart': <true>"));
+        assert!(on.contains("'commandline': <['sticky-gui-launch', '--background']>"));
+        assert_eq!(portal_options(false), "{'autostart': <false>}");
+    }
 
     #[test]
     fn enabling_writes_the_entry_and_disabling_removes_it() {

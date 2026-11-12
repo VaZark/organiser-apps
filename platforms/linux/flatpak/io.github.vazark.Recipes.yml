@@ -11,7 +11,7 @@ finish-args:
   - --device=dri
   # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
   # host's, since the sandbox's own would hide it.
-  - --filesystem=xdg-data/recipes
+  - --filesystem=xdg-data/recipes:create
   # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
   - --filesystem=xdg-config/iced-adaptive-design:ro
 modules:

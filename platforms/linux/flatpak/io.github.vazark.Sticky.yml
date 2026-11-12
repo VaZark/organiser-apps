@@ -16,8 +16,7 @@ finish-args:
   - --filesystem=xdg-data/faves
   # The list of linked apps, shared by every app.
   - --filesystem=xdg-config/organiser
-  # "Start on login": an autostart entry in the host's ~/.config/autostart.
-  - --filesystem=xdg-config/autostart
+  # "Start on login" goes through the Background portal, which needs no permission.
   # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
   - --filesystem=xdg-config/iced-adaptive-design:ro
 modules:

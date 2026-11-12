@@ -40,3 +40,13 @@ true by default) or only listed in Sticky Notes' own window, and the colour pick
 kept in `sticky-local.toml` beside the registry, never in the app's database. That state is dropped
 when the app stops flagging the item, and when the app is unregistered. A database that is not in
 the engine's layout is refused without being touched.
+
+## Finding and starting Sticky Notes (and Flatpak)
+
+Sticky's desktop file declares the URI scheme `organiser-sticky:` (`MimeType=x-scheme-handler/…`,
+`Exec=… %u`). An app in a Flatpak sandbox cannot see the host, so it uses the desktop portals:
+`OpenURI.SchemeSupported("organiser-sticky")` says whether Sticky is installed, and
+`xdg-open organiser-sticky://start` (the OpenURI portal inside a sandbox) starts it as `--background`
+does. Autostart uses the Background portal (`RequestBackground`). Outside a sandbox the same
+functions look at `PATH` and write an XDG autostart entry. No Flatpak permission beyond
+`xdg-config/organiser` (the shared registry) is needed.

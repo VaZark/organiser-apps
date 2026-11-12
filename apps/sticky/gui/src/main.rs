@@ -23,10 +23,18 @@ pub const META: AppMeta = AppMeta {
 fn main() -> iced::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--print-desktop-entry") {
-        print!("{}", shell::desktop_entry(&META, "sticky-gui"));
+        // `%u`: the URI the desktop hands over when something opens `organiser-sticky:`; that
+        // scheme is how the other apps find and start Sticky (see `organiser_sticky::discover`).
+        let entry = shell::desktop_entry(&META, "sticky-gui %u");
+        println!(
+            "{}\nMimeType=x-scheme-handler/{};",
+            entry.trim_end(),
+            organiser_sticky::discover::SCHEME
+        );
         return Ok(());
     }
-    let background = args.iter().any(|a| a == "--background");
+    // `--background`, or the URI the desktop portal passes to start Sticky for another app.
+    let background = organiser_sticky::discover::wants_background(&args);
     shell::init();
     iced::daemon(move || App::boot(background), App::update, App::view)
         .title(App::title)

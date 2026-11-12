@@ -11,15 +11,12 @@ finish-args:
   - --device=dri
   # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
   # host's, since the sandbox's own would hide it.
-  - --filesystem=xdg-data/faves
+  - --filesystem=xdg-data/faves:create
   # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
   - --filesystem=xdg-config/iced-adaptive-design:ro
-  # The list of apps linked to Sticky Notes, shared by every app, and a way to find and start
-  # Sticky Notes (an installed Flatpak) from here.
+  # The list of apps linked to Sticky Notes, shared by every app. Finding and starting Sticky
+  # Notes needs nothing more: it goes through the desktop portals (OpenURI).
   - --filesystem=xdg-config/organiser
-  - --filesystem=/var/lib/flatpak/exports/bin:ro
-  - --filesystem=~/.local/share/flatpak/exports/bin:ro
-  - --talk-name=org.freedesktop.Flatpak
 modules:
   - name: faves
     buildsystem: simple
