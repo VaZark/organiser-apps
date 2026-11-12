@@ -13,9 +13,9 @@ use organiser_core::AppMeta;
 use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
-pub use components::{lifecycle, views};
+pub use components::{lifecycle, vault, views};
 pub use organiser_markdown::{doc, export as md_export, parse as md_parse, tasks as md_tasks};
-pub use primitives::{color, folder, md_note, note, quick, section};
+pub use primitives::{color, folder, front_matter, md_note, note, quick};
 
 pub const META: AppMeta = AppMeta {
     id: "io.github.vazark.Notes",
@@ -27,7 +27,8 @@ pub const META: AppMeta = AppMeta {
 
 pub const NOTE: &str = "note";
 pub const FOLDER: &str = "folder";
-/// A named group of notes inside a folder: a child of its folder, so it goes when the folder does.
+/// What a folder's sections used to be: a kind kept only so a database that still has some loads;
+/// [`lifecycle::migrate_sections`] turns each into a folder inside its folder.
 pub const SECTION: &str = "section";
 
 /// What this app offers Sticky Notes: its notes can be desktop stickies.
@@ -75,7 +76,8 @@ pub static SCHEMA: Schema = Schema {
             // Kept when its folder stops rating: see `views::notes`, which leaves out the rating
             // of a note whose folder does not offer one.
             Field::new("rating", FieldType::Rating).indexed(),
-            // One of its folder's sections; cleared when the note changes folder.
+            // Legacy: the section it was in. Only read by `lifecycle::migrate_sections`, which
+            // turns a section into a folder and clears this.
             Field::new("section", FieldType::Reference(SECTION))
                 .indexed()
                 .internal(),
@@ -85,6 +87,11 @@ pub static SCHEMA: Schema = Schema {
             // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
             Field::new("sticky", FieldType::Bool).indexed().internal(),
             Field::new("sticky_color", FieldType::Text).internal(),
+            // The vault (see `components::vault`): the note's file, relative to the vault, a hash of
+            // that file as last read or written, and of the file this note would be written as then.
+            Field::new("file", FieldType::Text).internal(),
+            Field::new("file_hash", FieldType::Text).internal(),
+            Field::new("file_sig", FieldType::Text).internal(),
             // Unix seconds when moved to the trash; absent means not trashed.
             Field::new("trashed", FieldType::Number)
                 .indexed()

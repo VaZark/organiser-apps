@@ -58,6 +58,26 @@ impl App {
             }
         }
 
+        // The note's file, when the notes are kept as files.
+        if !draft
+            && let Some(v) = &self.vault
+            && let Some(file) = self.vault_known.get(&n.id).map(|rel| v.dir().join(rel))
+        {
+            let linked = std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink());
+            actions = actions.push(
+                IconToggle::new(
+                    if linked { Icon::Link } else { Icon::FileShow },
+                    false,
+                )
+                .tooltip(if linked {
+                    "Show the file (a link to a file elsewhere)"
+                } else {
+                    "Show the file"
+                })
+                .on_toggle(|_| Message::ShowFile),
+            );
+        }
+
         let mut col = column![
             row![
                 container(caption(if draft {
@@ -164,21 +184,9 @@ impl App {
             .find(|c| c.id == n.folder_id)
             .cloned();
         col = col.push(field(
-            "Folder",
+            "Section",
             dropdown(&self.folder_choices, here, Message::DFolder),
         ));
-        // The folder's sections, when it has any.
-        if !self.section_choices.is_empty() {
-            let current = self
-                .section_choices
-                .iter()
-                .find(|c| c.id == n.section)
-                .cloned();
-            col = col.push(field(
-                "Section",
-                dropdown(&self.section_choices, current, Message::DSection),
-            ));
-        }
         col.into()
     }
 

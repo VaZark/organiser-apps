@@ -132,7 +132,6 @@ pub fn run(db: &mut Db, from: Option<&str>) -> Result<Output> {
             color: text(&e.fields, "color").and_then(|c| Color::parse(&c)),
             tags: e.tags.clone(),
             folder,
-            section: None,
             favorite: e.fields.get("favorite").and_then(Value::as_bool).unwrap_or(false),
             // Set below: it is kept even where the folder does not rate, as Faves kept it.
             rating: None,

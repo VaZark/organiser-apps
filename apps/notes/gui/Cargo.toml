@@ -16,3 +16,4 @@ organiser-engine.workspace = true
 organiser-ui.workspace = true
 notes-schema.workspace = true
 organiser-sticky.workspace = true
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }

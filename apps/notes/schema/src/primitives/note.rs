@@ -12,9 +12,6 @@ pub struct Note {
     /// The folder it is filed in, if any.
     #[serde(default)]
     pub folder_id: Option<i64>,
-    /// The section of that folder it is in.
-    #[serde(default)]
-    pub section: Option<i64>,
     pub title: String,
     pub body: String,
     pub color: Option<Color>,
@@ -48,7 +45,6 @@ impl From<&Item> for Note {
         Self {
             id: i.id,
             folder_id: i.parent_id,
-            section: f.get("section").and_then(Value::as_i64),
             title: i.title.clone(),
             body: f.get("body").and_then(Value::as_str).unwrap_or("").into(),
             color: f
@@ -77,8 +73,6 @@ pub struct Edit {
     pub favorite: Option<bool>,
     /// `Some(None)` clears the rating.
     pub rating: Option<Option<u8>>,
-    /// Only meaningful with a folder: `lifecycle::edit` checks it is one of that folder's.
-    pub section: Option<Option<i64>>,
 }
 
 impl Edit {
@@ -106,9 +100,6 @@ impl Edit {
         }
         if let Some(r) = self.rating {
             p = p.field("rating", r.map_or(Value::Null, Value::from));
-        }
-        if let Some(s) = self.section {
-            p = p.field("section", s.map_or(Value::Null, Value::from));
         }
         p
     }

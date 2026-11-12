@@ -7,8 +7,8 @@ use serde_json::Value;
 use crate::primitives::color::Color;
 use crate::primitives::folder::{Folder, FolderEdit};
 use crate::primitives::note::{Edit, Note};
-use crate::primitives::section::{Section, SectionEdit};
 use crate::{FOLDER, NOTE, SECTION};
+use organiser_engine::{FieldFilter, Op};
 
 #[derive(Debug, Clone, Default)]
 pub struct NewNote {
@@ -21,8 +21,6 @@ pub struct NewNote {
     pub favorite: bool,
     /// Only where the folder offers ratings.
     pub rating: Option<u8>,
-    /// One of the folder's sections; ignored without a folder.
-    pub section: Option<i64>,
 }
 
 impl NewNote {
@@ -41,6 +39,7 @@ pub const DEFAULT_FOLDER_TITLE: &str = "Unassigned";
 /// missing, and every note in no folder at all is filed in it. It cannot be deleted. Returns its
 /// id. Call it when the database is opened; it changes nothing when all is as it should be.
 pub fn ensure_default_folder(db: &mut Db) -> Result<i64> {
+    migrate_sections(db)?;
     let existing = db
         .list(&Query {
             kind: Some(FOLDER.into()),
@@ -89,10 +88,6 @@ pub fn create(db: &mut Db, n: &NewNote) -> Result<Note> {
         require_rated(db, Some(folder))?;
         new = new.field("rating", r);
     }
-    if let Some(section) = n.section {
-        check_section(db, section, folder)?;
-        new = new.field("section", section);
-    }
     if !n.body.is_empty() {
         new = new.field("body", n.body.as_str());
     }
@@ -112,56 +107,28 @@ fn require_rated(db: &Db, folder: Option<i64>) -> Result<()> {
     }
 }
 
-/// The section must be one of that folder's.
-fn check_section(db: &Db, section: i64, folder: i64) -> Result<()> {
-    let item = db.get(section)?;
-    if item.kind != SECTION || item.parent_id != Some(folder) {
-        return Err(Error::Invalid(format!(
-            "item {section} is not a section of folder {folder}"
-        )));
-    }
-    Ok(())
-}
-
-/// Edit a note. A rating is only set where its folder offers them (clearing one always works). A
-/// section must be one of the note's folder's.
+/// Edit a note. A rating is only set where its folder offers them (clearing one always works).
 pub fn edit(db: &mut Db, id: i64, edit: &Edit) -> Result<Note> {
     if let Some(Some(_)) = edit.rating {
         require_rated(db, db.get(id)?.parent_id)?;
     }
-    if let Some(Some(section)) = edit.section {
-        match db.get(id)?.parent_id {
-            Some(folder) => check_section(db, section, folder)?,
-            None => return Err(Error::Invalid("a section needs a folder".into())),
-        }
-    }
     Ok(Note::from(&db.update(id, edit.to_patch())?))
 }
 
-/// File a note in a folder, or (`None`) in the default one, "Unassigned". Its rating stays: it is shown again wherever the
-/// note is in a folder that offers ratings. Its section does not: that is the old folder's.
+/// File a note in a folder, or (`None`) in the default one, "Unassigned". Its rating stays: it is
+/// shown again wherever the note is in a folder that offers ratings.
 pub fn move_note(db: &mut Db, id: i64, to: impl Into<Option<i64>>) -> Result<Note> {
     // Out of a folder is into the default one.
     let to = match to.into() {
         Some(f) => Some(f),
         None => Some(ensure_default_folder(db)?),
     };
-    if Note::from(&db.get(id)?).folder_id != to {
-        db.update(id, ItemPatch::default().field("section", Value::Null))?;
+    if let Some(f) = to
+        && db.get(f)?.kind != FOLDER
+    {
+        return Err(Error::Invalid(format!("item {f} is not a folder")));
     }
     Ok(Note::from(&db.move_item(id, to, None)?))
-}
-
-/// Put a note in a section of its folder, or (`None`) in none.
-pub fn set_section(db: &mut Db, id: i64, section: Option<i64>) -> Result<Note> {
-    edit(
-        db,
-        id,
-        &Edit {
-            section: Some(section),
-            ..Edit::default()
-        },
-    )
 }
 
 /// Mark a note as a favourite, or take the mark off.
@@ -178,8 +145,24 @@ pub fn set_favorite(db: &mut Db, id: i64, favorite: bool) -> Result<Note> {
 
 // ---- folders -------------------------------------------------------------------------------
 
+/// A folder at the top.
 pub fn create_folder(db: &mut Db, title: &str, rated: bool) -> Result<Folder> {
-    let new = NewItem::new(FOLDER, title).field("rated", rated);
+    create_folder_in(db, None, title, rated)
+}
+
+/// A folder, last, in `parent` (or at the top). Folders nest to any depth, but not in "Unassigned".
+pub fn create_folder_in(db: &mut Db, parent: Option<i64>, title: &str, rated: bool) -> Result<Folder> {
+    if let Some(p) = parent {
+        let item = db.get(p)?;
+        if item.kind != FOLDER {
+            return Err(Error::Invalid(format!("item {p} is not a folder")));
+        }
+        if Folder::from(&item).is_default {
+            return Err(Error::Invalid("the Unassigned folder cannot hold folders".into()));
+        }
+    }
+    let mut new = NewItem::new(FOLDER, title).field("rated", rated);
+    new.parent_id = parent;
     Ok(Folder::from(&db.create(new)?))
 }
 
@@ -206,25 +189,95 @@ fn deletable(db: &Db, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Delete a folder. Its notes stay, in the default folder, "Unassigned".
+/// Every folder below `id`, at any depth, nearest first.
+pub fn descendants(db: &Db, id: i64) -> Result<Vec<Folder>> {
+    let mut out = Vec::new();
+    let mut next = vec![id];
+    while let Some(at) = next.pop() {
+        for c in db.children(Some(at))? {
+            if c.kind == FOLDER {
+                next.push(c.id);
+                out.push(Folder::from(&c));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The folders from the top down to `id`, itself last.
+pub fn folder_path(db: &Db, id: i64) -> Result<Vec<Folder>> {
+    let mut path = Vec::new();
+    let mut at = Some(id);
+    while let Some(i) = at {
+        let item = db.get(i)?;
+        if item.kind != FOLDER || path.len() > 256 {
+            break;
+        }
+        at = item.parent_id;
+        path.push(Folder::from(&item));
+    }
+    path.reverse();
+    Ok(path)
+}
+
+/// Delete a folder. Its notes and its folders stay, in the folder it was in (the default folder,
+/// "Unassigned", for a notes of one at the top).
 pub fn delete_folder(db: &mut Db, id: i64) -> Result<()> {
     deletable(db, id)?;
-    let home = ensure_default_folder(db)?;
-    // Its notes stay (out of the folder, and out of its sections); its sections go with it.
+    let parent = db.get(id)?.parent_id;
+    let home = match parent {
+        Some(p) => p,
+        None => ensure_default_folder(db)?,
+    };
     for child in db.children(Some(id))? {
-        if child.kind == NOTE {
-            db.update(child.id, ItemPatch::default().field("section", Value::Null))?;
-            db.move_item(child.id, Some(home), None)?;
+        match child.kind.as_str() {
+            NOTE => {
+                db.move_item(child.id, Some(home), None)?;
+            }
+            FOLDER => {
+                db.move_item(child.id, parent, None)?;
+            }
+            _ => {}
         }
     }
     db.delete(id)?;
     Ok(())
 }
 
-/// Delete a folder and every note in it, trashed ones too. Returns how many notes went.
+/// Delete a folder, the folders in it and every note in them, trashed ones too. Returns how many
+/// notes went.
 pub fn delete_folder_and_notes(db: &mut Db, id: i64) -> Result<usize> {
     deletable(db, id)?;
-    Ok(db.delete(id)?.saturating_sub(1))
+    let folders = 1 + descendants(db, id)?.len();
+    Ok(db.delete(id)?.saturating_sub(folders))
+}
+
+/// Put a folder inside `parent` (or at the top), last. Not inside itself or what is in it, and
+/// not inside "Unassigned"; "Unassigned" itself stays at the top.
+pub fn move_folder_into(db: &mut Db, id: i64, parent: Option<i64>) -> Result<()> {
+    let item = db.get(id)?;
+    if item.kind != FOLDER {
+        return Err(Error::Invalid(format!("item {id} is not a folder")));
+    }
+    if Folder::from(&item).is_default {
+        return Err(Error::Invalid("the Unassigned folder stays at the top".into()));
+    }
+    if let Some(p) = parent {
+        let target = db.get(p)?;
+        if target.kind != FOLDER {
+            return Err(Error::Invalid(format!("item {p} is not a folder")));
+        }
+        if Folder::from(&target).is_default {
+            return Err(Error::Invalid("the Unassigned folder cannot hold folders".into()));
+        }
+        if p == id || descendants(db, id)?.iter().any(|f| f.id == p) {
+            return Err(Error::Invalid(
+                "a folder cannot go inside itself or a folder in it".into(),
+            ));
+        }
+    }
+    db.move_item(id, parent, None)?;
+    Ok(())
 }
 
 /// Make the note's tags exactly `tags`.
@@ -302,72 +355,70 @@ pub fn purge_expired(db: &mut Db, now: i64, days: u32) -> Result<usize> {
     purge_older_than(db, now - i64::from(days) * 86_400)
 }
 
-// ---- sections ------------------------------------------------------------------------------
+// ---- what sections were ---------------------------------------------------------------------
 
-/// Add a section, last, to a folder.
-pub fn create_section(db: &mut Db, folder: i64, title: &str) -> Result<Section> {
-    if db.get(folder)?.kind != FOLDER {
-        return Err(Error::Invalid(format!("item {folder} is not a folder")));
+/// Turn every section into a folder inside its folder, with its title, description and colour, in
+/// its place among the others, and move its notes into it (they keep their rating where the
+/// folder rates). Changes nothing when there are no sections, so it is safe to run at every start.
+/// Returns how many there were.
+pub fn migrate_sections(db: &mut Db) -> Result<usize> {
+    let sections = db.list(&Query {
+        kind: Some(SECTION.into()),
+        sort: vec![organiser_engine::Sort::asc("position")],
+        ..Query::default()
+    })?;
+    for s in &sections {
+        let rated = match s.parent_id {
+            Some(p) => Folder::from(&db.get(p)?).rated,
+            None => false,
+        };
+        let mut new = NewItem::new(FOLDER, &s.title).field("rated", rated);
+        new.parent_id = s.parent_id;
+        if let Some(n) = s.fields.get("notes").and_then(Value::as_str).filter(|n| !n.is_empty()) {
+            new = new.field("notes", n);
+        }
+        if let Some(c) = s.fields.get("color").and_then(Value::as_str) {
+            new = new.field("color", c);
+        }
+        let folder = db.create(new)?;
+        let members = db.list(&Query {
+            kind: Some(NOTE.into()),
+            filters: vec![FieldFilter::new("section", Op::Eq, s.id)],
+            ..Query::default()
+        })?;
+        for n in members {
+            db.update(n.id, ItemPatch::default().field("section", Value::Null))?;
+            db.move_item(n.id, Some(folder.id), None)?;
+        }
+        db.delete(s.id)?;
     }
-    let mut new = NewItem::new(SECTION, title);
-    new.parent_id = Some(folder);
-    Ok(Section::from(&db.create(new)?))
+    Ok(sections.len())
 }
 
-pub fn edit_section(db: &mut Db, id: i64, edit: &SectionEdit) -> Result<Section> {
-    if db.get(id)?.kind != SECTION {
-        return Err(Error::Invalid(format!("item {id} is not a section")));
-    }
-    Ok(Section::from(&db.update(id, edit.to_patch())?))
-}
-
-/// Move a section to place `to` (0 is first) among its folder's sections, the others keeping their
-/// order. A place past the last is the last.
-pub fn move_section(db: &mut Db, id: i64, to: usize) -> Result<()> {
-    let item = db.get(id)?;
-    if item.kind != SECTION {
-        return Err(Error::Invalid(format!("item {id} is not a section")));
-    }
-    let parent = item.parent_id;
-    let others: Vec<_> = db
-        .children(parent)?
-        .into_iter()
-        .filter(|i| i.kind == SECTION && i.id != id)
-        .collect();
-    match others.get(to) {
-        // Before the section now in that place.
-        Some(next) => db.move_item(id, parent, Some(next.position))?,
-        None => db.move_item(id, parent, None)?,
-    };
-    Ok(())
-}
-
-/// Delete a section. Its notes stay in the folder, in no section.
-pub fn delete_section(db: &mut Db, id: i64) -> Result<()> {
-    if db.get(id)?.kind != SECTION {
-        return Err(Error::Invalid(format!("item {id} is not a section")));
-    }
-    db.delete(id)?;
-    Ok(())
-}
-
-/// Move a folder before `before` (another folder), or last when there is none: the others keep
-/// their order. (The default folder is always listed last whatever its place.)
+/// Move a folder before `before` (another folder in the same folder), or last there when there is
+/// none: the others keep their order. (The default folder is always listed last whatever its place.)
 pub fn move_folder(db: &mut Db, id: i64, before: Option<i64>) -> Result<()> {
-    if db.get(id)?.kind != FOLDER {
+    let item = db.get(id)?;
+    if item.kind != FOLDER {
         return Err(Error::Invalid(format!("item {id} is not a folder")));
     }
+    let parent = item.parent_id;
     match before.filter(|b| *b != id) {
         Some(b) => {
             let next = db.get(b)?;
             if next.kind != FOLDER {
                 return Err(Error::Invalid(format!("item {b} is not a folder")));
             }
-            db.move_item(id, None, Some(next.position))?;
+            if next.parent_id != parent {
+                return Err(Error::Invalid(
+                    "a folder is moved among the folders it is with".into(),
+                ));
+            }
+            db.move_item(id, parent, Some(next.position))?;
         }
         None if before.is_some() => {}
         None => {
-            db.move_item(id, None, None)?;
+            db.move_item(id, parent, None)?;
         }
     }
     Ok(())

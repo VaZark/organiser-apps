@@ -7,7 +7,7 @@
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
 use notes_schema::note::Note;
-use notes_schema::section::SectionSummary;
+use notes_schema::folder::FolderSummary;
 use notes_schema::views::Scope;
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
@@ -31,6 +31,11 @@ use organiser_ui::widgets::masonry::{PAGE_PADDING, columns_for, masonry};
 use organiser_ui::widgets::schema_filters::active_filters;
 
 use crate::app::{App, Message, paint};
+
+/// `1 note`, `2 notes`.
+fn notes_word(n: usize) -> String {
+    format!("{n} note{}", if n == 1 { "" } else { "s" })
+}
 
 /// `★★★★☆`
 pub fn stars(rating: u8) -> String {
@@ -79,7 +84,7 @@ impl App {
         }
 
         // A folder's page starts with the folder: its icon, name, a button for its settings and a
-        // menu to add a section.
+        // menu to add a folder in it.
         if let Scope::Folder(id) = self.scope {
             page = page.push(self.folder_page_header(id));
         }
@@ -88,7 +93,16 @@ impl App {
         }
 
         let sectioned = self.sections_here();
-        if self.notes.is_empty() && sectioned.is_none() {
+        let searching = !self.search.text().trim().is_empty() || self.filter_count() > 0;
+        // A section's sections as cards on top, when not every note below is listed and they are
+        // not sections of the page.
+        let top_cards = match self.scope {
+            Scope::Folder(here) if !self.group_by_section && !self.show_all_notes && !searching => {
+                self.subfolder_entries(here)
+            }
+            _ => None,
+        };
+        if self.notes.is_empty() && sectioned.is_none() && top_cards.is_none() {
             let (icon, title, hint) = match (self.scope, self.search.query()) {
                 (_, Some(_)) => (Icon::Search, "No notes found", "Try another word."),
                 (Scope::Notes, _) => (Icon::Note, "No notes yet", "Notes you add appear here."),
@@ -99,7 +113,7 @@ impl App {
                 ),
                 (Scope::Folder(_), _) => (
                     Icon::Folder,
-                    "Nothing in this folder",
+                    "Nothing in this section",
                     "Add a note with the + above.",
                 ),
                 (Scope::Archive, _) => (
@@ -126,91 +140,96 @@ impl App {
                     self.masonry(&theme, notes, cols)
                 }
             };
-            // A folder with sections: the notes in none first, then each section under its header,
-            // each a place to drop a note dragged from another.
-            if let Some(sections) = sectioned {
+            // A folder showing the folders in it as sections: its own notes first, then each
+            // folder in it under its heading, each a place to drop a note dragged from another.
+            if let Some(cards) = top_cards {
+                page = page.push(cards);
+            }
+            if let (Scope::Folder(here), Some(subs)) = (self.scope, sectioned) {
                 let dragging = self.dragging.is_some();
-                let searching = !self.search.text().trim().is_empty() || self.filter_count() > 0;
-                let ids: Vec<i64> = sections.iter().map(|s| s.section.id).collect();
-                let loose: Vec<&'a Note> = self
-                    .notes
-                    .iter()
-                    .filter(|n| n.section.is_none_or(|s| !ids.contains(&s)))
-                    .collect();
-                if !loose.is_empty() || dragging {
-                    let body = if loose.is_empty() {
-                        container(caption("Drop here to take it out of its section"))
-                            .padding(12)
-                            .width(Length::Fill)
-                            .into()
-                    } else {
-                        block(&loose)
-                    };
+                let loose: Vec<&'a Note> = self.notes.iter().collect();
+                if !loose.is_empty() {
                     page = page.push(
-                        drop_zone(body, dragging, Message::DropInSection(None))
-                            .hint(DropHint::new("Take out of its section")),
+                        drop_zone(block(&loose), dragging, Message::DropInFolder(Some(here)))
+                            .hint(DropHint::new("Move here")),
                     );
                 }
-                for s in sections {
-                    let id = s.section.id;
-                    let mine: Vec<&'a Note> =
-                        self.notes.iter().filter(|n| n.section == Some(id)).collect();
-                    // Searching or filtering shows only the sections that have a match.
+                for s in subs {
+                    let id = s.folder.id;
+                    let mine: Vec<&'a Note> = self
+                        .sub_notes
+                        .get(&id)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    // Searching or filtering shows only the folders that have a match.
                     if mine.is_empty() && searching {
                         continue;
                     }
-                    let mut group = column![self.section_header(s)].spacing(8);
+                    let mut group = column![self.subfolder_header(s, mine.len())].spacing(8);
                     if !self.folded_sections.contains(&id) {
-                        group = group.push(if mine.is_empty() {
-                            caption("No notes in this section").into()
+                        // Deeper than one level: the sections in it, as cards to open, before its
+                        // notes.
+                        // (Not when every note below is listed: they are in the list.)
+                        let deeper = if searching || self.show_all_notes {
+                            None
                         } else {
-                            block(&mine)
-                        });
+                            self.subfolder_entries(id)
+                        };
+                        let has_cards = deeper.is_some();
+                        if let Some(deeper) = deeper {
+                            group = group.push(deeper);
+                        }
+                        if !mine.is_empty() {
+                            group = group.push(block(&mine));
+                        } else if !has_cards {
+                            group = group.push(caption("No notes in this section"));
+                        }
                     }
-                    // A note or a section can be dropped here.
-                    let hint = if self.dragging_section.is_some() {
-                        format!("Place it at {}", s.section.title)
+                    // A note or a folder can be dropped here.
+                    let hint = if self.dragging_folder.is_some() {
+                        format!("Move into {}", s.folder.title)
                     } else {
-                        format!("Move to {}", s.section.title)
+                        format!("Move to {}", s.folder.title)
                     };
                     page = page.push(
                         drop_zone(
                             group,
-                            dragging || self.dragging_section.is_some_and(|m| m != id),
-                            Message::DropInSection(Some(id)),
+                            dragging || self.dragging_folder.is_some_and(|m| m != id),
+                            Message::DropOnFolder(id),
                         )
                         .hint(DropHint::new(hint)),
                     );
                 }
             } else {
-            // In All and Favorites the notes can be in sections, one per folder.
-            let grouped = self.grouped_by_folder();
-            if !pinned.is_empty() {
-                page = page.push(caption("Pinned")).push(block(&pinned));
-            }
-            if grouped {
-                // Pinned first, then a section per folder, then those in none.
-                let order: Vec<i64> = self.folders.iter().map(|s| s.folder.id).collect();
-                let home = self.default_folder_id();
-                for (folder, notes) in group_by(others, |n| n.folder_id.or(home), &order) {
-                    // The heading and its notes are one place to drop: a note dropped there moves
-                    // to the folder.
-                    let label = match folder.and_then(|id| self.folders.iter().find(|s| s.folder.id == id)) {
-                        Some(s) => format!("Move to {}", s.folder.title),
-                        None => "Take out of its folder".to_string(),
-                    };
-                    let group = column![self.folder_header(folder, notes.len()), block(&notes)].spacing(8);
-                    page = page.push(
-                        drop_zone(group, self.dragging.is_some(), Message::DropInFolder(folder))
-                            .hint(DropHint::new(label)),
-                    );
-                }
-            } else if !others.is_empty() {
+                // In All and Favorites the notes can be in sections, one per folder.
+                let grouped = self.grouped_by_folder();
                 if !pinned.is_empty() {
-                    page = page.push(caption("Others"));
+                    page = page.push(caption("Pinned")).push(block(&pinned));
                 }
-                page = page.push(block(&others));
-            }
+                if grouped {
+                    // Pinned first, then a group per top section, then those in none. A note in a
+                    // section inside one is in its top one's group (with its own section as a chip).
+                    let order: Vec<i64> = self.children_of(None).iter().map(|s| s.folder.id).collect();
+                    let home = self.default_folder_id();
+                    for (folder, notes) in group_by(others, |n| self.base_folder(n.folder_id).or(home), &order) {
+                        // The heading and its notes are one place to drop: a note dropped there
+                        // moves to the folder.
+                        let label = match folder.and_then(|id| self.folders.iter().find(|s| s.folder.id == id)) {
+                            Some(s) => format!("Move to {}", s.folder.title),
+                            None => "Take out of its section".to_string(),
+                        };
+                        let group = column![self.folder_header(folder, notes.len()), block(&notes)].spacing(8);
+                        page = page.push(
+                            drop_zone(group, self.dragging.is_some(), Message::DropInFolder(folder))
+                                .hint(DropHint::new(label)),
+                        );
+                    }
+                } else if !others.is_empty() {
+                    if !pinned.is_empty() {
+                        page = page.push(caption("Others"));
+                    }
+                    page = page.push(block(&others));
+                }
             }
         }
         // A list is kept to a readable width, as in Todo; the cards use all of it.
@@ -291,10 +310,6 @@ impl App {
             chips = chips.push(f);
             any = true;
         }
-        if let Some(sec) = self.section_chip_of(n) {
-            chips = chips.push(sec);
-            any = true;
-        }
         if n.sticky {
             chips = chips.push(
                 Chip::from_icon(Icon::Note)
@@ -325,19 +340,78 @@ impl App {
         )
     }
 
-    /// The sections of the folder whose page this is, if it has any: its notes are then shown in
-    /// them.
-    pub(super) fn sections_here(&self) -> Option<&Vec<SectionSummary>> {
+    /// The folders in the folder whose page this is, when they are shown as sections (and it has
+    /// any): their notes are then listed under them.
+    pub(super) fn sections_here(&self) -> Option<Vec<&FolderSummary>> {
         match self.scope {
             Scope::Folder(id) if self.group_by_section => {
-                self.folder_sections.get(&id).filter(|v| !v.is_empty())
+                let v = self.children_of(Some(id));
+                (!v.is_empty()).then_some(v)
             }
             _ => None,
         }
     }
 
+    /// The folders in a folder, as folders to open: an entry each with its icon, name, what it
+    /// is for and how many notes it holds, which you can press and hold to move, and drop a note
+    /// or a folder on. `None` when it has none.
+    fn subfolder_entries(&self, id: i64) -> Option<Element<'_, Message>> {
+        let subs = self.children_of(Some(id));
+        if subs.is_empty() {
+            return None;
+        }
+        // Cards in a grid, as the playlists on weave's home are: a picture (the section's icon in
+        // its colour), its name and what is in it.
+        let cards: Vec<Element<'_, Message>> = subs
+            .into_iter()
+            .map(|s| {
+                let f = &s.folder;
+                let what = if s.subfolders > 0 {
+                    format!("{} · {} section{}", notes_word(s.total), s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+                } else {
+                    notes_word(s.total)
+                };
+                let card = ItemCard::new(f.title.clone())
+                    .subtitle(what)
+                    .picture(icons::tinted(
+                        icons::named(f.icon.as_deref()),
+                        28.0,
+                        Some(self.folder_color(f)),
+                    ))
+                    .density(organiser_ui::iad::config::Density::Compact)
+                    .on_press(Message::SetScope(Scope::Folder(f.id)));
+                // A thin border, so a section stands out from the notes around it.
+                let card = container(card).style(|theme: &organiser_ui::iad::Theme| {
+                    iced::widget::container::Style {
+                        border: iced::Border {
+                            color: iced::Color {
+                                a: 0.22,
+                                ..theme.semantic.window.fg
+                            },
+                            width: 1.0,
+                            radius: theme.metrics.radius_m.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+                let source = drag_source(Element::from(card), Message::FolderDragStart(f.id));
+                let active = self.dragging.is_some() || self.dragging_folder.is_some_and(|m| m != f.id);
+                Element::from(
+                    drop_zone(source, active, Message::DropOnFolder(f.id)).hint(
+                        DropHint::new(format!(
+                            "Move into {}",
+                            organiser_ui::primitives::text::ellipsize(&f.title, 24)
+                        ))
+                        .shrink(),
+                    ),
+                )
+            })
+            .collect();
+        Some(FlowGrid::new(cards).max_width(220.0).spacing(8.0).into())
+    }
+
     /// Whether the views of every note (All, Favorites, Archive, Trash) are in groups, one per
-    /// folder: the option is on and there are folders.
+    /// top section: the option is on and there are sections.
     pub(super) fn grouped_by_folder(&self) -> bool {
         self.group_by_folder
             && matches!(
@@ -355,7 +429,7 @@ impl App {
                 menu_button(
                     Icon::ViewMore,
                     Menu::new("Page").section([MenuItem::switch(
-                        "Group by folder",
+                        "Group by section",
                         self.group_by_folder,
                         Message::GroupByFolder(!self.group_by_folder),
                     )]),
@@ -367,19 +441,16 @@ impl App {
         .into()
     }
 
-    /// A note that can be picked up, on a page of sections, to carry it to another.
-    fn draggable<'a>(&self, note: &Note, e: Element<'a, Message>) -> Element<'a, Message> {
-        if self.sections_here().is_some() || self.grouped_by_folder() {
-            drag_source(e, Message::DragStart(note.id)).into()
-        } else {
-            e
-        }
+    /// A note that can be picked up, to carry it to a folder of the sidebar or of the page.
+    fn draggable<'a>(&self, _note: &Note, e: Element<'a, Message>) -> Element<'a, Message> {
+        drag_source(e, Message::DragStart(_note.id)).into()
     }
 
-    /// The top of a folder's page: its icon in its colour, its name over what it is for, how many
-    /// notes, a button for its settings and, beside it, a menu to group by section and to add one.
+    /// The top of a folder's page: where it is (the folders it is in, to go up to), its icon in its
+    /// colour, its name over what it is for, how many notes, a button for its settings and, beside
+    /// it, a menu to show the folders in it as sections and to add one.
     fn folder_page_header(&self, id: i64) -> Element<'_, Message> {
-        let Some(s) = self.folders.iter().find(|s| s.folder.id == id) else {
+        let Some(s) = self.folder_summary(id) else {
             return space().into();
         };
         let mut name = column![text(s.folder.title.clone()).size(20)].spacing(2);
@@ -397,67 +468,121 @@ impl App {
                 Some(self.folder_color(&s.folder)),
             ),
             container(name).width(Length::Fill),
-            caption(format!("{} notes", s.notes)),
+            caption(if s.subfolders > 0 {
+                format!("{} · {} section{}", notes_word(s.notes), s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+            } else {
+                notes_word(s.notes)
+            }),
+            tooltip(
+                icon_button(Icon::ListAdd).on_press(Message::NewInFolder(id)),
+                "New note in this section",
+                TooltipPosition::Bottom,
+            ),
             tooltip(
                 icon_button(Icon::Edit).on_press(Message::OpenFolderSettings(id)),
-                "Folder settings",
+                "Section settings",
                 TooltipPosition::Bottom,
             ),
             menu_button(
                 Icon::ViewMore,
-                Menu::new("Folder")
-                    .section([MenuItem::switch(
-                        "Group by section",
-                        self.group_by_section,
-                        Message::GroupBySection(!self.group_by_section),
-                    )])
-                    .section([MenuItem::action("Add section", Message::NewSection(id))]),
+                Menu::new("Section")
+                    .section([
+                        MenuItem::switch(
+                            "Show all notes",
+                            self.show_all_notes,
+                            Message::ShowAllNotes(!self.show_all_notes),
+                        ),
+                        MenuItem::switch(
+                            "Group by section",
+                            self.group_by_section,
+                            Message::GroupBySection(!self.group_by_section),
+                        ),
+                    ])
+                    .section([MenuItem::action("New section in here", Message::NewSubfolder(id))]),
             )
             .tooltip("More"),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
-        container(head).padding([4, 4]).into()
+        let mut col = column![].spacing(2);
+        // Where it is: each section it is in, to go up to (the arrow is in the header bar).
+        let path = self.folder_path(id);
+        if path.len() > 1 {
+            let mut crumbs = row![].spacing(2).align_y(Alignment::Center);
+            for (i, a) in path[..path.len() - 1].iter().enumerate() {
+                if i > 0 {
+                    crumbs = crumbs.push(caption("›"));
+                }
+                crumbs = crumbs.push(
+                    iced::widget::button(caption(organiser_ui::primitives::text::ellipsize(&a.folder.title, 20)))
+                        .padding([2, 6])
+                        .style(organiser_ui::iad::styles::button::flat)
+                        .on_press(Message::SetScope(Scope::Folder(a.folder.id))),
+                );
+            }
+            col = col.push(crumbs.wrap());
+        }
+        col = col.push(head);
+        container(col).padding([4, 4]).into()
     }
 
-    /// The heading of a section: a fold arrow, its name over what it is for (small), how many
-    /// notes, a button to edit it and one to add a note to it.
-    fn section_header<'a>(&'a self, s: &'a SectionSummary) -> Element<'a, Message> {
-        let id = s.section.id;
+    /// The heading of a folder shown as a section: a fold arrow, its name over what it is for
+    /// (small), how many notes, a button to edit it and one to add a note to it. Press and hold
+    /// the name to carry the folder to another.
+    fn subfolder_header<'a>(&'a self, s: &'a FolderSummary, shown: usize) -> Element<'a, Message> {
+        let f = &s.folder;
+        let id = f.id;
         let folded = self.folded_sections.contains(&id);
-        let mut name = column![text(s.section.title.clone()).size(15)].spacing(1);
-        if let Some(line) = s.section.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
+        let mut name = column![text(f.title.clone()).size(15)].spacing(1);
+        if let Some(line) = f.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
             name = name.push(
                 text(organiser_ui::primitives::text::ellipsize(line, 110))
                     .size(11)
                     .style(organiser_ui::iad::styles::text::dim),
             );
         }
-        let mut head = row![
-            icon_button(if folded { Icon::GoNext } else { Icon::GoDown })
-                .on_press(Message::SectionFold(id)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        if let Some(c) = s.section.color {
-            head = head.push(dot(paint(c), 10.0));
-        }
-        // Press and hold the name to carry the section to another place.
-        head.push(
-            container(drag_source(name, Message::SectionDragStart(id)).ghost_padding([4, 10])).width(Length::Fill),
-        )
-            .push(caption(s.notes.to_string()))
-            .push(tooltip(
-                icon_button(Icon::Edit).on_press(Message::OpenSectionSettings(id)),
-                "Edit section",
-                TooltipPosition::Bottom,
-            ))
-            .push(tooltip(
-                icon_button(Icon::ListAdd).on_press(Message::NewInSection(id)),
+        // The actions are a tray at the end, flush against the row's edge: add, edit, fold.
+        let tray = row![
+            tooltip(
+                icon_button(Icon::ListAdd).on_press(Message::NewInFolder(id)),
                 "Add a note to this section",
                 TooltipPosition::Bottom,
-            ))
-            .into()
+            ),
+            tooltip(
+                icon_button(Icon::Edit).on_press(Message::OpenFolderSettings(id)),
+                "Edit section",
+                TooltipPosition::Bottom,
+            ),
+            tooltip(
+                icon_button(if folded { Icon::GoNext } else { Icon::GoDown })
+                    .on_press(Message::FoldSubfolder(id)),
+                if folded { "Show the notes" } else { "Hide the notes" },
+                TooltipPosition::Bottom,
+            ),
+        ]
+        .spacing(0)
+        .align_y(Alignment::Center);
+        // Only the name opens the section: a pointer over it and nothing else (no hover). Press
+        // and hold it to carry the section.
+        let name = iced::widget::mouse_area(name)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .on_release(Message::SetScope(Scope::Folder(id)));
+        let name = drag_source(name, Message::FolderDragStart(id)).ghost_padding([4, 10]);
+        row![
+            icons::tinted(icons::named(f.icon.as_deref()), 18.0, Some(self.folder_color(f))),
+            name,
+            space().width(Length::Fill),
+            caption(if s.subfolders > 0 {
+                format!("{shown} · {} section{}", s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+            } else {
+                shown.to_string()
+            }),
+            tray,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 10.0 })
+        .into()
     }
 
     /// The heading of a section: the folder's icon in its colour, its name, how many notes it
@@ -469,34 +594,39 @@ impl App {
                 &s.folder.title,
                 s.folder.notes.lines().map(str::trim).find(|l| !l.is_empty()),
                 Some(count),
-                Some((Message::OpenFolderSettings(s.folder.id), "Folder settings")),
+                Some((Message::OpenFolderSettings(s.folder.id), "Section settings")),
             ),
             None => group_header(None, UNASSIGNED, None, Some(count), None),
         }
     }
 
-    /// The section a note is in, as a chip, wherever the section's own heading is not shown: out of
-    /// a folder's page, and on it when the notes are not grouped by section.
-    fn section_chip_of<'a>(&'a self, n: &'a Note) -> Option<Element<'a, Message>> {
-        if self.sections_here().is_some() {
-            return None;
-        }
-        let sec = self.section_of(n)?;
-        let chip = Chip::new(organiser_ui::primitives::text::ellipsize(&sec.title, 24))
-            .size(ChipSize::Small);
-        Some(match sec.color {
-            Some(c) => chip.color(paint(c)).into(),
-            None => chip.role(Role::Neutral).into(),
-        })
-    }
-
     /// Where a note is filed, as a chip, when the notes are not in sections that say so.
     fn folder_chip_of<'a>(&'a self, n: &'a Note) -> Option<Element<'a, Message>> {
-        if self.grouped_by_folder() || matches!(self.scope, Scope::Folder(_)) {
+        let f = self.folder_of(n)?;
+        // One level only. On a section's page that is not grouped, the section of this one the
+        // note is in (nothing for a note directly in it); in the groups of All and the like, the
+        // section it is in when that is inside the group's; ungrouped, its top section.
+        let shown = match self.scope {
+            Scope::Folder(here) => {
+                // One level below the group: grouped, a note in a section of a section of the page
+                // names that deeper one; not grouped, the section of the page it is in.
+                let path = self.folder_path(f.id);
+                let at = path.iter().position(|s| s.folder.id == here)?;
+                let want = at + if self.group_by_section { 2 } else { 1 };
+                path.get(want)?.folder.clone()
+            }
+            _ if self.grouped_by_folder() => {
+                if f.parent.is_none() {
+                    return None;
+                }
+                f.clone()
+            }
+            _ => self.folder_path(f.id).first()?.folder.clone(),
+        };
+        if shown.is_default {
             return None;
         }
-        let f = self.folder_of(n).filter(|f| !f.is_default)?;
-        Some(icons::folder_chip(&f.title, Some(self.folder_color(f)), f.icon.as_deref()))
+        Some(icons::folder_chip(&shown.title, Some(self.folder_color(&shown)), shown.icon.as_deref()))
     }
 
     fn card<'a>(&'a self, theme: &Theme, n: &'a Note) -> Element<'a, Message> {
@@ -531,9 +661,6 @@ impl App {
         }
         if let Some(f) = self.folder_chip_of(n) {
             body = body.push(f);
-        }
-        if let Some(sec) = self.section_chip_of(n) {
-            body = body.push(sec);
         }
         self.draggable(n, card(body, self.note_tint(n), selected, Message::Select(n.id)))
     }

@@ -461,125 +461,210 @@ mod folders {
     }
 }
 
-mod sections {
+mod nesting {
     use super::*;
     use notes_schema::lifecycle::{
-        create_folder, create_section, delete_folder, delete_section, edit_section, move_note,
-        set_section,
+        create_folder, create_folder_in, delete_folder, delete_folder_and_notes, descendants,
+        folder_path, move_folder, move_folder_into, move_note,
     };
-    use notes_schema::section::SectionEdit;
-    use notes_schema::views::sections;
+    use notes_schema::views::{children_of, folders};
+    use organiser_engine::NewItem;
 
-    fn filed(db: &mut Db, folder: Option<i64>, section: Option<i64>, title: &str) -> Note {
+    fn filed(db: &mut Db, folder: Option<i64>, title: &str) -> Note {
         create(
             db,
             &NewNote {
                 title: title.into(),
                 folder,
-                section,
                 ..NewNote::default()
             },
         )
         .unwrap()
     }
 
-    #[test]
-    fn a_note_is_in_a_section_of_its_own_folder_only() {
-        let mut db = db();
-        let a = create_folder(&mut db, "A", false).unwrap();
-        let b = create_folder(&mut db, "B", false).unwrap();
-        let sa = create_section(&mut db, a.id, "SA").unwrap();
-        let sb = create_section(&mut db, b.id, "SB").unwrap();
-        let n = filed(&mut db, Some(a.id), Some(sa.id), "n");
-        assert_eq!(n.section, Some(sa.id));
-        // Another folder's section, or one with no folder, is refused.
-        assert!(set_section(&mut db, n.id, Some(sb.id)).is_err());
-        let loose = filed(&mut db, None, None, "loose");
-        assert!(set_section(&mut db, loose.id, Some(sa.id)).is_err());
-        assert!(
-            create(
-                &mut db,
-                &NewNote {
-                    title: "x".into(),
-                    folder: Some(a.id),
-                    section: Some(sb.id),
-                    ..NewNote::default()
-                }
-            )
-            .is_err()
-        );
-        assert_eq!(set_section(&mut db, n.id, None).unwrap().section, None);
+    /// A > B > C > D, each a folder in the one before.
+    fn chain(db: &mut Db) -> [i64; 4] {
+        let a = create_folder(db, "A", false).unwrap().id;
+        let b = create_folder_in(db, Some(a), "B", false).unwrap().id;
+        let c = create_folder_in(db, Some(b), "C", false).unwrap().id;
+        let d = create_folder_in(db, Some(c), "D", false).unwrap().id;
+        [a, b, c, d]
     }
 
     #[test]
-    fn moving_to_another_folder_leaves_the_section_behind() {
+    fn folders_nest_to_any_depth_and_have_a_path() {
         let mut db = db();
-        let a = create_folder(&mut db, "A", false).unwrap();
-        let b = create_folder(&mut db, "B", false).unwrap();
-        let sa = create_section(&mut db, a.id, "SA").unwrap();
-        let n = filed(&mut db, Some(a.id), Some(sa.id), "n");
-        let moved = move_note(&mut db, n.id, b.id).unwrap();
-        assert_eq!((moved.folder_id, moved.section), (Some(b.id), None));
+        let [a, b, c, d] = chain(&mut db);
+        let path: Vec<String> = folder_path(&db, d).unwrap().into_iter().map(|f| f.title).collect();
+        assert_eq!(path, ["A", "B", "C", "D"]);
+        let below: Vec<i64> = {
+            let mut v: Vec<i64> = descendants(&db, a).unwrap().into_iter().map(|f| f.id).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(below, [b, c, d]);
+        assert_eq!(children_of(&db, None).unwrap().len(), 1);
+        assert_eq!(children_of(&db, Some(b)).unwrap()[0].folder.id, c);
     }
 
     #[test]
-    fn sections_count_their_live_notes_and_are_not_notes() {
+    fn a_folder_cannot_go_inside_itself_what_is_in_it_or_unassigned() {
         let mut db = db();
-        let f = create_folder(&mut db, "F", false).unwrap();
-        let s1 = create_section(&mut db, f.id, "One").unwrap();
-        let s2 = create_section(&mut db, f.id, "Two").unwrap();
-        filed(&mut db, Some(f.id), Some(s1.id), "a");
-        let b = filed(&mut db, Some(f.id), Some(s1.id), "b");
-        filed(&mut db, Some(f.id), None, "c");
-        trash(&mut db, b.id, 1).unwrap();
-        let counts: Vec<(String, usize)> = sections(&db, f.id)
-            .unwrap()
-            .into_iter()
-            .map(|s| (s.section.title, s.notes))
-            .collect();
-        assert_eq!(counts, [("One".into(), 1), ("Two".into(), 0)]);
-        // Neither the folder nor its sections show among the notes.
-        let live = in_scope(&db, Scope::Folder(f.id));
-        let mut shown = titles(&live);
-        shown.sort();
-        assert_eq!(shown, ["a", "c"]);
-        let _ = s2;
-    }
-
-    #[test]
-    fn a_section_has_a_colour_and_a_description_and_deleting_it_keeps_its_notes() {
-        let mut db = db();
-        let f = create_folder(&mut db, "F", false).unwrap();
-        let s = create_section(&mut db, f.id, "One").unwrap();
-        let e = edit_section(
-            &mut db,
-            s.id,
-            &SectionEdit {
-                notes: Some("why".into()),
-                color: Some(Some(Color::rgb(1, 2, 3))),
-                ..SectionEdit::default()
-            },
-        )
-        .unwrap();
-        assert_eq!((e.notes.as_str(), e.color), ("why", Some(Color::rgb(1, 2, 3))));
-        let n = filed(&mut db, Some(f.id), Some(s.id), "n");
-        delete_section(&mut db, s.id).unwrap();
-        let n = in_scope(&db, Scope::Folder(f.id)).into_iter().find(|x| x.id == n.id).unwrap();
-        assert_eq!((n.folder_id, n.section), (Some(f.id), None));
-    }
-
-    #[test]
-    fn deleting_a_folder_takes_its_sections_and_keeps_its_notes() {
-        let mut db = db();
-        let f = create_folder(&mut db, "F", false).unwrap();
-        let s = create_section(&mut db, f.id, "One").unwrap();
-        filed(&mut db, Some(f.id), Some(s.id), "n");
-        delete_folder(&mut db, f.id).unwrap();
-        assert!(db.get(s.id).is_err(), "the section went with the folder");
-        let left = in_scope(&db, Scope::Notes);
-        assert_eq!(titles(&left), ["n"]);
         let home = notes_schema::lifecycle::ensure_default_folder(&mut db).unwrap();
-        assert_eq!((left[0].folder_id, left[0].section), (Some(home), None));
+        let [a, b, _, d] = chain(&mut db);
+        assert!(move_folder_into(&mut db, a, Some(a)).is_err());
+        assert!(move_folder_into(&mut db, a, Some(d)).is_err());
+        assert!(move_folder_into(&mut db, b, Some(home)).is_err());
+        assert!(create_folder_in(&mut db, Some(home), "X", false).is_err());
+        assert!(move_folder_into(&mut db, home, Some(a)).is_err(), "it stays at the top");
+        // A folder can go up and across.
+        move_folder_into(&mut db, d, None).unwrap();
+        move_folder_into(&mut db, b, Some(d)).unwrap();
+        let path: Vec<String> = folder_path(&db, b).unwrap().into_iter().map(|f| f.title).collect();
+        assert_eq!(path, ["D", "B"]);
+    }
+
+    #[test]
+    fn a_note_is_in_one_folder_and_the_counts_roll_up() {
+        let mut db = db();
+        let [a, b, c, d] = chain(&mut db);
+        filed(&mut db, Some(a), "in a");
+        filed(&mut db, Some(b), "in b 1");
+        filed(&mut db, Some(b), "in b 2");
+        filed(&mut db, Some(d), "in d");
+        let all = folders(&db).unwrap();
+        let of = |id: i64| all.iter().find(|s| s.folder.id == id).unwrap();
+        assert_eq!((of(a).notes, of(a).total, of(a).subfolders), (1, 4, 1));
+        assert_eq!((of(b).notes, of(b).total), (2, 3));
+        assert_eq!((of(c).notes, of(c).total), (0, 1));
+        assert_eq!((of(d).notes, of(d).total, of(d).subfolders), (1, 1, 0));
+        // A folder's page is its own notes; with `recursive`, the ones below too.
+        let direct = in_scope(&db, Scope::Folder(b));
+        assert_eq!(titles(&direct).len(), 2);
+        let deep = notes(&db, &Filter { scope: Scope::Folder(a), recursive: true, ..Filter::default() }).unwrap();
+        assert_eq!(deep.len(), 4);
+        // All shows every depth.
+        assert_eq!(in_scope(&db, Scope::Notes).len(), 4);
+        // The folders are not notes.
+        assert!(in_scope(&db, Scope::Notes).iter().all(|n| !["A", "B", "C", "D"].contains(&n.title.as_str())));
+    }
+
+    #[test]
+    fn moving_a_note_between_folders_at_any_depth() {
+        let mut db = db();
+        let [a, _, _, d] = chain(&mut db);
+        let n = filed(&mut db, Some(a), "n");
+        assert_eq!(move_note(&mut db, n.id, d).unwrap().folder_id, Some(d));
+        assert!(move_note(&mut db, n.id, n.id).is_err(), "a note is not a folder");
+    }
+
+    #[test]
+    fn deleting_a_folder_keeps_its_notes_and_folders_in_the_one_it_was_in() {
+        let mut db = db();
+        let [a, b, c, d] = chain(&mut db);
+        let nb = filed(&mut db, Some(b), "in b");
+        let nd = filed(&mut db, Some(d), "in d");
+        delete_folder(&mut db, b).unwrap();
+        assert!(db.get(b).is_err());
+        // Its note is in A now, and C (with D) is a folder of A.
+        assert_eq!(Note::from(&db.get(nb.id).unwrap()).folder_id, Some(a));
+        let path: Vec<String> = folder_path(&db, d).unwrap().into_iter().map(|f| f.title).collect();
+        assert_eq!(path, ["A", "C", "D"]);
+        assert_eq!(Note::from(&db.get(nd.id).unwrap()).folder_id, Some(d));
+        // A top folder's notes go to Unassigned, its folders to the top.
+        delete_folder(&mut db, a).unwrap();
+        let home = notes_schema::lifecycle::ensure_default_folder(&mut db).unwrap();
+        assert_eq!(Note::from(&db.get(nb.id).unwrap()).folder_id, Some(home));
+        assert_eq!(children_of(&db, None).unwrap().iter().filter(|s| s.folder.id == c).count(), 1);
+    }
+
+    #[test]
+    fn deleting_a_folder_with_its_notes_takes_everything_below_it() {
+        let mut db = db();
+        let [a, b, _, d] = chain(&mut db);
+        filed(&mut db, Some(a), "kept");
+        filed(&mut db, Some(b), "gone 1");
+        let gone = filed(&mut db, Some(d), "gone 2");
+        trash(&mut db, gone.id, 1).unwrap();
+        assert_eq!(delete_folder_and_notes(&mut db, b).unwrap(), 2, "trashed ones too");
+        assert_eq!(titles(&in_scope(&db, Scope::Notes)), ["kept"]);
+        assert_eq!(descendants(&db, a).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn folders_are_ordered_among_those_they_are_with() {
+        let mut db = db();
+        let f = create_folder(&mut db, "F", false).unwrap();
+        let a = create_folder_in(&mut db, Some(f.id), "A", false).unwrap();
+        let b = create_folder_in(&mut db, Some(f.id), "B", false).unwrap();
+        let c = create_folder_in(&mut db, Some(f.id), "C", false).unwrap();
+        let other = create_folder(&mut db, "Other", false).unwrap();
+        let order = |db: &Db| -> Vec<String> {
+            children_of(db, Some(f.id)).unwrap().into_iter().map(|s| s.folder.title).collect()
+        };
+        assert_eq!(order(&db), ["A", "B", "C"]);
+        move_folder(&mut db, c.id, Some(a.id)).unwrap();
+        assert_eq!(order(&db), ["C", "A", "B"]);
+        move_folder(&mut db, c.id, None).unwrap();
+        assert_eq!(order(&db), ["A", "B", "C"]);
+        // Not before a folder it is not with.
+        assert!(move_folder(&mut db, a.id, Some(other.id)).is_err());
+        let _ = b;
+    }
+
+    #[test]
+    fn a_note_takes_its_own_folders_rating_rule_not_its_parents() {
+        let mut db = db();
+        let rated = create_folder(&mut db, "Rated", true).unwrap();
+        let plain = create_folder_in(&mut db, Some(rated.id), "Plain", false).unwrap();
+        let a = filed(&mut db, Some(rated.id), "a");
+        let b = filed(&mut db, Some(plain.id), "b");
+        assert!(edit(&mut db, a.id, &Edit { rating: Some(Some(4)), ..Edit::default() }).is_ok());
+        assert!(edit(&mut db, b.id, &Edit { rating: Some(Some(4)), ..Edit::default() }).is_err());
+    }
+
+    #[test]
+    fn sections_of_an_older_database_become_folders_with_their_notes() {
+        let mut db = db();
+        let f = create_folder(&mut db, "Films", true).unwrap();
+        let other = create_folder(&mut db, "Other", false).unwrap();
+        // What a database from before nesting holds: sections, and notes that point at them.
+        let section = |db: &mut Db, parent: i64, title: &str, color: &str| {
+            let mut s = NewItem::new("section", title).field("notes", "About it").field("color", color);
+            s.parent_id = Some(parent);
+            db.create(s).unwrap().id
+        };
+        let classics = section(&mut db, f.id, "Classics", "#f2d45c");
+        let recent = section(&mut db, f.id, "Recent", "#6aa5e8");
+        let lone = section(&mut db, other.id, "Lone", "#112233");
+        let in_section = |db: &mut Db, parent: i64, sec: i64, title: &str| {
+            let n = filed(db, Some(parent), title);
+            db.update(n.id, organiser_engine::ItemPatch::default().field("section", sec)).unwrap();
+            n.id
+        };
+        let alien = in_section(&mut db, f.id, classics, "Alien");
+        let blade = in_section(&mut db, f.id, recent, "Blade Runner");
+        let _ = in_section(&mut db, other.id, lone, "Solo");
+        let loose = filed(&mut db, Some(f.id), "Loose");
+
+        assert_eq!(notes_schema::lifecycle::migrate_sections(&mut db).unwrap(), 3);
+        // Each is a folder in the folder it was in, in order, with its title, description, colour
+        // and the folder's ratings; the sections are gone.
+        let kids = children_of(&db, Some(f.id)).unwrap();
+        let names: Vec<&str> = kids.iter().map(|s| s.folder.title.as_str()).collect();
+        assert_eq!(names, ["Classics", "Recent"]);
+        assert_eq!(kids[0].folder.notes, "About it");
+        assert_eq!(kids[0].folder.color, Color::parse("#f2d45c"));
+        assert!(kids[0].folder.rated && !children_of(&db, Some(other.id)).unwrap()[0].folder.rated);
+        let at = |id: i64| Note::from(&db.get(id).unwrap()).folder_id;
+        assert_eq!(at(alien), Some(kids[0].folder.id));
+        assert_eq!(at(blade), Some(kids[1].folder.id));
+        assert_eq!(at(loose.id), Some(f.id), "a note in no section stays");
+        assert!(db.get(classics).is_err() && db.get(recent).is_err());
+        // It is done once, and starting the app runs it.
+        assert_eq!(notes_schema::lifecycle::migrate_sections(&mut db).unwrap(), 0);
+        notes_schema::lifecycle::ensure_default_folder(&mut db).unwrap();
+        assert_eq!(children_of(&db, Some(f.id)).unwrap().len(), 2);
     }
 }
 
@@ -605,28 +690,6 @@ fn the_default_folder_is_made_once_adopts_loose_notes_and_cannot_be_deleted() {
     assert!(delete_folder(&mut db, home).is_err());
     assert!(delete_folder_and_notes(&mut db, home).is_err());
     assert_eq!(folders(&db).unwrap().len(), 1, "still there");
-}
-
-#[test]
-fn a_section_can_be_moved_to_another_place() {
-    use notes_schema::lifecycle::{create_folder, create_section, move_section};
-    use notes_schema::views::sections;
-    let mut db = db();
-    let f = create_folder(&mut db, "F", false).unwrap();
-    let a = create_section(&mut db, f.id, "A").unwrap();
-    let b = create_section(&mut db, f.id, "B").unwrap();
-    let c = create_section(&mut db, f.id, "C").unwrap();
-    let order = |db: &Db| -> Vec<String> {
-        sections(db, f.id).unwrap().into_iter().map(|s| s.section.title).collect()
-    };
-    assert_eq!(order(&db), ["A", "B", "C"]);
-    move_section(&mut db, c.id, 0).unwrap();
-    assert_eq!(order(&db), ["C", "A", "B"]);
-    move_section(&mut db, a.id, 2).unwrap();
-    assert_eq!(order(&db), ["C", "B", "A"]);
-    move_section(&mut db, c.id, 99).unwrap();
-    assert_eq!(order(&db), ["B", "A", "C"]);
-    let _ = b;
 }
 
 #[test]

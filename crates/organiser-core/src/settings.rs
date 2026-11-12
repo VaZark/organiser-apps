@@ -137,10 +137,17 @@ pub struct NotesSettings {
     pub trash_days: u32,
     /// Show the notes as a list instead of cards.
     pub list_view: bool,
-    /// In the views of every note (All, Favorites, Archive, Trash), group them by folder.
+    /// In the views of every note (All, Favorites, Archive, Trash), group them by section.
     pub group_by_folder: bool,
-    /// On a folder's page, group its notes by section.
+    /// On a section's page, list the notes of the sections in it under their names; off, list
+    /// them all together, each with a chip for the section of this one it is in.
     pub group_by_section: bool,
+    /// On a section's page, list every note in it and in the sections below it. Off (the
+    /// default), the sections in it are cards on top and only its own notes are listed.
+    pub show_all_notes: bool,
+    /// The directory the notes live in as Markdown files (the vault); none keeps them in the
+    /// database alone.
+    pub vault_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for NotesSettings {
@@ -150,6 +157,8 @@ impl Default for NotesSettings {
             list_view: false,
             group_by_folder: true,
             group_by_section: true,
+            show_all_notes: false,
+            vault_dir: None,
         }
     }
 }

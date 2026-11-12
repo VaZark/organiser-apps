@@ -8,7 +8,7 @@ Tags come from [weaver](https://github.com/VaZark/weaver).
 | App                           | Status                                                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------------------------- |
 | **Todo** (GTG, Jira, Planify) | Working: kanban board and list, nested tasks, epics, your own coloured statuses, Markdown notes, tags, search, CLI and GUI |
-| **Notes** (Keep-style)         | Working: coloured cards or a list, Markdown, pinning, favourites, folders (with ratings) and their sections, archive and trash, CLI and GUI |
+| **Notes** (Keep-style)         | Working: coloured cards or a list, Markdown, pinning, favourites, sections (with ratings) nested to any depth, archive and trash, CLI and GUI |
 | **Recipes**                   | Working: ingredients (optional or required), ordered steps, photos, read mode, a log of what you cooked, a fridge with expiry dates, shopping lists from recipes and portions that you can copy into Todo, CLI and GUI |
 | **Sticky Notes**              | Working: shows items of Notes, Todo and any compliant-app as coloured desktop stickies. It holds no data of its own, only a list of linked apps and flags per entry. Sticky Notes decides whether a sticky is a desktop window or only listed in its own window. GUI and CLI (`sticky`); it can start on login |
 
@@ -72,26 +72,35 @@ In both views:
   Dates accept `2026-12-01`, `today`, `tomorrow`, `+3d` or a weekday name. With an epic selected,
   new tasks go into it.
 
-### Notes: folders, favourites and ratings
+### Notes: sections, favourites and ratings
 
-Notes can be filed in **folders** (each with a name, an icon, a colour and a description), and a
-folder can have **sections**. The folders choose their own extras: **ratings** (up to five stars) on
-or off. Every note can be a **favourite**. In All, Favorites, Archive and Trash the notes can be
-grouped by folder, and a folder's page by section; the notes in no folder are under "Unassigned".
+Notes are filed in **sections** (each with a name, an icon, a colour and a description), and a
+section can hold sections, to any depth. Sections choose their own extras: **ratings** (up to five
+stars) on or off. Every note can be a **favourite**. The notes in no section are under
+"Unassigned", which sits right after Favorites.
 
-The rules hold everywhere, not just in the GUI. Switching ratings off for a folder hides its
-ratings and keeps them for when it is back on. Deleting a folder keeps its notes (or deletes them
+A section's page lists its own notes, then each section in it under its name with its notes (one
+level; deeper ones are entries to open). The sidebar shows one level of sections the way a menu shows a submenu: always the siblings of the
+section you are viewing, under a back arrow headed with the name of the section they are in. Open a
+section from the page of the one it is in (press its name or its entry) and its level slides in; the
+back arrow (in the sidebar or in the header bar) slides it away again. Choosing a sibling does not
+slide. Drag a note onto a section in the sidebar to file it, and a section
+onto the edge between two to put it there, or onto the middle of one to put it inside.
+
+The rules hold everywhere, not just in the GUI. Switching ratings off for a section hides its
+ratings and keeps them for when it is back on. Deleting a section keeps its notes (or deletes them
 with it, if asked).
 
 ```sh
-notes folder-new Films --rated --icon play         # prints the folder's id, say 1
+notes section-new Films --rated --icon play         # prints the section's id, say 1
 notes add "Alien" -s body="Spooky."                # a note
-notes move 3 1                                     # file note 3 in folder 1
-notes rate 3 5                                     # five stars (the folder must rate)
+notes move 3 1                                     # file note 3 in section 1
+notes rate 3 5                                     # five stars (the section must rate)
 notes fave 3                                       # mark a favourite
 notes ls --favorites --sort rating                 # favourites, best rated first
-notes folders                                      # folders with their counts
-notes section-new 1 Classics --color '#f2d45c'     # a section of folder 1
+notes section-new Classics --parent 1 --color '#f2d45c'  # a section in section 1
+notes section-mv 5 --parent 3                      # move a section inside another
+notes sections                                     # the tree, with counts
 notes import-faves                                 # copy what the old Faves app held
 ```
 
@@ -112,6 +121,29 @@ todo done 2                                         # closes the task and its op
 todo list -t travel -w 'due<2026-12-01' --sort due  # filter by tag and field, then sort
 todo list -q flights                                # full-text search
 todo tree --all                                     # include done and won't-do tasks
+```
+
+### Notes as Markdown files (the vault)
+
+Notes can live as `.md` files in a folder you choose, such as `Documents/Notes`, the way QOwnNotes
+and Obsidian keep them: **a section is a directory, and a section in a section a directory in it, to
+any depth**; the notes of no section are the files at the top. Tags, colour, pin, favourite and rating
+are front matter at the top of the file (it is optional on files that come from elsewhere); a
+section's description, colour and icon are in its `.folder.toml`. The database stays an index (so
+Sticky keeps its links) and keeps what a file cannot. The folder is the export and reading it is
+the import: edit the files in any editor, or move them between directories, and the notes follow.
+
+It is read when the app starts, when its window is focused and on request (**Sync now**). A file
+and its note both changed in between: the file wins and the note's version is kept beside it as
+`<name> (conflict).md`. A file that goes missing sends its note to the trash (`.trash/` in the
+vault); two files claiming one note are settled by path, then age, and the rest become notes of
+their own, their files numbered `-2`, `-3`. **Add Markdown file…** moves a file into the vault, or
+links to it if it cannot be moved. Set it up in Preferences or:
+
+```sh
+notes vault set ~/Documents/Notes   # or --default, or --off; the files are read at once
+notes vault sync                    # read the files, then write the notes out
+notes vault add draft.md --section Work/Design
 ```
 
 ## How it fits together

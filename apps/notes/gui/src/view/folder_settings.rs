@@ -19,7 +19,7 @@ impl App {
         let name = self.folder_name.as_deref().unwrap_or(f.title.as_str());
         let head = row![
             column![
-                text("Folder settings").size(18),
+                text("Section settings").size(18),
                 caption(f.title.clone()),
             ]
             .width(iced::Length::Fill),
@@ -29,7 +29,7 @@ impl App {
         let body = column![
             head,
             row![
-                entry("Folder name", name)
+                entry("Section name", name)
                     .on_input(Message::SetFolderTitle)
                     .width(iced::Length::Fill),
                 // The folder's icon and colour in one picker, at the end of its name.
@@ -50,6 +50,8 @@ impl App {
                 self.folder_notes.as_deref().unwrap_or(f.notes.as_str()),
             )
             .on_input(Message::SetFolderNotes),
+            // Where it is: another folder, or the top. Not itself, nor a folder in it.
+            self.parent_row(f),
             EntryRow::switch("Ratings", f.rated, Message::SetFolderRated)
                 .description(
                     "Give each note up to five stars. Switching this off hides them, and keeps them for when it is back on."
@@ -58,10 +60,10 @@ impl App {
             // The default folder is where the notes in no other folder are: it stays.
             if f.is_default {
                 Element::from(caption(
-                    "The default folder holds the notes that are in no other. It cannot be deleted.",
+                    "Unassigned holds the notes that are in no other section. It cannot be deleted.",
                 ))
             } else {
-                destructive_button(text("Delete folder…"))
+                destructive_button(text("Delete section…"))
                     .on_press(Message::FolderDeleteAsk)
                     .into()
             },
@@ -72,21 +74,42 @@ impl App {
             .into()
     }
 
-    /// "Delete this folder?": what becomes of its notes. `None` unless one is waiting for the answer.
+    /// The folder it is in, to move it: a dropdown of the others (not itself or what is in it).
+    fn parent_row(&self, f: &notes_schema::folder::Folder) -> Element<'_, Message> {
+        if f.is_default {
+            return space().into();
+        }
+        let current = self.parent_choices.iter().find(|c| c.id == f.parent).cloned();
+        column![
+            caption("In section"),
+            dropdown(&self.parent_choices, current, |c: crate::app::FolderChoice| Message::SetFolderParent(c.id)),
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    /// "Delete this section?": what becomes of its notes. `None` unless one is waiting for the answer.
     pub(super) fn folder_delete_dialog(&self) -> Option<Element<'_, Message>> {
         let id = self.confirm_folder_delete?;
         let s = self.folders.iter().find(|s| s.folder.id == id)?;
-        let n = s.notes;
+        let n = s.total;
+        let sub = s.subfolders;
+        let what = if sub > 0 {
+            "Keep them, and the sections in it, in the section it is in, or delete them all with it?"
+        } else {
+            "Keep them, in the section it is in, or delete them with it?"
+        };
         Some(
-            AlertDialog::new("Delete this folder?")
+            AlertDialog::new("Delete this section?")
                 .body(format!(
-                    "“{}” has {n} note{}. Keep them, in no folder, or delete them with it?",
+                    "“{}” has {n} note{}{}. {what}",
                     s.folder.title,
-                    if n == 1 { "" } else { "s" }
+                    if n == 1 { "" } else { "s" },
+                    if sub > 0 { " with the sections in it" } else { "" },
                 ))
                 .response("Cancel", ResponseAppearance::Default, Message::FolderDeleteCancel)
-                .response("Keep notes", ResponseAppearance::Suggested, Message::FolderDeleteKeep)
-                .response("Delete notes", ResponseAppearance::Destructive, Message::FolderDeleteAll)
+                .response("Keep", ResponseAppearance::Suggested, Message::FolderDeleteKeep)
+                .response("Delete all", ResponseAppearance::Destructive, Message::FolderDeleteAll)
                 .into(),
         )
     }

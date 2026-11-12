@@ -17,8 +17,10 @@ pub struct Folder {
     pub color: Option<Color>,
     /// The name of its icon; none is the folder.
     pub icon: Option<String>,
-    /// The folder of the notes that are in no other: it cannot be deleted.
+    /// The folder of the notes that are in no other: it cannot be deleted or hold folders.
     pub is_default: bool,
+    /// The folder it is in; none for one at the top.
+    pub parent: Option<i64>,
     pub position: i64,
     pub created: i64,
     pub updated: i64,
@@ -35,6 +37,7 @@ impl From<&Item> for Folder {
             color: f.get("color").and_then(Value::as_str).and_then(Color::parse),
             icon: f.get("icon").and_then(Value::as_str).map(String::from),
             is_default: f.get("default").and_then(Value::as_bool).unwrap_or(false),
+            parent: i.parent_id,
             position: i.position,
             created: i.created,
             updated: i.updated,
@@ -46,8 +49,14 @@ impl From<&Item> for Folder {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FolderSummary {
     pub folder: Folder,
+    /// Live notes directly in it.
     pub notes: usize,
+    /// Live notes directly in it that are favourites.
     pub favorites: usize,
+    /// Live notes in it and in every folder below it.
+    pub total: usize,
+    /// Folders directly in it.
+    pub subfolders: usize,
 }
 
 /// A change to a folder. `None` leaves a field alone; `Some(None)` clears a colour.

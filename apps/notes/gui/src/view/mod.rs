@@ -7,7 +7,6 @@ mod filter;
 mod folder_settings;
 mod grid;
 mod prefs;
-mod section_settings;
 mod sidebar;
 
 use notes_schema::views::{Scope, Sort};
@@ -86,12 +85,6 @@ impl App {
                 self.folder_settings.is_some().then(|| self.folder_settings_pane()),
                 Message::CloseFolderSettings,
             );
-            // And so are a section's.
-            let page = details_drawer(
-                page,
-                self.section_settings.is_some().then(|| self.section_settings_pane()),
-                Message::CloseSectionSettings,
-            );
             let content = toolbar_view(page).top_bar(head);
             let window: Element<'_, Message> = NavigationSplitView::new(side, content)
                 .adapt(width)
@@ -161,11 +154,14 @@ impl App {
             head = head.pack_start(button);
         }
         // New note: the edit page, empty. Notes are never made without a title and the rest in view.
+        // On a section's page the arrow goes up a level, where the "+" is elsewhere (in the section's
+        // heading, and Ctrl+N).
+        let in_section = matches!(self.scope, Scope::Folder(_)) && self.details.is_none();
         head = head.pack_start(new_or_back(
-            self.details.is_some(),
+            self.details.is_some() || in_section,
             "New note (Ctrl+N)",
             Message::New,
-            Message::CloseDetails,
+            if self.details.is_some() { Message::CloseDetails } else { Message::Back },
         ));
         let start_buttons = usize::from(start_present) + 1;
         if self.search.is_open() {
@@ -193,6 +189,13 @@ impl App {
         let mut menu = Menu::new("Menu")
             .section(shown)
             .section([MenuItem::submenu("Sort by", sort)]);
+        // Files: bring a Markdown file into the vault; read the vault again.
+        if self.vault.is_some() {
+            menu = menu.section([
+                MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
+                MenuItem::action("Sync now", Message::SyncVault).icon(Icon::Sync),
+            ]);
+        }
         menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);
         menu_button(Icon::OpenMenu, menu).tooltip("Main menu").into()
     }
@@ -206,7 +209,7 @@ impl App {
                 .folders
                 .iter()
                 .find(|s| s.folder.id == id)
-                .map_or_else(|| "Folder".into(), |s| s.folder.title.clone()),
+                .map_or_else(|| "Section".into(), |s| s.folder.title.clone()),
             Scope::Archive => "Archive".into(),
             Scope::Trash => "Trash".into(),
         }

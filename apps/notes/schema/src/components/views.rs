@@ -6,9 +6,8 @@ use organiser_engine::{
 use serde_json::Value;
 
 use crate::primitives::folder::{Folder, FolderSummary};
-use crate::primitives::section::{Section, SectionSummary};
 use crate::primitives::note::Note;
-use crate::{FOLDER, NOTE, SECTION};
+use crate::{FOLDER, NOTE};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Scope {
@@ -17,7 +16,8 @@ pub enum Scope {
     Notes,
     /// The live notes marked as favourites.
     Favorites,
-    /// The live notes filed in this folder.
+    /// The live notes filed in this folder (not those in the folders inside it, unless
+    /// [`Filter::recursive`]).
     Folder(i64),
     Archive,
     Trash,
@@ -58,6 +58,8 @@ pub struct Filter {
     pub tags: TagFilter,
     /// Search also looks in the archive (never the trash).
     pub include_archived: bool,
+    /// In a folder, the notes of the folders inside it too, at any depth.
+    pub recursive: bool,
     /// What the person chose in the filters the schema offers (pinned, favourite, rating, …).
     pub fields: Filters,
     pub sort: Sort,
@@ -132,10 +134,22 @@ fn rated_folders(db: &Db) -> Result<std::collections::HashSet<i64>> {
 /// to sort, though it is kept for when the folder rates again.
 pub fn notes(db: &Db, f: &Filter) -> Result<Vec<Note>> {
     let rated = rated_folders(db)?;
+    let mut q = query(f);
+    // A folder with the folders in it: any parent, then only those of the folders asked for.
+    let within: Option<std::collections::HashSet<i64>> = match f.scope {
+        Scope::Folder(id) if f.recursive => {
+            q.parent = ParentFilter::Any;
+            let mut set: std::collections::HashSet<i64> = std::iter::once(id).collect();
+            set.extend(crate::lifecycle::descendants(db, id)?.into_iter().map(|d| d.id));
+            Some(set)
+        }
+        _ => None,
+    };
     let mut v: Vec<Note> = db
-        .list(&query(f))?
+        .list(&q)?
         .into_iter()
         .filter(|i| i.kind == NOTE)
+        .filter(|i| within.as_ref().is_none_or(|w| i.parent_id.is_some_and(|p| w.contains(&p))))
         .map(|mut item| {
             if !item.parent_id.is_some_and(|p| rated.contains(&p)) {
                 item.fields.remove("rating");
@@ -154,52 +168,68 @@ pub fn notes(db: &Db, f: &Filter) -> Result<Vec<Note>> {
     Ok(v)
 }
 
-/// Every folder, in order, with how many live notes it holds and how many are favourites.
+/// Every folder, at every depth, in order (the default one last at the top), with how many live
+/// notes it holds directly and in all, how many of those are favourites, and how many folders
+/// are in it. Use [`children_of`] for one level.
 pub fn folders(db: &Db) -> Result<Vec<FolderSummary>> {
     let found = db.list(&Query {
         kind: Some(FOLDER.into()),
         sort: vec![Order::asc("position")],
         ..Query::default()
     })?;
-    let mut out = Vec::new();
-    for item in &found {
-        let live: Vec<Note> = notes(
-            db,
-            &Filter {
-                scope: Scope::Folder(item.id),
-                ..Filter::default()
-            },
-        )?;
-        out.push(FolderSummary {
-            folder: Folder::from(item),
-            favorites: live.iter().filter(|n| n.favorite).count(),
-            notes: live.len(),
-        });
+    // Live notes, once, by folder.
+    let live = notes(db, &Filter::default())?;
+    let mut direct: std::collections::HashMap<i64, (usize, usize)> = std::collections::HashMap::new();
+    for n in &live {
+        if let Some(f) = n.folder_id {
+            let e = direct.entry(f).or_default();
+            e.0 += 1;
+            e.1 += usize::from(n.favorite);
+        }
     }
+    let parent_of: std::collections::HashMap<i64, Option<i64>> =
+        found.iter().map(|i| (i.id, i.parent_id)).collect();
+    let mut total: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    let mut subs: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    for (id, (n, _)) in &direct {
+        // Its notes count in it and in every folder above it.
+        let mut at = Some(*id);
+        let mut guard = 0;
+        while let Some(f) = at {
+            *total.entry(f).or_default() += n;
+            at = parent_of.get(&f).copied().flatten();
+            guard += 1;
+            if guard > 256 {
+                break;
+            }
+        }
+    }
+    for i in &found {
+        if let Some(p) = i.parent_id {
+            *subs.entry(p).or_default() += 1;
+        }
+    }
+    let mut out: Vec<FolderSummary> = found
+        .iter()
+        .map(|item| {
+            let (notes, favorites) = direct.get(&item.id).copied().unwrap_or_default();
+            FolderSummary {
+                folder: Folder::from(item),
+                notes,
+                favorites,
+                total: total.get(&item.id).copied().unwrap_or(0),
+                subfolders: subs.get(&item.id).copied().unwrap_or(0),
+            }
+        })
+        .collect();
     // The default folder, "Unassigned", comes last.
     out.sort_by_key(|s| s.folder.is_default);
     Ok(out)
 }
 
-/// The sections of a folder, in the person's order, with how many live notes each holds.
-pub fn sections(db: &Db, folder: i64) -> Result<Vec<SectionSummary>> {
-    let live = notes(
-        db,
-        &Filter {
-            scope: Scope::Folder(folder),
-            ..Filter::default()
-        },
-    )?;
-    Ok(db
-        .children(Some(folder))?
-        .iter()
-        .filter(|i| i.kind == SECTION)
-        .map(Section::from)
-        .map(|section| SectionSummary {
-            notes: live.iter().filter(|n| n.section == Some(section.id)).count(),
-            section,
-        })
-        .collect())
+/// The folders directly in `parent` (or at the top), in order.
+pub fn children_of(db: &Db, parent: Option<i64>) -> Result<Vec<FolderSummary>> {
+    Ok(folders(db)?.into_iter().filter(|s| s.folder.parent == parent).collect())
 }
 
 /// Everything in the trash, most recently trashed first.

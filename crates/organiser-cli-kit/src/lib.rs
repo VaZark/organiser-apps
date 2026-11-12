@@ -30,6 +30,13 @@ pub trait Extension {
     fn opened(&self, _db: &mut Db) -> Result<()> {
         Ok(())
     }
+    /// Called with the database file about to be opened, before [`opened`](Self::opened).
+    fn database(&self, _path: &std::path::Path) {}
+    /// Called after the command has run, when it did not fail: save what the app keeps outside
+    /// the database (its files, say).
+    fn closed(&self, _db: &mut Db) -> Result<()> {
+        Ok(())
+    }
     /// Handle a subcommand, or return `None` if it is not one of yours.
     fn run(&self, db: &mut Db, name: &str, args: &ArgMatches) -> Option<Result<Output>>;
 }
@@ -53,13 +60,16 @@ pub fn run(meta: &AppMeta, schema: &'static Schema, ext: &dyn Extension) -> Exit
     let path = matches
         .get_one::<String>("db")
         .map_or_else(|| paths::db_path(meta), std::path::PathBuf::from);
+    ext.database(&path);
     let result = Db::open(&path, schema).and_then(|mut db| {
         ext.opened(&mut db)?;
         let (name, sub) = matches.subcommand().expect("subcommand is required");
-        match ext.run(&mut db, name, sub) {
+        let out = match ext.run(&mut db, name, sub) {
             Some(r) => r,
             None => components::handlers::run(&mut db, name, sub, ext.default_kind()),
-        }
+        }?;
+        ext.closed(&mut db)?;
+        Ok(out)
     });
     match result {
         Ok(out) => {
