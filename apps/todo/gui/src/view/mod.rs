@@ -197,15 +197,22 @@ impl App {
             let flat = MenuItem::switch("Flat list", self.is_flat(), Message::Flat(!self.flat));
             shows.push(if current { flat.disabled() } else { flat });
         }
+        let mut menu = Menu::new("Menu")
+            .section([
+                MenuItem::submenu("View", views),
+                MenuItem::submenu("Sort by", sort),
+            ])
+            .section(shows);
+        // Files: bring a Markdown file into the vault; read the vault again.
+        if self.vault.is_some() {
+            menu = menu.section([
+                MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
+                MenuItem::action("Sync now", Message::SyncVault).icon(Icon::Sync),
+            ]);
+        }
         menu_button(
             Icon::OpenMenu,
-            Menu::new("Menu")
-                .section([
-                    MenuItem::submenu("View", views),
-                    MenuItem::submenu("Sort by", sort),
-                ])
-                .section(shows)
-                .section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]),
+            menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]),
         )
         .tooltip("Menu")
         .open_initially(self.menu_open)
@@ -287,13 +294,17 @@ impl App {
 
     /// The title of what the window shows.
     pub(crate) fn heading(&self) -> String {
+        if self.no_epic && self.scope == Scope::All {
+            return "Unassigned".into();
+        }
         if self.scope == Scope::All
             && let Some(title) = self.epic_filter.and_then(|id| self.epic_titles.get(&id))
         {
             return title.clone();
         }
         match (self.scope, self.view) {
-            (Scope::Current, _) => "Current tasks".into(),
+            (Scope::Current, _) => "In progress".into(),
+            (Scope::Archived, _) => "Archived".into(),
             (Scope::All, View::Notes) => "Notes".into(),
             (Scope::All, View::Board) => "Board".into(),
             (Scope::All, View::List) => "All tasks".into(),

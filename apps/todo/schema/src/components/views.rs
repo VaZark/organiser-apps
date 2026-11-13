@@ -10,15 +10,20 @@ use crate::primitives::task::{Epic, EpicSummary, Section, SectionSummary, Task};
 use crate::statuses;
 use crate::{EPIC, SECTION, TASK};
 
+/// The name of the status that makes a task current.
+pub const IN_PROGRESS: &str = "In progress";
+
 /// Which tasks to list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Scope {
     /// Every task, in the order the person arranged them.
     #[default]
     All,
-    /// Scheduled tasks whose start-to-due span includes today (see [`Task::is_current`]), the
-    /// nearest deadline first. Each task stands alone: nothing pulls in its parent or subtasks.
+    /// The tasks that are being worked on: those in the "In progress" status. Each task stands
+    /// alone: nothing pulls in its parent or subtasks.
     Current,
+    /// The archived tasks, as a tree like [`All`](Scope::All) (closed ones included).
+    Archived,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -29,6 +34,8 @@ pub struct Filter {
     pub text: Option<String>,
     pub tags: TagFilter,
     pub epic: Option<i64>,
+    /// Only the tasks that are in no epic.
+    pub no_epic: bool,
     /// What the person chose in the filters the schema offers (status, priority, …).
     pub fields: Filters,
     pub include_archived: bool,
@@ -43,12 +50,18 @@ fn query(f: &Filter) -> Query {
         kind: Some(TASK.into()),
         text: f.text.clone(),
         tags: f.tags.clone(),
-        archived: (!f.include_archived).then_some(false),
+        archived: match f.scope {
+            Scope::Archived => Some(true),
+            _ => (!f.include_archived).then_some(false),
+        },
         sort: vec![Sort::asc("position")],
         ..Query::default()
     };
     if let Some(e) = f.epic {
         q.filters.push(FieldFilter::new("epic", Op::Eq, e));
+    } else if f.no_epic {
+        q.filters
+            .push(FieldFilter::new("epic", Op::IsNull, serde_json::Value::Null));
     }
     q
 }
@@ -64,7 +77,7 @@ fn depth_first(nodes: Vec<Node<Task>>) -> Vec<Task> {
 }
 
 /// Tasks matching the filter, flat.
-pub fn tasks(db: &Db, f: &Filter, today: NaiveDate) -> Result<Vec<Task>> {
+pub fn tasks(db: &Db, f: &Filter, _today: NaiveDate) -> Result<Vec<Task>> {
     let items = db.list(&query(f))?;
     // How many subtasks each task has, closed ones too: a tie-breaker of the sort.
     let mut subs: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
@@ -83,27 +96,27 @@ pub fn tasks(db: &Db, f: &Filter, today: NaiveDate) -> Result<Vec<Task>> {
         .filter(|i| f.fields.matches(i))
         .map(Task::from)
         .filter(|t| !f.hide_subtasks || t.parent_id.is_none())
-        .filter(|t| f.show_closed || chose_status || all.is_open(t.status));
-    // "Current" is an OR over two nullable dates, which the engine's AND-only filters cannot
-    // say, so it is applied here.
+        .filter(|t| {
+            f.show_closed || chose_status || f.scope == Scope::Archived || all.is_open(t.status)
+        });
+    // "In progress" is the person's own status, found by its name, so it is applied here.
+    let in_progress = all.by_name(IN_PROGRESS).map(|s| s.id);
     Ok(match f.scope {
         // Parents before their subtasks, siblings in the person's order: not a raw sort by
         // `position`, which only orders siblings.
         // Sorted, pinned first, then built into the tree: siblings keep the order they are in.
-        Scope::All => {
+        Scope::All | Scope::Archived => {
             let mut all: Vec<Task> = found.collect();
             sort_tasks(&mut all, f.sort, &subs);
             depth_first(build_tree(all, |t| t.id, |t| t.parent_id))
         }
         Scope::Current => {
-            let mut current: Vec<Task> = found.filter(|t| t.is_current(today)).collect();
-            // Pinned first; then dated deadlines, soonest first; then those that only have a start. The sort
-            // is stable, so ties stay in the person's own order.
-            if f.sort == SortKey::Manual {
-                current.sort_by_key(|t| (!t.pinned, t.due.is_none(), t.due, t.start));
-            } else {
-                sort_tasks(&mut current, f.sort, &subs);
-            }
+            let mut current: Vec<Task> = found
+                .filter(|t| in_progress.is_some() && all.resolve(t.status).map(|s| s.id) == in_progress)
+                .collect();
+            // Pinned first, then as the other views are sorted; the sort is stable, so ties stay
+            // in the person's own order.
+            sort_tasks(&mut current, f.sort, &subs);
             current
         }
     })
@@ -148,6 +161,23 @@ pub fn epics(db: &Db) -> Result<Vec<EpicSummary>> {
         });
     }
     Ok(out)
+}
+
+/// How many tasks are in no epic still open, and in all (archived ones left out).
+pub fn unassigned(db: &Db) -> Result<(usize, usize)> {
+    let all = statuses::load(db)?;
+    let tasks: Vec<Task> = db
+        .list(&Query {
+            kind: Some(TASK.into()),
+            archived: Some(false),
+            filters: vec![FieldFilter::new("epic", Op::IsNull, serde_json::Value::Null)],
+            ..Query::default()
+        })?
+        .iter()
+        .map(Task::from)
+        .collect();
+    let open = tasks.iter().filter(|t| all.is_open(t.status)).count();
+    Ok((open, tasks.len()))
 }
 
 /// The sections of an epic, in the person's order, with how many of their tasks are open.

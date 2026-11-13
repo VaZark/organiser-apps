@@ -9,14 +9,28 @@ use organiser_engine::{Db, Error, Node, Result, TagFilter};
 use serde_json::json;
 use todo_schema::due::label;
 use todo_schema::lifecycle::{
-    create_epic, create_section, delete_epic, delete_section, edit_epic, reparent, set_status,
+    create_epic, create_section, delete_epic, delete_section, edit_epic, reparent, set_archived,
+    set_status,
 };
 use todo_schema::status::Statuses;
 use todo_schema::statuses::{self, StatusEdit, ensure_defaults};
 use todo_schema::task::{Edit, EpicSummary, Task};
+use todo_schema::vault::Vault;
 use todo_schema::views::{Filter, Scope, epics, forest, tasks, today};
 
-struct Todo;
+/// What the command line keeps while it runs: the vault, when there is one, and the files the
+/// tasks had when it started (to know which were deleted).
+#[derive(Default)]
+struct Todo {
+    state: std::cell::RefCell<State>,
+}
+
+#[derive(Default)]
+struct State {
+    db_path: Option<std::path::PathBuf>,
+    vault: Option<Vault>,
+    known: std::collections::BTreeMap<i64, String>,
+}
 
 fn id() -> Arg {
     Arg::new("id")
@@ -94,6 +108,7 @@ fn filter(m: &ArgMatches, scope: Scope) -> Filter {
             ..TagFilter::default()
         },
         epic: m.try_get_one::<i64>("epic").ok().flatten().copied(),
+        no_epic: false,
         include_archived: false,
         hide_subtasks: false,
         sort: Default::default(),
@@ -173,6 +188,32 @@ impl Extension for Todo {
         Some(todo_schema::TASK)
     }
 
+    fn database(&self, path: &std::path::Path) {
+        self.state.borrow_mut().db_path = Some(path.to_path_buf());
+    }
+
+    /// With a vault, its files are read first, so what was changed outside is in.
+    fn opened(&self, db: &mut Db) -> Result<()> {
+        ensure_defaults(db)?;
+        let mut st = self.state.borrow_mut();
+        if let Some(dir) = configured_vault() {
+            let vault = Vault::open(dir, st.db_path.as_deref())?;
+            vault.sync(db)?;
+            st.known = vault.known(db)?;
+            st.vault = Some(vault);
+        }
+        Ok(())
+    }
+
+    /// With a vault, the changes this command made reach the files.
+    fn closed(&self, db: &mut Db) -> Result<()> {
+        let st = self.state.borrow();
+        if let Some(v) = &st.vault {
+            v.flush(db, &st.known)?;
+        }
+        Ok(())
+    }
+
     fn commands(&self) -> Vec<Command> {
         vec![
             Command::new("start")
@@ -188,9 +229,32 @@ impl Extension for Todo {
                 .about("Reopen a task (and the closed tasks above it)")
                 .arg(id()),
             list_args(Command::new("tree").about("Tasks with their subtasks")),
-            list_args(
-                Command::new("current").about("Tasks whose start-to-due span includes today"),
-            ),
+            list_args(Command::new("current").about("The tasks that are In progress")),
+            list_args(Command::new("archived").about("The archived tasks")),
+            Command::new("archive")
+                .about("Archive a task (and its subtasks)")
+                .arg(id()),
+            Command::new("unarchive")
+                .about("Bring a task back from the archive (with the tasks above it)")
+                .arg(id()),
+            Command::new("vault")
+                .about("Keep the tasks as Markdown files in a directory (an epic is a directory; a task with subtasks is a directory with an index.md)")
+                .subcommand_required(true)
+                .subcommand(Command::new("status").about("Show the directory and how many tasks have a file"))
+                .subcommand(Command::new("sync").about("Read the files, then write the tasks out"))
+                .subcommand(
+                    Command::new("set")
+                        .about("Choose the directory (read at once), or stop with --off")
+                        .arg(Arg::new("dir"))
+                        .arg(Arg::new("default").long("default").action(ArgAction::SetTrue).help("use Todo in the documents folder"))
+                        .arg(Arg::new("off").long("off").action(ArgAction::SetTrue).help("keep the tasks in the database alone again (the files stay)")),
+                )
+                .subcommand(
+                    Command::new("add")
+                        .about("Move a Markdown file into the vault (a link to it if it cannot be moved)")
+                        .arg(Arg::new("file").required(true))
+                        .arg(Arg::new("epic").long("epic").short('e').help("the epic, by name")),
+                ),
             Command::new("epics").about("List epics with progress"),
             Command::new("epic-new")
                 .about("Create an epic")
@@ -326,6 +390,10 @@ impl Extension for Todo {
             "current" => {
                 Some(tasks(db, &filter(m, Scope::Current), today()).map(|t| tasks_out(&t, &st)))
             }
+            "archived" => Some(tasks(db, &filter(m, Scope::Archived), today()).map(|t| tasks_out(&t, &st))),
+            "archive" => Some(set_archived(db, id, true).map(|t| tasks_out(&[t], &st))),
+            "unarchive" => Some(set_archived(db, id, false).map(|t| tasks_out(&[t], &st))),
+            "vault" => Some(vault_command(self, db, m)),
             "tree" => Some(forest(db, &filter(m, Scope::All), today()).and_then(|f| {
                 let mut lines = Vec::new();
                 walk(&f, 0, &mut lines, &st);
@@ -454,5 +522,91 @@ fn statuses_out(st: &Statuses) -> Output {
 }
 
 fn main() -> ExitCode {
-    organiser_cli_kit::run(&todo_schema::META, &todo_schema::SCHEMA, &Todo)
+    organiser_cli_kit::run(&todo_schema::META, &todo_schema::SCHEMA, &Todo::default())
+}
+
+/// The vault directory the settings name; `TODO_VAULT` overrides it (for trying one out), and set
+/// to nothing it means no vault at all, whatever the settings say (for scripts and tests that must
+/// not touch the person's own).
+fn configured_vault() -> Option<std::path::PathBuf> {
+    match std::env::var_os("TODO_VAULT") {
+        Some(v) if v.is_empty() => None,
+        Some(v) => Some(std::path::PathBuf::from(v)),
+        None => organiser_core::settings::Settings::load().settings.todo.vault_dir,
+    }
+}
+
+fn report_out(head: &str, rep: &todo_schema::vault::Report) -> Output {
+    let mut human = format!("{head}: {}", rep.summary_with("archived"));
+    for w in &rep.warnings {
+        human.push_str(&format!("\nwarning: {w}"));
+    }
+    Output::Custom {
+        human,
+        json: json!({
+            "created": rep.created, "updated": rep.updated, "moved": rep.moved,
+            "archived": rep.trashed, "written": rep.written, "removed": rep.removed,
+            "conflicts": rep.conflicts, "warnings": rep.warnings,
+        }),
+    }
+}
+
+/// `vault` and its subcommands.
+fn vault_command(app: &Todo, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
+    let (name, m) = sub.subcommand().expect("a vault subcommand is required");
+    if name == "set" {
+        let mut loaded = organiser_core::settings::Settings::load();
+        if m.get_flag("off") {
+            loaded.settings.todo.vault_dir = None;
+            loaded.settings.save().map_err(Error::Invalid)?;
+            return Ok(Output::Message("the tasks are kept in the database alone".into()));
+        }
+        let dir = if m.get_flag("default") {
+            organiser_core::paths::documents_folder(&todo_schema::META)
+        } else {
+            m.get_one::<String>("dir")
+                .map(std::path::PathBuf::from)
+                .ok_or_else(|| Error::Invalid("give a directory, --default or --off".into()))?
+        };
+        let dir = std::path::absolute(&dir).unwrap_or(dir);
+        let db_path = app.state.borrow().db_path.clone();
+        let vault = Vault::open(&dir, db_path.as_deref())?;
+        let known = vault.known(db)?;
+        let mut rep = vault.sync(db)?;
+        rep.add(vault.flush(db, &known)?);
+        loaded.settings.todo.vault_dir = Some(vault.dir().to_path_buf());
+        loaded.settings.save().map_err(Error::Invalid)?;
+        return Ok(report_out(&format!("tasks are kept in {}", vault.dir().display()), &rep));
+    }
+    let st = app.state.borrow();
+    let Some(vault) = &st.vault else {
+        return Err(Error::Invalid("there is no vault: choose a directory with `todo vault set <dir>`".into()));
+    };
+    match name {
+        "status" => {
+            let files = vault.known(db)?.len();
+            let all = db
+                .list(&organiser_engine::Query { kind: Some(todo_schema::TASK.into()), ..Default::default() })?
+                .len();
+            Ok(Output::Message(format!("{}: {files} of {all} tasks have a file", vault.dir().display())))
+        }
+        "sync" => {
+            let mut rep = vault.sync(db)?;
+            rep.add(vault.flush(db, &st.known)?);
+            Ok(report_out("done", &rep))
+        }
+        _ => {
+            let epic = match m.get_one::<String>("epic") {
+                Some(n) => Some(
+                    todo_schema::lifecycle::epic_by_title(db, n)
+                        .ok_or_else(|| Error::Invalid(format!("there is no epic `{n}`")))?,
+                ),
+                None => None,
+            };
+            let file = m.get_one::<String>("file").map_or("", String::as_str);
+            let (at, linked) = vault.add_file(db, std::path::Path::new(file), epic)?;
+            vault.sync(db)?;
+            Ok(Output::Message(format!("{} {}", if linked { "linked as" } else { "moved to" }, at.display())))
+        }
+    }
 }

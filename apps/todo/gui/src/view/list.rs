@@ -52,7 +52,9 @@ impl App {
                 Some(epic) if self.group_by_section => self.epic_sections_list(epic, &rows, stacked),
                 // Not in sections: the tasks, pinned first, as anywhere else.
                 Some(_) => self.pinned_and_rest(&rows, stacked),
-                None if self.scope == Scope::All => self.pinned_and_rest(&rows, stacked),
+                None if matches!(self.scope, Scope::All | Scope::Archived) => {
+                    self.pinned_and_rest(&rows, stacked)
+                }
                 None => self.open_ground(rows.iter().map(|r| self.dnd_row(r, stacked)).collect()),
             }
         };
@@ -304,7 +306,10 @@ impl App {
     /// The `⋯` at the top right of the pages of every task: how they are grouped. `None` on an
     /// epic's page (which has its own) and on Current tasks.
     pub(super) fn all_page_menu(&self) -> Option<Element<'_, Message>> {
-        if self.scope != Scope::All || self.epic_filter.is_some() || self.epics.is_empty() {
+        if !matches!(self.scope, Scope::All | Scope::Archived)
+            || self.epic_filter.is_some()
+            || self.epics.is_empty()
+        {
             return None;
         }
         Some(
@@ -469,10 +474,6 @@ impl App {
 
         // On the side, always when set: the epic, the person's own tags, then the due date, last.
         let mut side = row![].spacing(4).align_y(iced::Alignment::Center);
-        // The status as a dot, before the chips.
-        if let Some(d) = self.status_dot(t) {
-            side = side.push(d);
-        }
         if let Some(flags) = self.flags_row(t) {
             side = side.push(flags);
         }
@@ -506,6 +507,10 @@ impl App {
                 _ => Role::Accent,
             };
             side = side.push(pill(&label(d, self.today), role));
+        }
+        // The status as a dot, at the very end, after the date.
+        if let Some(d) = self.status_dot(t) {
+            side = side.push(d);
         }
 
         // Beside the title when there is room for both. Otherwise the chips go under it and wrap

@@ -1,7 +1,7 @@
 //! State, messages and update. Every change goes through `todo-schema` and the engine; the view
 //! never touches the database.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::NaiveDate;
 use iced::widget::text_editor;
@@ -31,6 +31,7 @@ use todo_schema::sort::{SortKey, sort_tasks};
 use todo_schema::status::{Status, Statuses};
 use todo_schema::statuses::{self, StatusEdit};
 use todo_schema::task::{Edit, Epic, EpicSummary, Section, SectionSummary, Task as TodoTask};
+use todo_schema::vault::Vault;
 use todo_schema::views::{self, Filter, Scope};
 
 #[derive(Debug, Clone)]
@@ -102,6 +103,30 @@ pub enum Message {
     PrefGroupByEpic(bool),
     PrefGroupBySection(bool),
     PrefDetailsDrawer(bool),
+    /// The archived tasks, grouped by epic.
+    Archived,
+    /// The tasks that are in no epic.
+    Unassigned,
+    /// Archive the selected task (true) or bring it back.
+    DArchive(bool),
+    /// Read the files of the vault, then write the tasks out.
+    SyncVault,
+    /// The window was focused: files may have been changed meanwhile.
+    FocusGained,
+    /// Pick the directory the tasks live in.
+    ChooseVault,
+    VaultChosen(Option<std::path::PathBuf>),
+    /// The folder `Todo` in the documents folder.
+    UseDefaultVault,
+    /// Keep the tasks in the database alone again; the files stay where they are.
+    VaultOff,
+    /// Show the vault in the file manager.
+    OpenVault,
+    /// Pick Markdown files to bring into the vault.
+    AddFiles,
+    FilesPicked(Vec<std::path::PathBuf>),
+    /// Show the selected task's file in the file manager.
+    ShowFile,
     /// Link (true) or unlink this app to the Sticky Notes app.
     PrefStickyLink(bool),
     /// Show the selected task as a desktop sticky (true) or stop.
@@ -278,6 +303,16 @@ pub struct App {
     pub today: NaiveDate,
     pub scope: Scope,
     pub epic_filter: Option<i64>,
+    /// Only the tasks in no epic.
+    pub no_epic: bool,
+    /// How many tasks are in no epic still open, and in all.
+    pub unassigned: (usize, usize),
+    /// The directory the tasks live in as files, when they do.
+    pub vault: Option<Vault>,
+    /// The file each task had after the last flush: how a task deleted for good is known to have
+    /// had one.
+    pub vault_known: BTreeMap<i64, String>,
+    pub db_path: std::path::PathBuf,
     /// Tasks must have at least one of these tags (or a tag below one of them).
     /// The picked tags: groups that are alternatives, every tag of one needed.
     pub tag_groups: TagGroups<String>,
@@ -387,6 +422,11 @@ impl App {
             today: views::today(),
             scope: Scope::All,
             epic_filter: None,
+            no_epic: false,
+            unassigned: (0, 0),
+            vault: None,
+            vault_known: BTreeMap::new(),
+            db_path: path.clone(),
             tag_groups: TagGroups::new(),
             prefs,
             sticky: StickyLink::load(&todo_schema::STICKY),
@@ -466,6 +506,9 @@ impl App {
         if std::env::var_os("TODO_GUI_CURRENT").is_some() {
             app.scope = Scope::Current;
         }
+        if std::env::var_os("TODO_GUI_ARCHIVED").is_some() {
+            app.scope = Scope::Archived;
+        }
         app.epic_filter = std::env::var("TODO_GUI_EPIC")
             .ok()
             .and_then(|v| v.parse().ok());
@@ -525,6 +568,16 @@ impl App {
                 .map(move |()| Message::Select(id)),
             );
         }
+        // `TODO_GUI_VAULT` picks one for a trial; set to nothing it means none, whatever the
+        // settings say.
+        let dir = match std::env::var_os("TODO_GUI_VAULT") {
+            Some(v) if v.is_empty() => None,
+            Some(v) => Some(std::path::PathBuf::from(v)),
+            None => app.prefs.settings.todo.vault_dir.clone(),
+        };
+        if let Some(dir) = dir {
+            app.open_vault(dir, &path);
+        }
         (app, Task::batch(tasks))
     }
 
@@ -544,6 +597,8 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                     iced::mouse::Button::Left,
                 )) => Some(Message::DragEnd),
+                // Coming back to the window: a file may have been changed in another editor.
+                iced::Event::Window(iced::window::Event::Focused) => Some(Message::FocusGained),
                 _ => None,
             }),
         ])
@@ -557,6 +612,7 @@ impl App {
             // The picked tags are alternatives: a task matches if it has any one of them.
             tags: engine_filter(&self.tag_groups),
             epic: self.epic_filter,
+            no_epic: self.no_epic,
             fields: self.filters.clone(),
             include_archived: false,
             hide_subtasks: !self.show_subtasks,
@@ -564,9 +620,83 @@ impl App {
         }
     }
 
+    /// Keep the tasks in `dir` as files: read what is there, write the rest, and say what changed.
+    fn open_vault(&mut self, dir: std::path::PathBuf, db_path: &std::path::Path) {
+        match Vault::open(dir, Some(db_path)) {
+            Ok(v) => {
+                self.vault = Some(v);
+                self.vault_sync(false);
+            }
+            Err(e) => {
+                self.vault = None;
+                self.toast = Some(e.to_string());
+            }
+        }
+    }
+
+    /// Read the vault's files into the tasks, then write the tasks' changes to the files.
+    fn vault_sync(&mut self, say: bool) {
+        let Some(v) = self.vault.clone() else { return };
+        let result = v.sync(&mut self.db).and_then(|mut r| {
+            r.add(v.flush(&mut self.db, &self.vault_known)?);
+            Ok(r)
+        });
+        match result {
+            Ok(r) => {
+                self.vault_known = v.known(&self.db).unwrap_or_default();
+                if say || r.created + r.updated + r.moved + r.trashed + r.conflicts > 0 {
+                    self.toast = Some(r.summary_with("archived"));
+                }
+                if let Some(w) = r.warnings.first() {
+                    self.toast = Some(w.clone());
+                }
+                self.refresh_details();
+                self.reload();
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// After a change: write it to the files.
+    fn vault_flush(&mut self) {
+        let Some(v) = self.vault.clone() else { return };
+        match v.flush(&mut self.db, &self.vault_known) {
+            Ok(r) => {
+                self.vault_known = v.known(&self.db).unwrap_or_default();
+                if let Some(w) = r.warnings.first() {
+                    self.toast = Some(w.clone());
+                }
+            }
+            Err(e) => self.toast = Some(e.to_string()),
+        }
+    }
+
+    fn set_vault(&mut self, dir: Option<std::path::PathBuf>) {
+        self.prefs.settings.todo.vault_dir = dir.clone();
+        if let Err(e) = self.prefs.save() {
+            self.fail(e);
+        }
+        match dir {
+            Some(d) => {
+                let db_path = self.db_path.clone();
+                self.open_vault(d, &db_path);
+                if self.vault.is_none() {
+                    self.prefs.settings.todo.vault_dir = None;
+                    let _ = self.prefs.save();
+                }
+            }
+            None => {
+                self.vault = None;
+                self.vault_known.clear();
+            }
+        }
+    }
+
     /// Re-read what the lists show from the database.
     fn reload(&mut self) {
+        self.vault_flush();
         self.today = views::today();
+        self.unassigned = views::unassigned(&self.db).unwrap_or((0, 0));
         match statuses::load(&self.db) {
             Ok(s) => self.statuses = s,
             Err(e) => self.toast = Some(e.to_string()),
@@ -722,8 +852,9 @@ impl App {
     /// All (not Current, not one epic's) and there are epics.
     pub fn grouped_by_epic(&self) -> bool {
         self.group_by_epic
-            && self.scope == Scope::All
+            && matches!(self.scope, Scope::All | Scope::Archived)
             && self.epic_filter.is_none()
+            && !self.no_epic
             && !self.epics.is_empty()
     }
 
@@ -1000,6 +1131,7 @@ impl App {
             Message::Quit => return iced::exit(),
             Message::Current(on) => {
                 self.scope = if on { Scope::Current } else { Scope::All };
+                self.no_epic = false;
                 if on {
                     // The sidebar is one choice: current tasks, or an epic, or all.
                     self.epic_filter = None;
@@ -1192,8 +1324,116 @@ impl App {
                 self.clear_filters();
                 self.reload();
             }
+            Message::Archived => {
+                self.scope = Scope::Archived;
+                self.epic_filter = None;
+                self.no_epic = false;
+                self.drawer_open = false;
+                self.reload();
+            }
+            Message::Unassigned => {
+                self.scope = Scope::All;
+                self.epic_filter = None;
+                self.no_epic = true;
+                self.drawer_open = false;
+                self.reload();
+            }
+            Message::DArchive(on) => {
+                if let Some(d) = &self.details
+                    && !d.is_new()
+                    && matches!(d.subject, Subject::Task(_))
+                {
+                    let id = d.id();
+                    if let Err(e) = lifecycle::set_archived(&mut self.db, id, on) {
+                        self.fail(e);
+                    } else if on {
+                        // It left the list: so does its page.
+                        self.details = None;
+                    }
+                    self.refresh_details();
+                    self.reload();
+                }
+            }
+            Message::SyncVault => self.vault_sync(true),
+            Message::FocusGained => {
+                if self.vault.is_some() {
+                    self.vault_sync(false);
+                }
+            }
+            Message::ChooseVault => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Choose the folder for your tasks")
+                            .pick_folder()
+                            .await
+                            .map(|f| f.path().to_path_buf())
+                    },
+                    Message::VaultChosen,
+                );
+            }
+            Message::VaultChosen(dir) => {
+                if let Some(d) = dir {
+                    self.set_vault(Some(d));
+                }
+            }
+            Message::UseDefaultVault => {
+                self.set_vault(Some(paths::documents_folder(&todo_schema::META)));
+            }
+            Message::VaultOff => {
+                self.set_vault(None);
+                self.toast = Some("The tasks are kept in the database alone; the files stay".into());
+            }
+            Message::OpenVault => {
+                if let Some(v) = &self.vault {
+                    reveal(v.dir());
+                }
+            }
+            Message::ShowFile => {
+                if let (Some(v), Some(d)) = (&self.vault, &self.details)
+                    && let Some(rel) = self.vault_known.get(&d.id())
+                {
+                    let file = v.dir().join(rel);
+                    reveal(file.parent().unwrap_or(v.dir()));
+                }
+            }
+            Message::AddFiles => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Add Markdown files")
+                            .add_filter("Markdown", &["md", "markdown"])
+                            .pick_files()
+                            .await
+                            .map(|v| v.into_iter().map(|f| f.path().to_path_buf()).collect())
+                            .unwrap_or_default()
+                    },
+                    Message::FilesPicked,
+                );
+            }
+            Message::FilesPicked(files) => {
+                if let Some(v) = self.vault.clone() {
+                    let mut linked = 0;
+                    for f in &files {
+                        match v.add_file(&self.db, f, self.epic_filter) {
+                            Ok((_, l)) => linked += usize::from(l),
+                            Err(e) => self.fail(e),
+                        }
+                    }
+                    self.vault_sync(false);
+                    if !files.is_empty() {
+                        self.toast = Some(format!(
+                            "Added {} file{}{}",
+                            files.len(),
+                            if files.len() == 1 { "" } else { "s" },
+                            if linked > 0 { " (some as links)" } else { "" }
+                        ));
+                    }
+                }
+            }
             Message::SetEpic(id) => {
                 self.scope = Scope::All;
+                self.no_epic = false;
                 self.epic_filter = id;
                 self.drawer_open = false;
                 self.reload();
@@ -1792,4 +2032,14 @@ impl App {
         }
         Task::none()
     }
+}
+
+/// Show a directory in the file manager.
+fn reveal(dir: &std::path::Path) {
+    let _ = std::process::Command::new("xdg-open")
+        .arg(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }

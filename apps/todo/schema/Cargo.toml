@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 organiser-core.workspace = true
 organiser-engine.workspace = true
+organiser-vault.workspace = true
+toml = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 serde.workspace = true
 serde_json.workspace = true

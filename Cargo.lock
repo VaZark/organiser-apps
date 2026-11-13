@@ -1551,6 +1551,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iad-icons"
 version = "0.1.0"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=353edd850720f03b0068e30290c9bf1e976df933#353edd850720f03b0068e30290c9bf1e976df933"
 
 [[package]]
 name = "iana-time-zone"
@@ -1596,6 +1597,7 @@ dependencies = [
 [[package]]
 name = "iced-adaptive-design"
 version = "0.1.0"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=353edd850720f03b0068e30290c9bf1e976df933#353edd850720f03b0068e30290c9bf1e976df933"
 dependencies = [
  "iad-icons",
  "iced",
@@ -2552,6 +2554,7 @@ dependencies = [
  "organiser-core",
  "organiser-engine",
  "organiser-markdown",
+ "organiser-vault",
  "serde",
  "serde_json",
 ]
@@ -3090,6 +3093,14 @@ dependencies = [
  "organiser-engine",
  "organiser-markdown",
  "organiser-sticky",
+ "serde_json",
+]
+
+[[package]]
+name = "organiser-vault"
+version = "0.0.1"
+dependencies = [
+ "organiser-engine",
  "serde_json",
 ]
 
@@ -4358,6 +4369,7 @@ dependencies = [
  "chrono",
  "clap",
  "organiser-cli-kit",
+ "organiser-core",
  "organiser-engine",
  "serde_json",
  "todo-schema",
@@ -4374,6 +4386,7 @@ dependencies = [
  "organiser-markdown",
  "organiser-sticky",
  "organiser-ui",
+ "rfd",
  "serde_json",
  "todo-schema",
 ]
@@ -4385,8 +4398,10 @@ dependencies = [
  "chrono",
  "organiser-core",
  "organiser-engine",
+ "organiser-vault",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -4927,6 +4942,7 @@ dependencies = [
 [[package]]
 name = "weaver"
 version = "0.0.1"
+source = "git+https://github.com/VaZark/weaver?rev=d44d3c077b3da937307ed809f988f3aad0136ee2#d44d3c077b3da937307ed809f988f3aad0136ee2"
 dependencies = [
  "rusqlite",
  "serde",

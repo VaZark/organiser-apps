@@ -1,0 +1,10 @@
+[package]
+name = "organiser-vault"
+description = "What the organiser apps share to keep their items as Markdown files in a directory: front matter, atomic writes, names, small TOML files and the report of a sync."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+organiser-engine.workspace = true
+serde_json.workspace = true

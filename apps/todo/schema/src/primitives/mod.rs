@@ -2,6 +2,7 @@
 
 pub mod board;
 pub mod due;
+pub mod md_task;
 pub mod priority;
 pub mod quadrant;
 pub mod quick;

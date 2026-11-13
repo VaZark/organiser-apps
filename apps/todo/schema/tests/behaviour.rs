@@ -161,67 +161,15 @@ fn dismissing_a_parent_leaves_already_done_children_done() {
 }
 
 #[test]
-fn current_tasks_are_scheduled_tasks_whose_span_includes_today_soonest_deadline_first() {
+fn current_is_what_is_in_progress_each_task_alone() {
+    use todo_schema::lifecycle::set_status;
     let mut db = db();
-    // (title, start, due)
-    let cases = [
-        ("undated", None, None),
-        ("started, open ended", Some("2026-11-01"), None),
-        ("due later", None, Some("2026-11-20")),
-        ("due today", None, Some(TODAY)),
-        ("starts today", Some(TODAY), None),
-        ("in a range", Some("2026-11-05"), Some("2026-11-15")),
-        ("overdue", None, Some("2026-11-09")),
-        ("not started", Some("2026-11-11"), None),
-        ("range in the past", Some("2026-10-01"), Some("2026-10-31")),
-        (
-            "range in the future",
-            Some("2026-12-01"),
-            Some("2026-12-31"),
-        ),
-    ];
-    for (title, start, due) in cases {
-        create(
-            &mut db,
-            &NewTask {
-                start: start.map(d),
-                due: due.map(d),
-                ..NewTask::new(title)
-            },
-        )
-        .unwrap();
-    }
-    let current = all(
-        &db,
-        &Filter {
-            scope: Scope::Current,
-            ..Filter::default()
-        },
-    );
-    assert_eq!(
-        titles(&current),
-        [
-            "due today",
-            "in a range",
-            "due later",
-            "started, open ended",
-            "starts today"
-        ],
-        "undated, overdue and not-yet-started tasks are left out"
-    );
-    assert_eq!(all(&db, &Filter::default()).len(), 10);
-}
-
-#[test]
-fn current_lists_each_task_alone_without_pulling_in_its_family() {
-    let mut db = db();
-    let parent = create(&mut db, &NewTask::new("parent, undated")).unwrap();
-    let dated = create(
+    let parent = create(&mut db, &NewTask::new("parent")).unwrap();
+    let working = create(
         &mut db,
         &NewTask {
             parent: Some(parent.id),
-            due: Some(d("2026-11-12")),
-            ..NewTask::new("dated subtask")
+            ..NewTask::new("working subtask")
         },
     )
     .unwrap();
@@ -229,10 +177,16 @@ fn current_lists_each_task_alone_without_pulling_in_its_family() {
         &mut db,
         &NewTask {
             parent: Some(parent.id),
-            ..NewTask::new("undated sibling")
+            ..NewTask::new("idle sibling")
         },
     )
     .unwrap();
+    // Dates do not make a task current any more.
+    create(&mut db, &NewTask { due: Some(d("2026-11-12")), ..NewTask::new("due, not started") }).unwrap();
+    let other = create(&mut db, &NewTask::new("also working")).unwrap();
+    let in_progress = todo_schema::statuses::load(&db).unwrap().by_name("In progress").unwrap().id;
+    set_status(&mut db, working.id, in_progress).unwrap();
+    set_status(&mut db, other.id, in_progress).unwrap();
     let current = all(
         &db,
         &Filter {
@@ -240,13 +194,32 @@ fn current_lists_each_task_alone_without_pulling_in_its_family() {
             ..Filter::default()
         },
     );
-    assert_eq!(titles(&current), ["dated subtask"]);
-    assert_eq!(
-        current[0].parent_id,
-        Some(parent.id),
-        "it still knows its parent"
-    );
-    assert_eq!(current[0].id, dated.id);
+    let mut names = titles(&current);
+    names.sort();
+    assert_eq!(names, ["also working", "working subtask"]);
+    let sub = current.iter().find(|t| t.id == working.id).unwrap();
+    assert_eq!(sub.parent_id, Some(parent.id), "it still knows its parent");
+}
+
+#[test]
+fn archived_tasks_are_their_own_view_and_leave_the_others() {
+    use todo_schema::lifecycle::set_archived;
+    let mut db = db();
+    let parent = create(&mut db, &NewTask::new("parent")).unwrap();
+    let sub = create(&mut db, &NewTask { parent: Some(parent.id), ..NewTask::new("sub") }).unwrap();
+    create(&mut db, &NewTask::new("kept")).unwrap();
+    set_archived(&mut db, parent.id, true).unwrap();
+    let archived = |db: &Db| {
+        all(db, &Filter { scope: Scope::Archived, ..Filter::default() })
+    };
+    // The parent and everything below it.
+    assert_eq!(titles(&archived(&db)), ["parent", "sub"]);
+    assert_eq!(titles(&all(&db, &Filter::default())), ["kept"]);
+    // Bringing a subtask back brings the tasks above it too.
+    set_archived(&mut db, sub.id, false).unwrap();
+    assert!(archived(&db).is_empty());
+    assert_eq!(all(&db, &Filter::default()).len(), 3);
+    assert!(set_archived(&mut db, 9999, true).is_err());
 }
 
 #[test]
@@ -1108,4 +1081,19 @@ fn an_epic_can_be_moved_before_another() {
     assert_eq!(order(&db), ["B", "A", "C"]);
     assert!(move_epic(&mut db, a.id, Some(999)).is_err());
     let _ = b;
+}
+
+#[test]
+fn tasks_in_no_epic_can_be_listed_and_counted() {
+    use todo_schema::views::unassigned;
+    let mut db = db();
+    let e = create_epic(&mut db, "E").unwrap();
+    create(&mut db, &NewTask { epic: Some(e.id), ..NewTask::new("in") }).unwrap();
+    create(&mut db, &NewTask::new("out 1")).unwrap();
+    let two = create(&mut db, &NewTask::new("out 2")).unwrap();
+    let done = todo_schema::statuses::load(&db).unwrap().first_closed().unwrap().id;
+    todo_schema::lifecycle::set_status(&mut db, two.id, done).unwrap();
+    let none = all(&db, &Filter { no_epic: true, show_closed: true, ..Filter::default() });
+    assert_eq!(titles(&none), ["out 1", "out 2"]);
+    assert_eq!(unassigned(&db).unwrap(), (1, 2));
 }

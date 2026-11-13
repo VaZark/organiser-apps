@@ -14,16 +14,33 @@ impl App {
     pub(super) fn sidebar(&self) -> Element<'_, Message> {
         // "All" and the epics are one choice, a selection: picking an epic shows its tasks, picking
         // All shows everything. (The filter can still pick several.)
-        let everything = self.scope == Scope::All && self.epic_filter.is_none();
+        let everything = self.scope == Scope::All && self.epic_filter.is_none() && !self.no_epic;
         let mut items: Vec<SidebarItem<Message>> = vec![
             SidebarItem::new("All", Message::SetEpic(None))
                 .icon(Icon::CardGrid)
                 .selected(everything),
-            SidebarItem::new("Current tasks", Message::Current(true))
+            SidebarItem::new("In progress", Message::Current(true))
                 .icon(icons::calendar())
                 .selected(self.scope == Scope::Current),
+            SidebarItem::new("Archived", Message::Archived)
+                .icon(Icon::Archive)
+                .selected(self.scope == Scope::Archived),
         ];
-        let mut first = true;
+        // The tasks that are in no epic come first among the epics.
+        let (open, total) = self.unassigned;
+        items.push(
+            SidebarItem::new(
+                format!("Unassigned  ({}/{})", total - open, total),
+                Message::Unassigned,
+            )
+            .icon(Icon::Folder)
+            .icon_color(organiser_ui::components::color_pick::UNSET)
+            .selected(self.scope == Scope::All && self.no_epic)
+            .divider_above()
+            // A task dropped on it leaves its epic.
+            .drop_target("Take out of its epic", |_| Message::DropInEpic(None)),
+        );
+        let mut first = false;
         for s in self
             .epics
             .iter()
@@ -60,7 +77,7 @@ impl App {
         // All and Current tasks stay in view; the epics scroll beneath them.
         SidebarList::new(items)
             .style(SidebarStyle::List)
-            .fixed_top(2)
+            .fixed_top(3)
             .dragging(self.dragging_epic.is_some())
             .into()
     }

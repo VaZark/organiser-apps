@@ -129,10 +129,6 @@ impl App {
         ]
         .spacing(8)
         .align_y(Alignment::Center);
-        // The task's status as a dot in its colour, before the chips.
-        if let Some(d) = self.status_dot(t) {
-            line = line.push(d);
-        }
         if let Some(d) = t.due {
             let role = match (closed, bucket(d, self.today)) {
                 (true, _) => Role::Success,
@@ -141,6 +137,10 @@ impl App {
                 _ => Role::Accent,
             };
             line = line.push(pill(&label(d, self.today), role));
+        }
+        // The task's status as a dot in its colour, at the very end, after the date.
+        if let Some(d) = self.status_dot(t) {
+            line = line.push(d);
         }
         selectable(container(line).padding([4, 8]), selected, Message::Select(id))
     }

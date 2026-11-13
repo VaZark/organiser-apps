@@ -123,6 +123,26 @@ todo list -q flights                                # full-text search
 todo tree --all                                     # include done and won't-do tasks
 ```
 
+### Todo as Markdown files
+
+Todo can keep its tasks as `.md` files in a folder you choose (`Documents/Todo` by default), the
+same way as Notes: the files are the tasks, the database an index. **An epic is a directory**
+(its `.epic.toml` holds its colour, icon, dates and sections), **a task with no subtasks is a file**
+(`Buy milk.md`), and **a task with subtasks is a directory with an `index.md`** and its subtasks
+inside, to any depth. Status (by name), priority, dates, tags, pin and section are front matter;
+the notes are the body. A task gaining its first subtask moves to `Name/index.md` by itself, and
+back to `Name.md` when it loses the last. Archived tasks live in `.archive/`; a file that goes
+missing archives its task.
+
+```sh
+todo vault set ~/Documents/Todo     # or --default, or --off; the files are read at once
+todo vault sync                     # read the files, then write the tasks out
+todo vault add draft.md --epic Work
+todo archive 12; todo archived      # the Archived view, grouped by epic
+```
+
+"In progress" (in the sidebar, `todo current`) is every task whose status is In progress.
+
 ### Notes as Markdown files (the vault)
 
 Notes can live as `.md` files in a folder you choose, such as `Documents/Notes`, the way QOwnNotes

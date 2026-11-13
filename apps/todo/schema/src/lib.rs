@@ -13,8 +13,9 @@ use organiser_core::AppMeta;
 use organiser_core::sticky::{StickyKind, StickySpec};
 use organiser_engine::{Field, FieldType, Kind, Schema};
 
-pub use components::{lifecycle, statuses, views};
-pub use primitives::{board, due, priority, quadrant, quick, sort, status, task};
+pub use components::{lifecycle, statuses, vault, views};
+pub use organiser_vault::front_matter;
+pub use primitives::{board, due, md_task, priority, quadrant, quick, sort, status, task};
 
 pub const META: AppMeta = AppMeta {
     id: "io.github.vazark.Todo",
@@ -67,6 +68,12 @@ pub static SCHEMA: Schema = Schema {
                 Field::new("section", FieldType::Reference(SECTION))
                     .indexed()
                     .internal(),
+                // The vault (see `components::vault`): the task's file, relative to the vault, a
+                // hash of that file as last read or written, and of what this task would be written
+                // as then.
+                Field::new("file", FieldType::Text).internal(),
+                Field::new("file_hash", FieldType::Text).internal(),
+                Field::new("file_sig", FieldType::Text).internal(),
             ],
         },
         Kind {

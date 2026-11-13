@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui", "crates/organiser-sticky", "apps/sticky/engine", "apps/sticky/cli", "apps/sticky/gui"]
+members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-vault", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui", "crates/organiser-sticky", "apps/sticky/engine", "apps/sticky/cli", "apps/sticky/gui"]
 
 [workspace.package]
 version = "0.0.1"
@@ -10,6 +10,7 @@ license = "MIT"
 [workspace.dependencies]
 organiser-core = { path = "crates/organiser-core" }
 organiser-markdown = { path = "crates/organiser-markdown" }
+organiser-vault = { path = "crates/organiser-vault" }
 organiser-engine = { path = "crates/organiser-engine" }
 todo-schema = { path = "apps/todo/schema" }
 todo-cli = { path = "apps/todo/cli" }
@@ -19,7 +20,7 @@ organiser-cli-kit = { path = "crates/organiser-cli-kit" }
 organiser-ui = { path = "crates/organiser-ui" }
 organiser-sticky = { path = "crates/organiser-sticky" }
 sticky-engine = { path = "apps/sticky/engine" }
-iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "98c68525b511eeef293c070061032db4db010183" }
+iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "353edd850720f03b0068e30290c9bf1e976df933" }
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "wayland", "advanced", "svg", "image", "tokio", "canvas"] }
 rusqlite = "0.37"
 serde = { version = "1", features = ["derive"] }

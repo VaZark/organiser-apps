@@ -115,6 +115,9 @@ pub struct TodoSettings {
     pub group_by_epic: bool,
     /// On an epic's page, group its tasks by section.
     pub group_by_section: bool,
+    /// The directory the tasks live in as Markdown files (the vault); none keeps them in the
+    /// database alone.
+    pub vault_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for TodoSettings {
@@ -126,6 +129,7 @@ impl Default for TodoSettings {
             show_subtasks: true,
             group_by_epic: true,
             group_by_section: true,
+            vault_dir: None,
         }
     }
 }

@@ -15,7 +15,8 @@ use organiser_engine::{Field, FieldType, Kind, Schema};
 
 pub use components::{lifecycle, vault, views};
 pub use organiser_markdown::{doc, export as md_export, parse as md_parse, tasks as md_tasks};
-pub use primitives::{color, folder, front_matter, md_note, note, quick};
+pub use organiser_vault::front_matter;
+pub use primitives::{color, folder, md_note, note, quick};
 
 pub const META: AppMeta = AppMeta {
     id: "io.github.vazark.Notes",

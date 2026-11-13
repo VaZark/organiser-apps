@@ -71,8 +71,10 @@ impl App {
                 }))
                 .width(Length::Fill),
                 self.more_menu(d),
+                self.file_button(d),
                 self.pin_toggle(d),
                 self.sticky_toggle(d),
+                self.archive_toggle(d),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -361,6 +363,38 @@ impl App {
         ColorInput::new(current, typed, Message::DColorText, Message::DColor)
             .swatches(SWATCHES)
             .trigger(dot(rgb, 22.0))
+            .into()
+    }
+
+    /// Show the task's file, when the tasks are kept as files.
+    fn file_button(&self, d: &Details) -> Element<'_, Message> {
+        if d.is_new() || !matches!(d.subject, Subject::Task(_)) || self.vault.is_none() {
+            return space().into();
+        }
+        let Some(rel) = self.vault_known.get(&d.id()) else {
+            return space().into();
+        };
+        let linked = self
+            .vault
+            .as_ref()
+            .is_some_and(|v| std::fs::symlink_metadata(v.dir().join(rel)).is_ok_and(|m| m.file_type().is_symlink()));
+        IconToggle::new(if linked { Icon::Link } else { Icon::FileShow }, false)
+            .tooltip(if linked { "Show the file (a link to a file elsewhere)" } else { "Show the file" })
+            .on_toggle(|_| Message::ShowFile)
+            .into()
+    }
+
+    /// The archive toggle: a task out of the way, in the Archived view.
+    fn archive_toggle(&self, d: &Details) -> Element<'_, Message> {
+        let Subject::Task(t) = &d.subject else {
+            return space().into();
+        };
+        if d.is_new() {
+            return space().into();
+        }
+        IconToggle::new(Icon::Archive, t.archived)
+            .tooltip(if t.archived { "Unarchive" } else { "Archive" })
+            .on_toggle(Message::DArchive)
             .into()
     }
 

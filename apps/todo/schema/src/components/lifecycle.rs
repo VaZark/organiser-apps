@@ -128,6 +128,27 @@ pub fn set_pinned(db: &mut Db, id: i64, pinned: bool) -> Result<Task> {
     ))
 }
 
+/// Archive a task, with everything below it, or bring it back (with the tasks above it, so it is
+/// never under an archived parent).
+pub fn set_archived(db: &mut Db, id: i64, archived: bool) -> Result<Task> {
+    if db.get(id)?.kind != TASK {
+        return Err(Error::Invalid(format!("item {id} is not a task")));
+    }
+    let mut ids = vec![id];
+    ids.extend(descendants(db, id)?.into_iter().map(|t| t.id));
+    if !archived {
+        let mut up = db.get(id)?.parent_id;
+        while let Some(p) = up {
+            ids.push(p);
+            up = db.get(p)?.parent_id;
+        }
+    }
+    for i in ids {
+        db.update(i, ItemPatch::default().archived(archived))?;
+    }
+    Ok(Task::from(&db.get(id)?))
+}
+
 /// Make the item's tags exactly `tags` (adding and removing only the difference).
 pub fn set_tags(db: &mut Db, id: i64, tags: &[String]) -> Result<()> {
     db.set_tags(id, tags).map(|_| ())
@@ -347,4 +368,16 @@ pub fn move_epic(db: &mut Db, id: i64, before: Option<i64>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The id of the epic with this title (case ignored), if there is one.
+pub fn epic_by_title(db: &Db, title: &str) -> Option<i64> {
+    db.list(&Query {
+        kind: Some(EPIC.into()),
+        ..Query::default()
+    })
+    .ok()?
+    .into_iter()
+    .find(|i| i.title.eq_ignore_ascii_case(title))
+    .map(|i| i.id)
 }

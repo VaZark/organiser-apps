@@ -1,7 +1,7 @@
 //! A whole note as a Markdown file: the title as a first-level heading, then the body.
 
 use super::color::Color;
-use super::front_matter::{self, FrontMatter};
+use organiser_vault::front_matter::{self, FrontMatter};
 use super::note::Note;
 use organiser_markdown::export::export;
 use organiser_markdown::parse::parse;

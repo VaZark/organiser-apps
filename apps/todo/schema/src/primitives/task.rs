@@ -88,18 +88,6 @@ impl From<&Item> for Task {
     }
 }
 
-impl Task {
-    /// Whether the task is happening today: it has a start or a due date, and today falls within
-    /// them. A missing start counts as already started and a missing due date as never ending.
-    /// A task with no dates at all is not scheduled, so it is not current, and an overdue task is
-    /// late rather than current.
-    pub fn is_current(&self, today: NaiveDate) -> bool {
-        (self.start.is_some() || self.due.is_some())
-            && self.start.is_none_or(|s| s <= today)
-            && self.due.is_none_or(|d| d >= today)
-    }
-}
-
 /// A group of tasks working towards one goal, with its own dates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Epic {
