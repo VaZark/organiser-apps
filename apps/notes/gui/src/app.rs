@@ -103,6 +103,10 @@ pub enum Message {
     FolderDeleteKeep,
     FolderDeleteAll,
     FolderDeleteCancel,
+    /// The answer to "save the new note first?" before changing the notes folder.
+    VaultDraftSave,
+    VaultDraftDiscard,
+    VaultDraftCancel,
     /// The heart of a card or row: favourite it, or not.
     Fave(i64),
     DFavorite(bool),
@@ -266,6 +270,10 @@ pub struct App {
     pub folder_settings: Option<i64>,
     /// The folder being deleted, waiting for the answer to what becomes of its notes.
     pub confirm_folder_delete: Option<i64>,
+    /// A folder to switch to, waiting for the answer about the unsaved new note.
+    pub pending_vault: Option<std::path::PathBuf>,
+    /// The next flush is skipped: a freshly loaded folder is only read, not written to.
+    skip_flush: bool,
     /// What is typed in the folder's name and colour, while it is not a valid one yet.
     pub folder_name: Option<String>,
     pub folder_notes: Option<String>,
@@ -364,6 +372,8 @@ impl App {
             dragging_folder: None,
             folder_settings: None,
             confirm_folder_delete: None,
+            pending_vault: None,
+            skip_flush: false,
             folder_name: None,
             folder_notes: None,
             folder_color_text: None,
@@ -458,7 +468,7 @@ impl App {
             None => app.prefs.settings.notes.vault_dir.clone(),
         };
         if let Some(dir) = dir {
-            app.open_vault(dir, &path);
+            app.open_vault(dir, &path, false);
         }
         (app, Task::batch(tasks))
     }
@@ -502,11 +512,15 @@ impl App {
 
     /// Re-read what the page shows from the database.
     /// Keep the notes in `dir` as files: read what is there, write the rest, and say what changed.
-    fn open_vault(&mut self, dir: std::path::PathBuf, db_path: &std::path::Path) {
+    fn open_vault(&mut self, dir: std::path::PathBuf, db_path: &std::path::Path, load: bool) {
         match Vault::open(dir, Some(db_path)) {
             Ok(v) => {
                 self.vault = Some(v);
-                self.vault_sync(false);
+                if load {
+                    self.vault_load();
+                } else {
+                    self.vault_sync(false);
+                }
             }
             Err(e) => {
                 self.vault = None;
@@ -538,8 +552,40 @@ impl App {
         }
     }
 
+    /// Load the folder: read its files into the app and nothing more. Used when a folder is
+    /// chosen; only work in the folder already in use is synced both ways.
+    fn vault_load(&mut self) {
+        let Some(v) = self.vault.clone() else { return };
+        match v.sync(&mut self.db) {
+            Ok(r) => {
+                self.vault_known = v.known(&self.db).unwrap_or_default();
+                self.toast = Some(r.summary());
+                if let Some(w) = r.warnings.first() {
+                    self.toast = Some(w.clone());
+                }
+                self.skip_flush = true;
+                self.refresh_details();
+                self.reload();
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// Change the folder, after the person has said what becomes of a new note not yet saved.
+    fn request_vault(&mut self, dir: std::path::PathBuf) {
+        let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
+        if !same && self.details.as_ref().is_some_and(Details::is_new) {
+            self.pending_vault = Some(dir);
+        } else {
+            self.set_vault(Some(dir));
+        }
+    }
+
     /// After a change: write it to the files.
     fn vault_flush(&mut self) {
+        if std::mem::take(&mut self.skip_flush) {
+            return;
+        }
         let Some(v) = self.vault.clone() else { return };
         match v.flush(&mut self.db, &self.vault_known) {
             Ok(r) => {
@@ -553,6 +599,17 @@ impl App {
     }
 
     fn set_vault(&mut self, dir: Option<std::path::PathBuf>) {
+        // Choosing a folder loads it: whatever the app held before goes, so nothing is carried
+        // over and written into the new one.
+        let same = self.vault.as_ref().is_some_and(|v| {
+            dir.as_ref().is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
+        });
+        if dir.is_some() && !same {
+            if let Err(e) = Vault::forget(&mut self.db) {
+                self.fail(e);
+            }
+            self.vault_known.clear();
+        }
         self.prefs.settings.notes.vault_dir = dir.clone();
         if let Err(e) = self.prefs.save() {
             self.fail(e);
@@ -560,7 +617,7 @@ impl App {
         match dir {
             Some(d) => {
                 let db_path = self.db_path.clone();
-                self.open_vault(d, &db_path);
+                self.open_vault(d, &db_path, !same);
                 if self.vault.is_none() {
                     self.prefs.settings.notes.vault_dir = None;
                     let _ = self.prefs.save();
@@ -768,6 +825,13 @@ impl App {
     // ---- details ---------------------------------------------------------------------------
 
     fn open(&mut self, id: i64) {
+        // Its file gets its front matter the first time it is opened.
+        if let Some(v) = self.vault.clone()
+            && let Err(e) = v.stamp(&mut self.db, id)
+        {
+            self.toast = Some(e.to_string());
+        }
+        self.vault_known = self.vault.as_ref().and_then(|v| v.known(&self.db).ok()).unwrap_or_default();
         let note = match self.db.get(id) {
             Ok(i) => Note::from(&i),
             Err(e) => return self.fail(e),
@@ -1258,11 +1322,27 @@ impl App {
             }
             Message::VaultChosen(dir) => {
                 if let Some(d) = dir {
-                    self.set_vault(Some(d));
+                    self.request_vault(d);
                 }
             }
             Message::UseDefaultVault => {
-                self.set_vault(Some(paths::documents_folder(&notes_schema::META)));
+                self.request_vault(paths::documents_folder(&notes_schema::META));
+            }
+            Message::VaultDraftCancel => self.pending_vault = None,
+            Message::VaultDraftDiscard => {
+                self.details = None;
+                if let Some(d) = self.pending_vault.take() {
+                    self.set_vault(Some(d));
+                }
+            }
+            Message::VaultDraftSave => {
+                let _ = self.update(Message::DCreate);
+                // Created: the draft is a note now. If it could not be, the page shows why.
+                if self.details.as_ref().is_some_and(|d| !d.is_new())
+                    && let Some(d) = self.pending_vault.take()
+                {
+                    self.set_vault(Some(d));
+                }
             }
             Message::VaultOff => {
                 self.set_vault(None);

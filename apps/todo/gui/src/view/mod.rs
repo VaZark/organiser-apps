@@ -55,6 +55,9 @@ impl App {
             let window = self.shell(size.width);
             let page = responsive_dialog::present(window, modal, narrow, size, radius, false);
             // The question about an epic's tasks is a small alert over everything.
+            if self.pending_vault.is_some() {
+                return present_dialog(page, self.draft_dialog(), Some(Message::VaultDraftCancel), radius);
+            }
             present_dialog(page, self.epic_delete_dialog(), Some(Message::EpicDeleteCancel), radius)
         })
         .into();
@@ -73,6 +76,18 @@ impl App {
             ),
             None => toast_stack(framed, Vec::new()),
         }
+    }
+
+    /// "Save the new task?" before the tasks folder is changed.
+    fn draft_dialog(&self) -> Option<Element<'_, Message>> {
+        Some(
+            AlertDialog::new("Save the new task?")
+                .body("The task being written is not saved yet. Save it before changing the folder, or discard it.")
+                .response("Cancel", ResponseAppearance::Default, Message::VaultDraftCancel)
+                .response("Discard", ResponseAppearance::Destructive, Message::VaultDraftDiscard)
+                .response("Save", ResponseAppearance::Suggested, Message::VaultDraftSave)
+                .into(),
+        )
     }
 
     /// "Delete this epic?": what becomes of its tasks. `None` unless one is waiting for the answer.
@@ -207,7 +222,7 @@ impl App {
         if self.vault.is_some() {
             menu = menu.section([
                 MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
-                MenuItem::action("Sync now", Message::SyncVault).icon(Icon::Sync),
+                MenuItem::action("Load from folder", Message::SyncVault).icon(Icon::Sync),
             ]);
         }
         menu_button(

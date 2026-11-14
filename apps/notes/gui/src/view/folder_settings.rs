@@ -88,6 +88,18 @@ impl App {
         .into()
     }
 
+    /// "Save the new note?" before the notes folder is changed.
+    pub(super) fn draft_dialog(&self) -> Option<Element<'_, Message>> {
+        Some(
+            AlertDialog::new("Save the new note?")
+                .body("The note being written is not saved yet. Save it before changing the folder, or discard it.")
+                .response("Cancel", ResponseAppearance::Default, Message::VaultDraftCancel)
+                .response("Discard", ResponseAppearance::Destructive, Message::VaultDraftDiscard)
+                .response("Save", ResponseAppearance::Suggested, Message::VaultDraftSave)
+                .into(),
+        )
+    }
+
     /// "Delete this section?": what becomes of its notes. `None` unless one is waiting for the answer.
     pub(super) fn folder_delete_dialog(&self) -> Option<Element<'_, Message>> {
         let id = self.confirm_folder_delete?;

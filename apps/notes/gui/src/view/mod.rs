@@ -103,6 +103,9 @@ impl App {
             };
             let page = responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false);
             // The question about a folder's notes is a small alert over everything.
+            if self.pending_vault.is_some() {
+                return present_dialog(page, self.draft_dialog(), Some(Message::VaultDraftCancel), radius);
+            }
             present_dialog(page, self.folder_delete_dialog(), Some(Message::FolderDeleteCancel), radius)
         })
         .into();
@@ -193,7 +196,7 @@ impl App {
         if self.vault.is_some() {
             menu = menu.section([
                 MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
-                MenuItem::action("Sync now", Message::SyncVault).icon(Icon::Sync),
+                MenuItem::action("Load from folder", Message::SyncVault).icon(Icon::Sync),
             ]);
         }
         menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);

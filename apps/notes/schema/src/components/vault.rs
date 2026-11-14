@@ -162,6 +162,36 @@ impl Vault {
         field(&item, "file").map(|f| self.dir.join(f))
     }
 
+    /// Let go of everything that came from the old folder, for when the vault is changed: every
+    /// note and folder is removed, so none is written out again as a directory in the new place.
+    /// The old folder is not touched; the next sync reads the new one.
+    pub fn forget(db: &mut Db) -> Result<()> {
+        for kind in [NOTE, FOLDER, crate::SECTION] {
+            for i in db.list(&Query { kind: Some(kind.into()), ..Query::default() })? {
+                match db.delete(i.id) {
+                    // A note or folder goes with its parent, which may already have taken it.
+                    Ok(_) | Err(Error::NotFound(_)) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The note's file gets its front matter now, if it has none yet: called when the note is
+    /// first opened, not when its file is found.
+    pub fn stamp(&self, db: &mut Db, id: i64) -> Result<Report> {
+        let item = db.get(id)?;
+        let Some(file) = field(&item, "file") else { return Ok(Report::default()) };
+        let bare = fs::read_to_string(self.dir.join(file)).is_ok_and(|t| parse_file(&t, "").id.is_none());
+        if !bare {
+            return Ok(Report::default());
+        }
+        db.update(id, ItemPatch::default().field("file_sig", ""))?;
+        let known = self.known(db)?;
+        self.flush(db, &known)
+    }
+
     // ---- reading the files into the notes ---------------------------------------------------
 
     /// Bring the notes up to date with the files.
@@ -345,7 +375,9 @@ impl Vault {
         let item = db.get(id)?;
         let note = Note::from(&item);
         let layout = Layout::load(db)?;
-        let sig = if again || f.note.id != Some(id) {
+        // A file with no id is left as it is until its note is first opened (or changed in the
+        // app); one naming another note's id is rewritten at once.
+        let sig = if again || f.lost.is_some() || f.note.id.is_some_and(|i| i != id) {
             String::new()
         } else {
             self.sig(&layout, &note)
@@ -912,8 +944,8 @@ mod tests {
         let deepnote = Note::from(items.iter().find(|i| i.title == "Deep").unwrap());
         assert_eq!(deepnote.folder_id, Some(too.id));
         let _ = deep; // an empty directory is a folder too
-        // Files that had no id got one when written back.
-        assert!(read(&dir, "Top.md").contains("id: "));
+        // Files that had no id are left alone until opened.
+        assert!(!read(&dir, "Top.md").contains("id: "));
         // Running it again changes nothing.
         assert!(!sync_flush(&mut db, &v).changed());
         assert_eq!(titles(&db).len(), 4);
@@ -1239,6 +1271,28 @@ mod tests {
         fs::write(&db, "").unwrap();
         assert!(Vault::open(&dir, Some(&db)).is_err());
         assert!(Vault::open(&dir, Some(Path::new("/nowhere/else.db"))).is_ok());
+    }
+
+    #[test]
+    fn changing_folders_loads_the_new_one_and_keeps_nothing_of_the_old() {
+        let (mut db, v, dir) = setup();
+        let f = lifecycle::create_folder_in(&mut db, None, "Work", false).unwrap();
+        lifecycle::create(&mut db, &NewNote { title: "Plan".into(), folder: Some(f.id), ..NewNote::default() }).unwrap();
+        sync_flush(&mut db, &v);
+        let other = temp();
+        fs::create_dir_all(other.join("Fresh")).unwrap();
+        fs::write(other.join("Fresh/Idea.md"), "just text\n").unwrap();
+        let v2 = Vault::open(&other, None).unwrap();
+        Vault::forget(&mut db).unwrap();
+        v2.sync(&mut db).unwrap();
+        assert_eq!(titles(&db), ["Idea"]);
+        let dirs: Vec<_> = fs::read_dir(&other).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(dirs, ["Fresh"], "nothing from the old folder was made here");
+        assert_eq!(read(&other, "Fresh/Idea.md"), "just text\n", "found, not touched");
+        let id = db.list(&Query { kind: Some(NOTE.into()), ..Query::default() }).unwrap()[0].id;
+        assert_eq!(v2.stamp(&mut db, id).unwrap().written, 1);
+        assert!(read(&other, "Fresh/Idea.md").starts_with("---\nid: "));
+        assert!(dir.join("Work/Plan.md").exists());
     }
 
     #[test]

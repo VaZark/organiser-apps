@@ -163,6 +163,22 @@ impl Vault {
         field(&item, "file").map(|f| self.dir.join(f))
     }
 
+    /// Let go of everything that came from the old folder, for when the vault is changed: every
+    /// task, epic and section is removed, so none is written out again as a folder in the new
+    /// place. The old folder is not touched; the next sync reads the new one.
+    pub fn forget(db: &mut Db) -> Result<()> {
+        for kind in [TASK, EPIC] {
+            for i in db.list(&Query { kind: Some(kind.into()), ..Query::default() })? {
+                match db.delete(i.id) {
+                    // A subtask or section goes with its parent, which may already have taken it.
+                    Ok(_) | Err(Error::NotFound(_)) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        Ok(())
+    }
+
     // ---- reading the files into the tasks ---------------------------------------------------
 
     /// Bring the tasks up to date with the files.
@@ -349,7 +365,9 @@ impl Vault {
         let task = Task::from(&db.get(id)?);
         let names = Names::load(db)?;
         let layout = Layout::load(db)?;
-        let sig = if again || f.task.id != Some(id) {
+        // A file with no id of its own is left as it is until the task is first opened (or changed
+        // in the app); one naming another task's id is rewritten at once.
+        let sig = if again || f.lost.is_some() || f.task.id.is_some_and(|i| i != id) {
             String::new()
         } else {
             sig(&names, &layout, &task)
@@ -705,6 +723,20 @@ impl Vault {
             }
         }
         Ok(())
+    }
+
+    /// The task's file gets its front matter now, if it has none yet: called when the task is
+    /// first opened, not when its file is found.
+    pub fn stamp(&self, db: &mut Db, id: i64) -> Result<Report> {
+        let item = db.get(id)?;
+        let Some(file) = field(&item, "file") else { return Ok(Report::default()) };
+        let bare = fs::read_to_string(self.dir.join(file)).is_ok_and(|t| parse_file(&t, "").id.is_none());
+        if !bare {
+            return Ok(Report::default());
+        }
+        db.update(id, ItemPatch::default().field("file_sig", ""))?;
+        let known = self.known(db)?;
+        self.flush(db, &known)
     }
 
     // ---- writing the tasks out ---------------------------------------------------------------
@@ -1223,8 +1255,8 @@ mod tests {
             assert_eq!(c.epic, Some(work), "{child} is in the epic too");
         }
         assert_eq!(task_named(&db, "Top").epic, None);
-        // Files that had no id got one when written back, and a second look changes nothing.
-        assert!(read(&dir, "Top.md").contains("id: "));
+        // Files that had no id are left alone until opened, and a second look changes nothing.
+        assert!(!read(&dir, "Top.md").contains("id: "));
         assert!(!sync_flush(&mut db, &v).changed());
         assert_eq!(titles(&db).len(), 6);
     }
@@ -1460,6 +1492,35 @@ mod tests {
         assert!(r.warnings.iter().any(|w| w.contains("Dead.md")), "{r:?}");
         assert!(titles(&db).is_empty());
         let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn changing_folders_leaves_the_old_tasks_epics_and_sections_behind() {
+        let (mut db, v, dir) = setup();
+        let e = lifecycle::create_epic(&mut db, "Trip").unwrap();
+        lifecycle::create_section(&mut db, e.id, "Booking").unwrap();
+        lifecycle::create(&mut db, &NewTask { epic: Some(e.id), ..NewTask::new("Flights") }).unwrap();
+        sync_flush(&mut db, &v);
+        let other = temp();
+        let v2 = Vault::open(&other, None).unwrap();
+        Vault::forget(&mut db).unwrap();
+        sync_flush(&mut db, &v2);
+        assert!(titles(&db).is_empty());
+        assert!(db.list(&Query { kind: Some(EPIC.into()), ..Query::default() }).unwrap().is_empty());
+        assert!(db.list(&Query { kind: Some(SECTION.into()), ..Query::default() }).unwrap().is_empty());
+        assert_eq!(fs::read_dir(&other).unwrap().count(), 0, "no folders made in the new place");
+        assert!(dir.join("Trip/Flights.md").exists(), "the old folder is untouched");
+    }
+
+    #[test]
+    fn a_file_gets_its_front_matter_when_first_opened_not_when_found() {
+        let (mut db, v, dir) = setup();
+        fs::write(dir.join("Plain.md"), "just text\n").unwrap();
+        sync_flush(&mut db, &v);
+        assert_eq!(read(&dir, "Plain.md"), "just text\n", "found, not touched");
+        let id = task_named(&db, "Plain").id;
+        assert_eq!(v.stamp(&mut db, id).unwrap().written, 1);
+        assert!(read(&dir, "Plain.md").starts_with("---\nid: "));
     }
 
     #[test]

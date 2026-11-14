@@ -23,7 +23,7 @@ impl App {
         match &self.vault {
             Some(_) => {
                 buttons = buttons
-                    .push(button(Icon::Sync, "Sync now", Message::SyncVault))
+                    .push(button(Icon::Sync, "Load from folder", Message::SyncVault))
                     .push(button(Icon::FileShow, "Show in the file manager", Message::OpenVault))
                     .push(button(Icon::WindowClose, "Keep the tasks in the database alone", Message::VaultOff));
             }

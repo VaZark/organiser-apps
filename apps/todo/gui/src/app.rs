@@ -86,6 +86,10 @@ pub enum Message {
     EpicDeleteKeep,
     EpicDeleteAll,
     EpicDeleteCancel,
+    /// The answer to "save the new task first?" before changing the tasks folder.
+    VaultDraftSave,
+    VaultDraftDiscard,
+    VaultDraftCancel,
     OpenFilter,
     CloseFilter,
     ClearFilters,
@@ -376,6 +380,10 @@ pub struct App {
     /// An epic with tasks that is about to be deleted, waiting for the answer to what becomes of
     /// its tasks.
     pub confirm_epic_delete: Option<i64>,
+    /// A folder to switch to, waiting for the answer about the unsaved new task.
+    pub pending_vault: Option<std::path::PathBuf>,
+    /// The next flush is skipped: a freshly loaded folder is only read, not written to.
+    pub skip_flush: bool,
     /// What the dragged task cannot be dropped on: itself and everything below it.
     pub drag_blocked: std::collections::HashSet<i64>,
     pub epic_sections: HashMap<i64, Vec<SectionSummary>>,
@@ -461,6 +469,8 @@ impl App {
             dragging_section: None,
             dragging_epic: None,
             confirm_epic_delete: None,
+            pending_vault: None,
+            skip_flush: false,
             drag_blocked: Default::default(),
             epic_sections: HashMap::new(),
             folded_sections: Default::default(),
@@ -576,7 +586,7 @@ impl App {
             None => app.prefs.settings.todo.vault_dir.clone(),
         };
         if let Some(dir) = dir {
-            app.open_vault(dir, &path);
+            app.open_vault(dir, &path, false);
         }
         (app, Task::batch(tasks))
     }
@@ -621,11 +631,15 @@ impl App {
     }
 
     /// Keep the tasks in `dir` as files: read what is there, write the rest, and say what changed.
-    fn open_vault(&mut self, dir: std::path::PathBuf, db_path: &std::path::Path) {
+    fn open_vault(&mut self, dir: std::path::PathBuf, db_path: &std::path::Path, load: bool) {
         match Vault::open(dir, Some(db_path)) {
             Ok(v) => {
                 self.vault = Some(v);
-                self.vault_sync(false);
+                if load {
+                    self.vault_load();
+                } else {
+                    self.vault_sync(false);
+                }
             }
             Err(e) => {
                 self.vault = None;
@@ -657,8 +671,30 @@ impl App {
         }
     }
 
+    /// Load the folder: read its files into the app and nothing more. Used when a folder is
+    /// chosen; only work in the folder already in use is synced both ways.
+    fn vault_load(&mut self) {
+        let Some(v) = self.vault.clone() else { return };
+        match v.sync(&mut self.db) {
+            Ok(r) => {
+                self.vault_known = v.known(&self.db).unwrap_or_default();
+                self.toast = Some(r.summary_with("archived"));
+                if let Some(w) = r.warnings.first() {
+                    self.toast = Some(w.clone());
+                }
+                self.skip_flush = true;
+                self.refresh_details();
+                self.reload();
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
     /// After a change: write it to the files.
     fn vault_flush(&mut self) {
+        if std::mem::take(&mut self.skip_flush) {
+            return;
+        }
         let Some(v) = self.vault.clone() else { return };
         match v.flush(&mut self.db, &self.vault_known) {
             Ok(r) => {
@@ -671,7 +707,28 @@ impl App {
         }
     }
 
+    /// Change the folder, after the person has said what becomes of a new task not yet saved.
+    fn request_vault(&mut self, dir: std::path::PathBuf) {
+        let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
+        if !same && self.details.as_ref().is_some_and(Details::is_new) {
+            self.pending_vault = Some(dir);
+        } else {
+            self.set_vault(Some(dir));
+        }
+    }
+
     fn set_vault(&mut self, dir: Option<std::path::PathBuf>) {
+        // Choosing a folder loads it: whatever the app held before (from the old folder or the
+        // database alone) goes, so nothing is carried over and written into the new one.
+        let same = self.vault.as_ref().is_some_and(|v| {
+            dir.as_ref().is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
+        });
+        if dir.is_some() && !same {
+            if let Err(e) = Vault::forget(&mut self.db) {
+                self.fail(e);
+            }
+            self.vault_known.clear();
+        }
         self.prefs.settings.todo.vault_dir = dir.clone();
         if let Err(e) = self.prefs.save() {
             self.fail(e);
@@ -679,7 +736,7 @@ impl App {
         match dir {
             Some(d) => {
                 let db_path = self.db_path.clone();
-                self.open_vault(d, &db_path);
+                self.open_vault(d, &db_path, !same);
                 if self.vault.is_none() {
                     self.prefs.settings.todo.vault_dir = None;
                     let _ = self.prefs.save();
@@ -890,6 +947,13 @@ impl App {
 
     /// Show a task or an epic in the details pane.
     fn open(&mut self, id: i64) {
+        // Its file gets its front matter the first time it is opened.
+        if let Some(v) = self.vault.clone()
+            && let Err(e) = v.stamp(&mut self.db, id)
+        {
+            self.toast = Some(e.to_string());
+        }
+        self.vault_known = self.vault.as_ref().and_then(|v| v.known(&self.db).ok()).unwrap_or_default();
         let item = match self.db.get(id) {
             Ok(i) => i,
             Err(e) => return self.fail(e),
@@ -1374,11 +1438,27 @@ impl App {
             }
             Message::VaultChosen(dir) => {
                 if let Some(d) = dir {
-                    self.set_vault(Some(d));
+                    self.request_vault(d);
                 }
             }
             Message::UseDefaultVault => {
-                self.set_vault(Some(paths::documents_folder(&todo_schema::META)));
+                self.request_vault(paths::documents_folder(&todo_schema::META));
+            }
+            Message::VaultDraftCancel => self.pending_vault = None,
+            Message::VaultDraftDiscard => {
+                self.details = None;
+                if let Some(d) = self.pending_vault.take() {
+                    self.set_vault(Some(d));
+                }
+            }
+            Message::VaultDraftSave => {
+                let _ = self.update(Message::DCreate);
+                // Created: the draft is a task now. If it could not be, the page shows why.
+                if self.details.as_ref().is_some_and(|d| !d.is_new())
+                    && let Some(d) = self.pending_vault.take()
+                {
+                    self.set_vault(Some(d));
+                }
             }
             Message::VaultOff => {
                 self.set_vault(None);

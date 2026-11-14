@@ -652,9 +652,11 @@ fn vault_command(app: &Notes, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
             let dir = std::path::absolute(&dir).unwrap_or(dir);
             let db_path = app.state.borrow().db_path.clone();
             let vault = Vault::open(&dir, db_path.as_deref())?;
-            let known = vault.known(db)?;
-            let mut rep = vault.sync(db)?;
-            rep.add(vault.flush(db, &known)?);
+            // Choosing a folder loads it: what the app held before does not carry over into it.
+            if app.state.borrow().vault.as_ref().is_none_or(|c| c.dir() != vault.dir()) {
+                Vault::forget(db)?;
+            }
+            let rep = vault.sync(db)?; // a load: nothing is written to the folder
             loaded.settings.notes.vault_dir = Some(vault.dir().to_path_buf());
             loaded.settings.save().map_err(Error::Invalid)?;
             Ok(report_out(&format!("notes are kept in {}", vault.dir().display()), &rep))
