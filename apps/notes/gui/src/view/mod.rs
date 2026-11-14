@@ -192,11 +192,10 @@ impl App {
         let mut menu = Menu::new("Menu")
             .section(shown)
             .section([MenuItem::submenu("Sort by", sort)]);
-        // Files: bring a Markdown file into the vault; read the vault again.
+        // Files: bring a Markdown file into the vault.
         if self.vault.is_some() {
             menu = menu.section([
                 MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
-                MenuItem::action("Load from folder", Message::SyncVault).icon(Icon::Sync),
             ]);
         }
         menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);

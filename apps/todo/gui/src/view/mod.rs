@@ -218,11 +218,10 @@ impl App {
                 MenuItem::submenu("Sort by", sort),
             ])
             .section(shows);
-        // Files: bring a Markdown file into the vault; read the vault again.
+        // Files: bring a Markdown file into the vault.
         if self.vault.is_some() {
             menu = menu.section([
                 MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
-                MenuItem::action("Load from folder", Message::SyncVault).icon(Icon::Sync),
             ]);
         }
         menu_button(
