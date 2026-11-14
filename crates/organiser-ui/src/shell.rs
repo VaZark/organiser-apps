@@ -53,13 +53,16 @@ pub fn wants_new(meta: &AppMeta) -> bool {
         .any(|a| a == "--new" || a.starts_with(&prefix))
 }
 
-/// The toolkit theme for the desktop scheme and the user's override.
+/// The toolkit theme for the desktop scheme and the user's override. The app supplies no look of
+/// its own: it inherits the installed theme file and the desktop config.
 pub fn theme(dark: bool) -> iad::Theme {
-    if dark {
-        iad::Theme::dark()
+    let mut desktop = (*iad::config::current()).clone();
+    desktop.color_scheme = iad::config::Pick::Fixed(if dark {
+        iad::Scheme::Dark
     } else {
-        iad::Theme::light()
-    }
+        iad::Scheme::Light
+    });
+    iad::Theme::from_config(&desktop)
 }
 
 /// Open a link from a note in the desktop's default handler. Only web and mail links are opened
