@@ -103,6 +103,12 @@ impl App {
             };
             let page = responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false);
             // The question about a folder's notes is a small alert over everything.
+            if self.import_choose {
+                return present_dialog(page, self.import_choose_dialog(), Some(Message::ImportCancel), radius);
+            }
+            if !self.pending_import.is_empty() {
+                return present_dialog(page, self.import_dialog(), Some(Message::ImportCancel), radius);
+            }
             if self.pending_vault.is_some() {
                 return present_dialog(page, self.draft_dialog(), Some(Message::VaultDraftCancel), radius);
             }
@@ -192,10 +198,10 @@ impl App {
         let mut menu = Menu::new("Menu")
             .section(shown)
             .section([MenuItem::submenu("Sort by", sort)]);
-        // Files: bring a Markdown file into the vault.
+        // Files: bring Markdown files into the vault.
         if self.vault.is_some() {
             menu = menu.section([
-                MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
+                MenuItem::action("Import…", Message::AddFiles).icon(Icon::FileAdd),
             ]);
         }
         menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);

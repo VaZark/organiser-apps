@@ -4,7 +4,6 @@
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use std::collections::BTreeMap;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use notes_schema::color::Color;
@@ -35,7 +34,7 @@ struct Notes {
 struct State {
     db_path: Option<std::path::PathBuf>,
     vault: Option<Vault>,
-    known: BTreeMap<i64, String>,
+    known: notes_schema::vault::Known,
 }
 
 fn id() -> Arg {

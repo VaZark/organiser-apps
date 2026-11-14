@@ -88,6 +88,35 @@ impl App {
         .into()
     }
 
+    /// "Import what?": files picked one by one, or every Markdown file in a folder.
+    pub(super) fn import_choose_dialog(&self) -> Option<Element<'_, Message>> {
+        Some(
+            AlertDialog::new("Import Markdown files")
+                .body("Pick some files, or a folder to bring in every Markdown file in it, and the folders in it.")
+                .response("Cancel", ResponseAppearance::Default, Message::ImportCancel)
+                .response("A folder", ResponseAppearance::Default, Message::ImportPickFolder)
+                .response("Files", ResponseAppearance::Suggested, Message::ImportPickFiles)
+                .into(),
+        )
+    }
+
+    /// "Copy or link?" for the files or folder picked to import.
+    pub(super) fn import_dialog(&self) -> Option<Element<'_, Message>> {
+        let n = self.pending_import.len();
+        let title = match self.pending_import.as_slice() {
+            [d] if d.is_dir() => format!("Import the files in “{}”?", d.file_name().and_then(|n| n.to_str()).unwrap_or("folder")),
+            _ => format!("Import {n} file{}?", if n == 1 { "" } else { "s" }),
+        };
+        Some(
+            AlertDialog::new(title)
+                .body("Copy them into the notes folder, leaving the originals alone, or link to them so there is only one file, where it is.")
+                .response("Cancel", ResponseAppearance::Default, Message::ImportCancel)
+                .response("Link", ResponseAppearance::Default, Message::ImportLink)
+                .response("Copy", ResponseAppearance::Suggested, Message::ImportCopy)
+                .into(),
+        )
+    }
+
     /// "Save the new note?" before the notes folder is changed.
     pub(super) fn draft_dialog(&self) -> Option<Element<'_, Message>> {
         Some(

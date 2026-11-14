@@ -6,6 +6,11 @@
 //! [`Report`] of a sync). What a directory or a file *means* is each app's own.
 
 pub mod front_matter;
+mod shared;
+pub use shared::{
+    FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, forget, known_of, mark_unstamped,
+    remove_deleted, settle_claims, without_id,
+};
 
 use std::collections::HashSet;
 use std::fs;
@@ -271,3 +276,65 @@ pub fn write_toml(path: &Path, pairs: &[(&str, String)]) -> Result<()> {
     write_atomic(path, &text)
 }
 
+/// What an app knows of a task or note's file, to tell later which file a deleted one had.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KnownFile {
+    /// The file, relative to the vault.
+    pub rel: String,
+    /// The id its front matter carries (a UUID version 7), when it has one.
+    pub uid: Option<String>,
+}
+
+/// The file each item has, by item id.
+pub type Known = std::collections::BTreeMap<i64, KnownFile>;
+
+/// A new UUID version 7: the time in milliseconds, then random bits, so ids sort by when they
+/// were made. Randomness comes from the OS-seeded hasher of the standard library.
+pub fn uuid7() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let n = COUNT.fetch_add(1, Ordering::Relaxed);
+    let mut bits = [0u64; 2];
+    for (i, b) in bits.iter_mut().enumerate() {
+        let mut h = RandomState::new().build_hasher();
+        h.write_u64(ms ^ n.rotate_left(17) ^ i as u64);
+        h.write_u32(std::process::id());
+        *b = h.finish();
+    }
+    let hi = (ms << 16) | 0x7000 | (bits[0] & 0x0fff);
+    let lo = (bits[1] & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000;
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        hi >> 32,
+        (hi >> 16) & 0xffff,
+        hi & 0xffff,
+        lo >> 48,
+        lo & 0xffff_ffff_ffff
+    )
+}
+
+/// Whether `s` is written as a UUID (8-4-4-4-12 hex digits).
+pub fn is_uuid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && [8, 4, 4, 4, 12].iter().zip(&parts).all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+#[cfg(test)]
+mod uuid_tests {
+    use super::*;
+
+    #[test]
+    fn ids_are_version_7_uuids_that_differ() {
+        let (a, b) = (uuid7(), uuid7());
+        assert!(is_uuid(&a) && a != b, "{a} {b}");
+        assert_eq!(a.as_bytes()[14], b'7');
+        assert!(matches!(a.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
+        assert!(!is_uuid("12"));
+    }
+}

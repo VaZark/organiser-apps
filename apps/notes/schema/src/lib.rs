@@ -91,6 +91,8 @@ pub static SCHEMA: Schema = Schema {
             // The vault (see `components::vault`): the note's file, relative to the vault, a hash of
             // that file as last read or written, and of the file this note would be written as then.
             Field::new("file", FieldType::Text).internal(),
+            // The id its file carries in its front matter (a UUID version 7).
+            Field::new("uid", FieldType::Text).internal(),
             Field::new("file_hash", FieldType::Text).internal(),
             Field::new("file_sig", FieldType::Text).internal(),
             // Unix seconds when moved to the trash; absent means not trashed.

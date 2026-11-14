@@ -1,7 +1,7 @@
 //! State, messages and update. Every change goes through `todo-schema` and the engine; the view
 //! never touches the database.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use iced::widget::text_editor;
@@ -315,7 +315,7 @@ pub struct App {
     pub vault: Option<Vault>,
     /// The file each task had after the last flush: how a task deleted for good is known to have
     /// had one.
-    pub vault_known: BTreeMap<i64, String>,
+    pub vault_known: todo_schema::vault::Known,
     pub db_path: std::path::PathBuf,
     /// Tasks must have at least one of these tags (or a tag below one of them).
     /// The picked tags: groups that are alternatives, every tag of one needed.
@@ -433,7 +433,7 @@ impl App {
             no_epic: false,
             unassigned: (0, 0),
             vault: None,
-            vault_known: BTreeMap::new(),
+            vault_known: Default::default(),
             db_path: path.clone(),
             tag_groups: TagGroups::new(),
             prefs,
@@ -1471,7 +1471,7 @@ impl App {
             }
             Message::ShowFile => {
                 if let (Some(v), Some(d)) = (&self.vault, &self.details)
-                    && let Some(rel) = self.vault_known.get(&d.id())
+                    && let Some(rel) = self.vault_known.get(&d.id()).map(|k| &k.rel)
                 {
                     let file = v.dir().join(rel);
                     reveal(file.parent().unwrap_or(v.dir()));
@@ -1655,6 +1655,7 @@ impl App {
                 self.details = Some(Details {
                     subject: Subject::Task(TodoTask {
                         id: 0,
+                        uid: None,
                         parent_id: None,
                         // Under the epic being looked at, as a task added there would be.
                         epic: self.epic_filter,

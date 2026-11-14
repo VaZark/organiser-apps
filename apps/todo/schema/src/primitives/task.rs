@@ -27,6 +27,8 @@ fn status(item: &Item) -> Option<i64> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: i64,
+    /// The id its Markdown file carries (a UUID version 7), once it has one.
+    pub uid: Option<String>,
     pub parent_id: Option<i64>,
     /// The epic this task belongs to.
     pub epic: Option<i64>,
@@ -55,6 +57,7 @@ impl From<&Item> for Task {
     fn from(i: &Item) -> Self {
         Self {
             id: i.id,
+            uid: i.fields.get("uid").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from),
             parent_id: i.parent_id,
             epic: i.fields.get("epic").and_then(Value::as_i64),
             section: i.fields.get("section").and_then(Value::as_i64),

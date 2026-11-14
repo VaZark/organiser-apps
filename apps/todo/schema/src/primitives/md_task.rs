@@ -5,14 +5,25 @@
 use chrono::NaiveDate;
 use organiser_vault::front_matter::{self, FrontMatter};
 
+use organiser_vault::is_uuid;
+
 use super::priority::Priority;
 use super::task::Task;
+
+/// This app's name: every key of its own in the front matter is `todo-<key>` (`todo-id`, ...), so
+/// one file can carry the keys of several apps, and keys that are not this app's are left alone.
+pub const APP: &str = "todo";
+
+/// The front matter key for one of this app's.
+fn k(key: &str) -> String {
+    format!("{APP}-{key}")
+}
 
 /// What a vault file says about its task (see [`parse_file`]).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FileTask {
-    /// The task it is, when the file says (an `id:` in its front matter).
-    pub id: Option<i64>,
+    /// The task it is, when the file says (an `id:` UUID in its front matter).
+    pub id: Option<String>,
     pub title: String,
     /// The task's notes.
     pub notes: String,
@@ -52,16 +63,16 @@ pub fn parse_file(text: &str, fallback: &str) -> FileTask {
         ..FileTask::default()
     };
     if let Some(fm) = &front {
-        t.id = fm.get_i64("id");
-        t.tags = fm.list("tags");
-        t.pinned = fm.get_bool("pinned").unwrap_or(false);
-        t.priority = fm.get("priority").and_then(|p| Priority::parse(&p.to_lowercase()));
-        t.start = fm.get("start").and_then(|d| d.parse().ok());
-        t.due = fm.get("due").and_then(|d| d.parse().ok());
-        t.status = fm.get("status");
-        t.section = fm.get("section");
-        t.archived = fm.get_bool("archived").unwrap_or(false);
-        t.created = fm.get("created").and_then(|c| front_matter::parse_iso(&c));
+        t.id = fm.get(&k("id")).filter(|i| is_uuid(i));
+        t.tags = fm.list(&k("tags"));
+        t.pinned = fm.get_bool(&k("pinned")).unwrap_or(false);
+        t.priority = fm.get(&k("priority")).and_then(|p| Priority::parse(&p.to_lowercase()));
+        t.start = fm.get(&k("start")).and_then(|d| d.parse().ok());
+        t.due = fm.get(&k("due")).and_then(|d| d.parse().ok());
+        t.status = fm.get(&k("status"));
+        t.section = fm.get(&k("section"));
+        t.archived = fm.get_bool(&k("archived")).unwrap_or(false);
+        t.created = fm.get(&k("created")).and_then(|c| front_matter::parse_iso(&c));
     }
     t.front = front;
     t
@@ -77,37 +88,40 @@ pub fn render_file(
     previous: Option<&FrontMatter>,
 ) -> String {
     let mut fm = previous.cloned().unwrap_or_default();
-    fm.set_raw("id", &task.id.to_string());
-    match status {
-        Some(s) => fm.set("status", s),
-        None => fm.remove("status"),
+    match &task.uid {
+        Some(u) => fm.set_raw(&k("id"), u),
+        None => fm.remove(&k("id")),
     }
-    fm.set("priority", task.priority.as_str());
+    match status {
+        Some(s) => fm.set(&k("status"), s),
+        None => fm.remove(&k("status")),
+    }
+    fm.set(&k("priority"), task.priority.as_str());
     match task.start {
-        Some(d) => fm.set_raw("start", &d.to_string()),
-        None => fm.remove("start"),
+        Some(d) => fm.set_raw(&k("start"), &d.to_string()),
+        None => fm.remove(&k("start")),
     }
     match task.due {
-        Some(d) => fm.set_raw("due", &d.to_string()),
-        None => fm.remove("due"),
+        Some(d) => fm.set_raw(&k("due"), &d.to_string()),
+        None => fm.remove(&k("due")),
     }
     if task.tags.is_empty() {
-        fm.remove("tags");
+        fm.remove(&k("tags"));
     } else {
-        fm.set_list("tags", &task.tags);
+        fm.set_list(&k("tags"), &task.tags);
     }
     for (key, on) in [("pinned", task.pinned), ("archived", task.archived)] {
         if on {
-            fm.set_raw(key, "true");
+            fm.set_raw(&k(key), "true");
         } else {
-            fm.remove(key);
+            fm.remove(&k(key));
         }
     }
     match section {
-        Some(s) => fm.set("section", s),
-        None => fm.remove("section"),
+        Some(s) => fm.set(&k("section"), s),
+        None => fm.remove(&k("section")),
     }
-    fm.set_raw("created", &front_matter::iso(task.created));
+    fm.set_raw(&k("created"), &front_matter::iso(task.created));
     let title = task.title.replace('\n', " ");
     let notes = task.notes.trim_matches('\n');
     if notes.is_empty() {
@@ -121,9 +135,12 @@ pub fn render_file(
 mod tests {
     use super::*;
 
+    const UID: &str = "01934f3a-7b2c-7d11-8a55-3c1e9f0a2b44";
+
     fn task(title: &str, notes: &str) -> Task {
         Task {
             id: 7,
+            uid: Some(UID.into()),
             parent_id: None,
             epic: None,
             section: None,
@@ -152,9 +169,9 @@ mod tests {
         t.tags = vec!["travel".into(), "a, b".into()];
         t.pinned = true;
         let text = render_file(&t, Some("In progress"), Some("Booking"), None);
-        assert!(text.starts_with("---\nid: 7\n"));
+        assert!(text.starts_with(&format!("---\ntodo-id: {UID}\n")));
         let back = parse_file(&text, "x");
-        assert_eq!(back.id, Some(7));
+        assert_eq!(back.id.as_deref(), Some(UID));
         assert_eq!(back.title, "Book flights");
         assert_eq!(back.notes, "Compare **prices**.\n\n- [ ] Lisbon");
         assert_eq!(back.status.as_deref(), Some("In progress"));
@@ -179,12 +196,21 @@ mod tests {
 
     #[test]
     fn keys_of_other_tools_are_kept_and_cleared_ones_leave() {
-        let f = parse_file("---\nid: 1\npinned: true\ncssclass: wide\ndue: 2026-01-01\n---\n# T\n", "s");
-        let mut t = task("T", "");
-        t.id = 1;
+        let f = parse_file("---\ntodo-pinned: true\ncssclass: wide\ntodo-due: 2026-01-01\nnotes-color: red\n---\n# T\n", "s");
+        let t = task("T", "");
         let text = render_file(&t, None, None, f.front.as_ref());
-        assert!(text.contains("cssclass: wide"));
-        assert!(!text.contains("pinned") && !text.contains("due:"));
+        assert!(text.contains("cssclass: wide") && text.contains("notes-color: red"));
+        assert!(!text.contains("todo-pinned") && !text.contains("todo-due"));
+    }
+
+    #[test]
+    fn only_keys_with_this_apps_name_are_read() {
+        let f = parse_file(&format!("---\nnotes-id: {UID}\npriority: high\nid: 12\nnotes-priority: high\n---\n# T\n"), "s");
+        assert!(f.id.is_none() && f.priority.is_none());
+        let f = parse_file(&format!("---\nnotes-id: x\ntodo-id: {UID}\ntodo-priority: high\n---\n# T\n"), "s");
+        assert_eq!((f.id.as_deref(), f.priority), (Some(UID), Some(Priority::High)));
+        let f = parse_file("---\ntodo-id: 12\n---\n# T\n", "s");
+        assert!(f.id.is_none(), "a number is not a UUID");
     }
 
     #[test]

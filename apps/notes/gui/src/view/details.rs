@@ -61,7 +61,7 @@ impl App {
         // The note's file, when the notes are kept as files.
         if !draft
             && let Some(v) = &self.vault
-            && let Some(file) = self.vault_known.get(&n.id).map(|rel| v.dir().join(rel))
+            && let Some(file) = self.vault_known.get(&n.id).map(|k| v.dir().join(&k.rel))
         {
             let linked = std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink());
             actions = actions.push(

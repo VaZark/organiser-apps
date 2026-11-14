@@ -1,7 +1,7 @@
 //! State, messages and update. Every change goes through `notes-schema` and the engine; the view
 //! never touches the database.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::widget::text_editor;
@@ -11,7 +11,7 @@ use notes_schema::folder::{Folder, FolderEdit, FolderSummary};
 use notes_schema::lifecycle::{self, NewNote};
 use notes_schema::md_tasks;
 use notes_schema::note::{Edit, Note};
-use notes_schema::vault::Vault;
+use notes_schema::vault::{Import, Vault};
 use notes_schema::views::{self, Filter, Scope, Sort};
 use organiser_core::paths;
 use organiser_engine::{Db, Filters, Tag};
@@ -73,6 +73,14 @@ pub enum Message {
     /// Pick Markdown files to bring into the vault.
     AddFiles,
     FilesPicked(Vec<std::path::PathBuf>),
+    /// The answer to "import what?": pick files, or a folder (all the Markdown files in it).
+    ImportPickFiles,
+    ImportPickFolder,
+    FolderPicked(Option<std::path::PathBuf>),
+    /// The answer to "copy or link?" for the files picked to import.
+    ImportCopy,
+    ImportLink,
+    ImportCancel,
     /// Show the selected note's file in the file manager.
     ShowFile,
     /// Group by folder in the views of every note.
@@ -272,6 +280,10 @@ pub struct App {
     pub confirm_folder_delete: Option<i64>,
     /// A folder to switch to, waiting for the answer about the unsaved new note.
     pub pending_vault: Option<std::path::PathBuf>,
+    /// Files picked to import, waiting for the answer: copy them or link to them.
+    pub pending_import: Vec<std::path::PathBuf>,
+    /// "Import what?" is asking: files, or a folder.
+    pub import_choose: bool,
     /// The next flush is skipped: a freshly loaded folder is only read, not written to.
     skip_flush: bool,
     /// What is typed in the folder's name and colour, while it is not a valid one yet.
@@ -284,7 +296,7 @@ pub struct App {
     pub vault: Option<Vault>,
     /// The file each note had after the last flush: how a note deleted for good is known to have
     /// had one.
-    pub vault_known: BTreeMap<i64, String>,
+    pub vault_known: notes_schema::vault::Known,
     pub toast: Option<String>,
     pub desktop_dark: bool,
     pub mode: Mode,
@@ -373,6 +385,8 @@ impl App {
             folder_settings: None,
             confirm_folder_delete: None,
             pending_vault: None,
+            pending_import: Vec::new(),
+            import_choose: false,
             skip_flush: false,
             folder_name: None,
             folder_notes: None,
@@ -380,7 +394,7 @@ impl App {
             details: None,
             db_path: path.clone(),
             vault: None,
-            vault_known: BTreeMap::new(),
+            vault_known: Default::default(),
             toast: None,
             desktop_dark: false,
             mode,
@@ -549,6 +563,36 @@ impl App {
                 self.reload();
             }
             Err(e) => self.fail(e),
+        }
+    }
+
+    /// Bring the picked files into the vault, in the folder being looked at.
+    fn import_files(&mut self, how: Import) {
+        let files = std::mem::take(&mut self.pending_import);
+        let Some(v) = self.vault.clone() else { return };
+        let folder = match self.scope {
+            Scope::Folder(id) => Some(id),
+            _ => None,
+        };
+        let mut done = 0;
+        for f in &files {
+            let result = if f.is_dir() {
+                v.import_dir(&self.db, f, folder, how)
+            } else {
+                v.import_file(&self.db, f, folder, how).map(|_| 1)
+            };
+            match result {
+                Ok(n) => done += n,
+                Err(e) => self.fail(e),
+            }
+        }
+        self.vault_sync(false);
+        if done > 0 {
+            self.toast = Some(format!(
+                "Imported {done} file{} as {}",
+                if done == 1 { "" } else { "s" },
+                if how == Import::Copy { "copies" } else { "links" }
+            ));
         }
     }
 
@@ -1360,11 +1404,27 @@ impl App {
                     reveal(file.parent().unwrap_or(v.dir()));
                 }
             }
-            Message::AddFiles => {
+            Message::AddFiles => self.import_choose = true,
+            Message::ImportPickFolder => {
+                self.import_choose = false;
                 return Task::perform(
                     async {
                         rfd::AsyncFileDialog::new()
-                            .set_title("Add Markdown files")
+                            .set_title("Import the Markdown files in a folder")
+                            .pick_folder()
+                            .await
+                            .map(|f| f.path().to_path_buf())
+                    },
+                    Message::FolderPicked,
+                );
+            }
+            Message::FolderPicked(dir) => self.pending_import = dir.into_iter().collect(),
+            Message::ImportPickFiles => {
+                self.import_choose = false;
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Import Markdown files")
                             .add_filter("Markdown", &["md", "markdown"])
                             .pick_files()
                             .await
@@ -1374,30 +1434,13 @@ impl App {
                     Message::FilesPicked,
                 );
             }
-            Message::FilesPicked(files) => {
-                if let Some(v) = self.vault.clone() {
-                    let folder = match self.scope {
-                        Scope::Folder(id) => Some(id),
-                        _ => None,
-                    };
-                    let mut linked = 0;
-                    for f in &files {
-                        match v.add_file(&self.db, f, folder) {
-                            Ok((_, l)) => linked += usize::from(l),
-                            Err(e) => self.fail(e),
-                        }
-                    }
-                    self.vault_sync(false);
-                    if !files.is_empty() {
-                        self.toast = Some(format!(
-                            "Added {} file{}{}",
-                            files.len(),
-                            if files.len() == 1 { "" } else { "s" },
-                            if linked > 0 { " (some as links)" } else { "" }
-                        ));
-                    }
-                }
+            Message::FilesPicked(files) => self.pending_import = files,
+            Message::ImportCancel => {
+                self.pending_import.clear();
+                self.import_choose = false;
             }
+            Message::ImportCopy => self.import_files(Import::Copy),
+            Message::ImportLink => self.import_files(Import::Link),
             Message::PrefListView(on) => {
                 self.prefs.settings.notes.list_view = on;
                 if let Err(e) = self.prefs.save() {
@@ -1461,6 +1504,7 @@ impl App {
                 self.details = Some(Details {
                     note: Note {
                         id: 0,
+                        uid: None,
                         // In a folder's page, a new note goes in that folder.
                         // In a folder's page, a new note goes in that folder; elsewhere, in the
                         // default one.

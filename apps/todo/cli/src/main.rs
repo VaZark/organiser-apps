@@ -29,7 +29,7 @@ struct Todo {
 struct State {
     db_path: Option<std::path::PathBuf>,
     vault: Option<Vault>,
-    known: std::collections::BTreeMap<i64, String>,
+    known: todo_schema::vault::Known,
 }
 
 fn id() -> Arg {

@@ -72,6 +72,8 @@ pub static SCHEMA: Schema = Schema {
                 // hash of that file as last read or written, and of what this task would be written
                 // as then.
                 Field::new("file", FieldType::Text).internal(),
+                // The id its file carries in its front matter (a UUID version 7).
+                Field::new("uid", FieldType::Text).internal(),
                 Field::new("file_hash", FieldType::Text).internal(),
                 Field::new("file_sig", FieldType::Text).internal(),
             ],

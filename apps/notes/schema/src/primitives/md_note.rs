@@ -1,6 +1,7 @@
 //! A whole note as a Markdown file: the title as a first-level heading, then the body.
 
 use super::color::Color;
+use organiser_vault::is_uuid;
 use organiser_vault::front_matter::{self, FrontMatter};
 use super::note::Note;
 use organiser_markdown::export::export;
@@ -29,12 +30,21 @@ pub fn from_markdown(md: &str, fallback: &str) -> (String, String) {
     }
 }
 
+/// This app's name: every key of its own in the front matter is `notes-<key>` (`notes-id`, ...), so
+/// one file can carry the keys of several apps, and keys that are not this app's are left alone.
+pub const APP: &str = "notes";
+
+/// The front matter key for one of this app's.
+fn k(key: &str) -> String {
+    format!("{APP}-{key}")
+}
+
 /// What a vault file says about its note (see [`parse_file`]). Folder and section are not here:
 /// they are the directories the file is in. Nor is the desktop sticky: that stays with the app.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FileNote {
-    /// The note it is, when the file says (an `id:` in its front matter).
-    pub id: Option<i64>,
+    /// The note it is, when the file says (an `id:` UUID in its front matter).
+    pub id: Option<String>,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
@@ -63,19 +73,19 @@ pub fn parse_file(text: &str, fallback: &str) -> FileNote {
         ..FileNote::default()
     };
     if let Some(fm) = &front {
-        note.id = fm.get_i64("id");
-        note.tags = fm.list("tags");
-        note.color = fm.get("color").and_then(|c| Color::parse(&c));
-        note.pinned = fm.get_bool("pinned").unwrap_or(false);
-        note.favorite = fm.get_bool("favorite").unwrap_or(false);
+        note.id = fm.get(&k("id")).filter(|i| is_uuid(i));
+        note.tags = fm.list(&k("tags"));
+        note.color = fm.get(&k("color")).and_then(|c| Color::parse(&c));
+        note.pinned = fm.get_bool(&k("pinned")).unwrap_or(false);
+        note.favorite = fm.get_bool(&k("favorite")).unwrap_or(false);
         note.rating = fm
-            .get_i64("rating")
+            .get_i64(&k("rating"))
             .and_then(|r| u8::try_from(r).ok())
             .filter(|r| (1..=5).contains(r));
-        note.archived = fm.get_bool("archived").unwrap_or(false);
-        note.created = fm.get("created").and_then(|c| front_matter::parse_iso(&c));
-        note.trashed = fm.get("trashed").and_then(|c| front_matter::parse_iso(&c));
-        note.from = fm.get("from");
+        note.archived = fm.get_bool(&k("archived")).unwrap_or(false);
+        note.created = fm.get(&k("created")).and_then(|c| front_matter::parse_iso(&c));
+        note.trashed = fm.get(&k("trashed")).and_then(|c| front_matter::parse_iso(&c));
+        note.from = fm.get(&k("from"));
     }
     note.front = front;
     note
@@ -86,15 +96,18 @@ pub fn parse_file(text: &str, fallback: &str) -> FileNote {
 /// trashed note was.
 pub fn render_file(note: &Note, from: Option<&str>, previous: Option<&FrontMatter>) -> String {
     let mut fm = previous.cloned().unwrap_or_default();
-    fm.set_raw("id", &note.id.to_string());
+    match &note.uid {
+        Some(u) => fm.set_raw(&k("id"), u),
+        None => fm.remove(&k("id")),
+    }
     if note.tags.is_empty() {
-        fm.remove("tags");
+        fm.remove(&k("tags"));
     } else {
-        fm.set_list("tags", &note.tags);
+        fm.set_list(&k("tags"), &note.tags);
     }
     match note.color {
-        Some(c) => fm.set("color", &c.hex()),
-        None => fm.remove("color"),
+        Some(c) => fm.set(&k("color"), &c.hex()),
+        None => fm.remove(&k("color")),
     }
     for (key, on) in [
         ("pinned", note.pinned),
@@ -102,27 +115,27 @@ pub fn render_file(note: &Note, from: Option<&str>, previous: Option<&FrontMatte
         ("archived", note.archived),
     ] {
         if on {
-            fm.set_raw(key, "true");
+            fm.set_raw(&k(key), "true");
         } else {
-            fm.remove(key);
+            fm.remove(&k(key));
         }
     }
     match note.rating {
-        Some(r) => fm.set_raw("rating", &r.to_string()),
-        None => fm.remove("rating"),
+        Some(r) => fm.set_raw(&k("rating"), &r.to_string()),
+        None => fm.remove(&k("rating")),
     }
-    fm.set_raw("created", &front_matter::iso(note.created));
+    fm.set_raw(&k("created"), &front_matter::iso(note.created));
     match (note.trashed, from) {
         (Some(t), _) => {
-            fm.set_raw("trashed", &front_matter::iso(t));
+            fm.set_raw(&k("trashed"), &front_matter::iso(t));
             match from {
-                Some(f) => fm.set("from", f),
-                None => fm.remove("from"),
+                Some(f) => fm.set(&k("from"), f),
+                None => fm.remove(&k("from")),
             }
         }
         _ => {
-            fm.remove("trashed");
-            fm.remove("from");
+            fm.remove(&k("trashed"));
+            fm.remove(&k("from"));
         }
     }
     let title = note.title.replace('\n', " ");
@@ -138,9 +151,12 @@ pub fn render_file(note: &Note, from: Option<&str>, previous: Option<&FrontMatte
 mod tests {
     use super::*;
 
+    const UID: &str = "01934f3a-7b2c-7d11-8a55-3c1e9f0a2b44";
+
     fn note(title: &str, body: &str) -> Note {
         Note {
             id: 1,
+            uid: Some(UID.into()),
             folder_id: None,
             title: title.into(),
             body: body.into(),
@@ -188,7 +204,6 @@ mod tests {
     #[test]
     fn a_file_with_front_matter_round_trips() {
         let mut n = note("Trip plan", "Pack **light**.\n\n- [ ] Tickets");
-        n.id = 42;
         n.tags = vec!["travel".into(), "a, b".into()];
         n.color = Some(Color::rgb(0xe8, 0xb6, 0xff));
         n.pinned = true;
@@ -196,9 +211,9 @@ mod tests {
         n.rating = Some(4);
         n.created = 1_759_305_600;
         let text = render_file(&n, None, None);
-        assert!(text.starts_with("---\nid: 42\n"));
+        assert!(text.starts_with(&format!("---\nnotes-id: {UID}\n")));
         let back = parse_file(&text, "x");
-        assert_eq!(back.id, Some(42));
+        assert_eq!(back.id.as_deref(), Some(UID));
         assert_eq!(back.title, "Trip plan");
         assert_eq!(back.body, "Pack **light**.\n\n- [ ] Tickets");
         assert_eq!(back.tags, ["travel", "a, b"]);
@@ -223,12 +238,20 @@ mod tests {
 
     #[test]
     fn keys_of_other_tools_are_kept_and_cleared_flags_leave() {
-        let f = parse_file("---\nid: 1\npinned: true\naliases: [x]\n---\n# T\n", "s");
-        let mut n = note("T", "");
-        n.id = 1;
+        let f = parse_file("---\nnotes-pinned: true\npinned: true\naliases: [x]\ntodo-due: 2026-01-01\n---\n# T\n", "s");
+        let n = note("T", "");
         let text = render_file(&n, None, f.front.as_ref());
-        assert!(text.contains("aliases: [x]"));
-        assert!(!text.contains("pinned"), "the note is no longer pinned");
+        assert!(text.contains("aliases: [x]") && text.contains("todo-due: 2026-01-01"));
+        assert!(!text.contains("notes-pinned"), "the note is no longer pinned");
+        assert!(text.contains("\npinned: true"), "another tool's key is not ours to change");
+    }
+
+    #[test]
+    fn only_keys_with_this_apps_name_are_read() {
+        let f = parse_file(&format!("---\ntodo-id: {UID}\nid: 12\nrating: 3\n---\n# T\n"), "s");
+        assert!(f.id.is_none() && f.rating.is_none());
+        let f = parse_file(&format!("---\nnotes-id: {UID}\nnotes-rating: 3\n---\n# T\n"), "s");
+        assert_eq!((f.id.as_deref(), f.rating), (Some(UID), Some(3)));
     }
 
     #[test]

@@ -25,17 +25,17 @@
 //! task were both changed since they last agreed, the file wins and the task's version is kept
 //! beside it as `<name> (conflict).md`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use organiser_engine::{Db, Error, Item, ItemPatch, Query, Result};
+use organiser_vault::{FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped, remove_deleted, settle_claims, without_id};
 use organiser_vault::{
-    MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, prune, read_dir, unique,
+    MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, prune, read_dir, unique, 
     write_atomic,
 };
-pub use organiser_vault::{Report, sanitise};
-use serde_json::Value;
+pub use organiser_vault::{Known, KnownFile, Report, sanitise};
 
 use super::lifecycle::{self, NewTask};
 use crate::primitives::md_task::{FileTask, parse_file, render_file};
@@ -52,10 +52,6 @@ const INDEX: &str = "index.md";
 #[derive(Debug, Clone)]
 pub struct Vault {
     dir: PathBuf,
-}
-
-fn field<'a>(item: &'a Item, key: &str) -> Option<&'a str> {
-    item.fields.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
 /// The directory of every epic, relative to the vault, from their titles.
@@ -132,7 +128,22 @@ struct Found {
     parent: Option<usize>,
     archived: bool,
     /// The `id` it named, when another file has it: this one is a task of its own.
-    lost: Option<i64>,
+    lost: Option<String>,
+}
+
+impl FoundFile for Found {
+    fn rel(&self) -> &str {
+        &self.rel
+    }
+    fn created(&self) -> Option<i64> {
+        self.task.created
+    }
+    fn uid(&self) -> Option<&str> {
+        self.task.id.as_deref()
+    }
+    fn lose_claim(&mut self) {
+        self.lost = self.task.id.take();
+    }
 }
 
 impl Vault {
@@ -167,16 +178,7 @@ impl Vault {
     /// task, epic and section is removed, so none is written out again as a folder in the new
     /// place. The old folder is not touched; the next sync reads the new one.
     pub fn forget(db: &mut Db) -> Result<()> {
-        for kind in [TASK, EPIC] {
-            for i in db.list(&Query { kind: Some(kind.into()), ..Query::default() })? {
-                match db.delete(i.id) {
-                    // A subtask or section goes with its parent, which may already have taken it.
-                    Ok(_) | Err(Error::NotFound(_)) => {}
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-        Ok(())
+        organiser_vault::forget(db, &[TASK, EPIC])
     }
 
     // ---- reading the files into the tasks ---------------------------------------------------
@@ -205,75 +207,29 @@ impl Vault {
 
         // Two files claiming one task: the one first by path keeps it, then the older; the others
         // are tasks of their own.
-        let mut claims: HashMap<i64, Vec<usize>> = HashMap::new();
-        for (i, f) in found.iter().enumerate() {
-            if let Some(id) = f.task.id {
-                claims.entry(id).or_default().push(i);
-            }
-        }
-        for (_, mut idx) in claims {
-            if idx.len() < 2 {
-                continue;
-            }
-            idx.sort_by(|a, b| {
-                let (fa, fb) = (&found[*a], &found[*b]);
-                fa.rel
-                    .to_lowercase()
-                    .cmp(&fb.rel.to_lowercase())
-                    .then(fa.rel.cmp(&fb.rel))
-                    .then(fa.task.created.unwrap_or(i64::MAX).cmp(&fb.task.created.unwrap_or(i64::MAX)))
-            });
-            for loser in &idx[1..] {
-                found[*loser].lost = found[*loser].task.id.take();
-            }
-        }
+        settle_claims(&mut found);
 
         let names = Names::load(db)?;
         let items = self.task_items(db)?;
-        let by_id: HashMap<i64, &Item> = items.iter().map(|i| (i.id, i)).collect();
-        let by_file: HashMap<String, i64> = items
-            .iter()
-            .filter_map(|i| field(i, "file").map(|f| (f.to_string(), i.id)))
-            .collect();
-        // Tasks not yet tied to a file, to adopt a plain file that is the same task.
-        let mut untied: HashMap<(Option<i64>, String), i64> = HashMap::new();
-        for i in &items {
-            if field(i, "file").is_none() {
-                let t = Task::from(i);
-                untied.insert((t.epic, t.title.clone()), t.id);
-            }
-        }
-
-        let mut seen: HashSet<i64> = HashSet::new();
+        let mut matcher = Matcher::new(&items, |i| {
+            let t = Task::from(i);
+            (t.epic, t.title)
+        });
         let mut resolved: Vec<i64> = Vec::new();
         for f in &found {
             let epic = f.epic_dir.as_ref().and_then(|d| layout.by_dir.get(d)).copied();
             let parent = f.parent.map(|p| resolved[p]);
-            let task_id = f
-                .task
-                .id
-                .filter(|id| by_id.contains_key(id) && !seen.contains(id))
-                .or_else(|| {
-                    let named = f.task.id.or(f.lost);
-                    if named.is_some_and(|id| by_id.contains_key(&id)) {
-                        return None;
-                    }
-                    by_file
-                        .get(&f.rel)
-                        .copied()
-                        .filter(|id| !seen.contains(id))
-                        .or_else(|| untied.remove(&(epic, f.task.title.clone())))
-                });
+            let task_id = matcher.find(f.task.id.as_deref(), &f.rel, (epic, f.task.title.clone()));
             let id = match task_id {
                 Some(id) => {
-                    seen.insert(id);
+                    matcher.see(id);
                     let item = db.get(id)?;
                     self.read_into(db, &item, f, epic, parent, &names, &mut rep)?;
                     id
                 }
                 None => {
                     let id = self.create_from(db, f, epic, parent, &names)?;
-                    seen.insert(id);
+                    matcher.see(id);
                     rep.created += 1;
                     id
                 }
@@ -281,17 +237,13 @@ impl Vault {
             resolved.push(id);
         }
 
-        // A task whose file is gone is archived; if it already was, it goes for good.
+        // A task whose file is gone is archived. One already archived stays: only the person
+        // deleting it in the app removes it, and the next flush writes its file again.
         for i in &items {
-            if seen.contains(&i.id) || field(i, "file").is_none() {
+            if matcher.seen(i.id) || field(i, "file").is_none() {
                 continue;
             }
-            if i.archived {
-                db.delete(i.id).or_else(|e| match e {
-                    Error::NotFound(_) => Ok(0),
-                    e => Err(e),
-                })?;
-            } else {
+            if !i.archived {
                 lifecycle::set_archived(db, i.id, true)?;
                 rep.trashed += 1;
             }
@@ -362,12 +314,14 @@ impl Vault {
     /// Record that the task is this file as it is now. `again` asks for the file to be written
     /// once more by the next flush.
     fn tie(&self, db: &mut Db, id: i64, f: &Found, again: bool) -> Result<()> {
-        let task = Task::from(&db.get(id)?);
+        let mut task = Task::from(&db.get(id)?);
+        // The id the file carries is the task's.
+        task.uid = adopt_uid(db, id, task.uid.take(), f.task.id.as_ref())?;
         let names = Names::load(db)?;
         let layout = Layout::load(db)?;
         // A file with no id of its own is left as it is until the task is first opened (or changed
-        // in the app); one naming another task's id is rewritten at once.
-        let sig = if again || f.lost.is_some() || f.task.id.is_some_and(|i| i != id) {
+        // in the app); one that had another file's id (its claim lost) is rewritten at once.
+        let sig = if again || f.lost.is_some() {
             String::new()
         } else {
             sig(&names, &layout, &task)
@@ -498,26 +452,11 @@ impl Vault {
     /// Save the task's own version next to the file that won, as a task without an id.
     fn keep_conflict(&self, task: &Task, names: &Names, layout: &Layout, rel: &str, rep: &mut Report) -> Result<()> {
         let _ = layout;
-        let path = self.dir.join(rel);
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("task").to_string();
-        // An `index.md` is named for its directory.
-        let (dir, stem) = if stem == "index" {
-            let d = path.parent().unwrap_or(&self.dir);
-            (
-                d.parent().unwrap_or(&self.dir).to_path_buf(),
-                d.file_name().and_then(|n| n.to_str()).unwrap_or("task").to_string(),
-            )
-        } else {
-            (path.parent().unwrap_or(&self.dir).to_path_buf(), stem)
-        };
-        let mut copy = dir.join(format!("{stem} (conflict).md"));
-        let mut n = 1;
-        while copy.exists() {
-            n += 1;
-            copy = dir.join(format!("{stem} (conflict {n}).md"));
-        }
-        let text = render_file(task, names.status(task).as_deref(), names.section(task).as_deref(), None)
-            .replacen(&format!("id: {}\n", task.id), "", 1);
+        let copy = conflict_path(&self.dir, rel, "task");
+        let text = without_id(
+            &render_file(task, names.status(task).as_deref(), names.section(task).as_deref(), None),
+            "todo-id",
+        );
         write_atomic(&copy, &text)?;
         rep.warnings.push(format!(
             "{rel} was changed in the app and outside it; the file was kept, the app's version is {}",
@@ -728,13 +667,9 @@ impl Vault {
     /// The task's file gets its front matter now, if it has none yet: called when the task is
     /// first opened, not when its file is found.
     pub fn stamp(&self, db: &mut Db, id: i64) -> Result<Report> {
-        let item = db.get(id)?;
-        let Some(file) = field(&item, "file") else { return Ok(Report::default()) };
-        let bare = fs::read_to_string(self.dir.join(file)).is_ok_and(|t| parse_file(&t, "").id.is_none());
-        if !bare {
+        if !mark_unstamped(db, &self.dir, id, |t| parse_file(t, "").id)? {
             return Ok(Report::default());
         }
-        db.update(id, ItemPatch::default().field("file_sig", ""))?;
         let known = self.known(db)?;
         self.flush(db, &known)
     }
@@ -743,17 +678,13 @@ impl Vault {
 
     /// The file each task has now, to hand back to [`flush`](Self::flush): that is how a task
     /// deleted for good is known to have had one.
-    pub fn known(&self, db: &Db) -> Result<BTreeMap<i64, String>> {
-        Ok(self
-            .task_items(db)?
-            .iter()
-            .filter_map(|i| field(i, "file").map(|f| (i.id, f.to_string())))
-            .collect())
+    pub fn known(&self, db: &Db) -> Result<Known> {
+        Ok(known_of(&self.task_items(db)?))
     }
 
     /// Bring the files up to date with the tasks. `before` is [`known`](Self::known) from before
     /// the changes: a task in it that is gone loses its file.
-    pub fn flush(&self, db: &mut Db, before: &BTreeMap<i64, String>) -> Result<Report> {
+    pub fn flush(&self, db: &mut Db, before: &Known) -> Result<Report> {
         let mut rep = Report::default();
         let layout = Layout::load(db)?;
         let names = Names::load(db)?;
@@ -761,18 +692,7 @@ impl Vault {
         let live: HashSet<i64> = items.iter().map(|i| i.id).collect();
 
         // A task deleted for good: its file, if it is still that task's.
-        for (id, rel) in before {
-            if live.contains(id) {
-                continue;
-            }
-            let path = self.dir.join(rel);
-            let mine = fs::read_to_string(&path)
-                .map(|t| parse_file(&t, "").id == Some(*id))
-                .unwrap_or(false);
-            if mine && fs::remove_file(&path).is_ok() {
-                rep.removed += 1;
-            }
-        }
+        rep.removed += remove_deleted(&self.dir, before, &live, |t| parse_file(t, "").id);
 
         self.write_epic_meta(db, &layout)?;
 
@@ -972,7 +892,7 @@ impl Vault {
         last: bool,
         rep: &mut Report,
     ) -> Result<bool> {
-        let task = Task::from(item);
+        let mut task = Task::from(item);
         let recorded = field(item, "file").map(String::from);
         let old_path = recorded.as_ref().map(|r| self.dir.join(r));
         let on_disk = old_path.as_ref().and_then(|p| fs::read_to_string(p).ok());
@@ -1013,6 +933,9 @@ impl Vault {
             .to_string_lossy()
             .replace('\\', "/");
         }
+        // A task gets its id the first time it is written.
+        task.uid = Some(ensure_uid(db, task.id, task.uid.take())?);
+        let sig = self::sig(names, layout, &task);
         let previous = on_disk.as_deref().and_then(|t| parse_file(t, "").front);
         let text = render_file(&task, names.status(&task).as_deref(), names.section(&task).as_deref(), previous.as_ref());
         let new_path = self.dir.join(&rel);
@@ -1190,7 +1113,9 @@ mod tests {
         let r = flush(&mut db, &v);
         assert_eq!(r.written, 2, "{r:?}");
         assert!(read(&dir, "Holiday/Pack.md").contains("# Pack\n\ntext\n"));
-        assert!(read(&dir, "Holiday/Pack.md").starts_with(&format!("---\nid: {}\n", a.id)));
+        let uid = Task::from(&db.get(a.id).unwrap()).uid.expect("written with an id");
+        assert!(organiser_vault::is_uuid(&uid));
+        assert!(read(&dir, "Holiday/Pack.md").starts_with(&format!("---\ntodo-id: {uid}\n")));
         assert!(dir.join("Loose.md").exists(), "a task in no epic is a file at the top");
         assert!(read(&dir, "Holiday/.epic.toml").contains("title = \"Holiday\""));
         let known = v.known(&db).unwrap();
@@ -1232,7 +1157,7 @@ mod tests {
         fs::create_dir_all(dir.join("Work/Notes dir")).unwrap();
         fs::write(dir.join("Top.md"), "# Top\n\nhello\n").unwrap();
         fs::write(dir.join("Work/Plain.md"), "no heading here\n").unwrap();
-        fs::write(dir.join("Work/Report/index.md"), "---\nstatus: In progress\npriority: high\ndue: 2026-12-01\ntags: [a, b]\n---\n# Report\n").unwrap();
+        fs::write(dir.join("Work/Report/index.md"), "---\ntodo-status: In progress\ntodo-priority: high\ntodo-due: 2026-12-01\ntodo-tags: [a, b]\n---\n# Report\n").unwrap();
         fs::write(dir.join("Work/Report/Intro.md"), "# Intro\n").unwrap();
         fs::write(dir.join("Work/Report/Draft/index.md"), "# Draft\n").unwrap();
         fs::write(dir.join("Work/Report/Draft/Outline.md"), "# Outline\n").unwrap();
@@ -1256,7 +1181,7 @@ mod tests {
         }
         assert_eq!(task_named(&db, "Top").epic, None);
         // Files that had no id are left alone until opened, and a second look changes nothing.
-        assert!(!read(&dir, "Top.md").contains("id: "));
+        assert!(!read(&dir, "Top.md").contains("todo-id: "));
         assert!(!sync_flush(&mut db, &v).changed());
         assert_eq!(titles(&db).len(), 6);
     }
@@ -1339,7 +1264,7 @@ mod tests {
         assert!(read(&dir, "Trip/Flights.md").contains("section: Booking"));
         assert!(read(&dir, "Trip/.epic.toml").contains("title = \"Booking\""));
         // A new name in a file makes the section.
-        fs::write(dir.join("Trip/Hotel.md"), "---\nsection: Stay\n---\n# Hotel\n").unwrap();
+        fs::write(dir.join("Trip/Hotel.md"), "---\ntodo-section: Stay\n---\n# Hotel\n").unwrap();
         sync_flush(&mut db, &v);
         let hotel = task_named(&db, "Hotel");
         let stay = db.get(hotel.section.unwrap()).unwrap();
@@ -1358,7 +1283,12 @@ mod tests {
         assert_eq!(r.trashed, 1, "{r:?}");
         assert!(Task::from(&db.get(t.id).unwrap()).archived);
         assert!(dir.join(".archive/Trip/Gone.md").exists());
-        assert!(read(&dir, ".archive/Trip/Gone.md").contains("archived: true"));
+        assert!(read(&dir, ".archive/Trip/Gone.md").contains("todo-archived: true"));
+        // Deleting the archived file outside does not clear the archive: it is written again.
+        fs::remove_file(dir.join(".archive/Trip/Gone.md")).unwrap();
+        sync_flush(&mut db, &v);
+        assert!(Task::from(&db.get(t.id).unwrap()).archived);
+        assert!(dir.join(".archive/Trip/Gone.md").exists());
         // Brought back in the app, it is a file of its epic again.
         lifecycle::set_archived(&mut db, t.id, false).unwrap();
         flush(&mut db, &v);
@@ -1520,7 +1450,7 @@ mod tests {
         assert_eq!(read(&dir, "Plain.md"), "just text\n", "found, not touched");
         let id = task_named(&db, "Plain").id;
         assert_eq!(v.stamp(&mut db, id).unwrap().written, 1);
-        assert!(read(&dir, "Plain.md").starts_with("---\nid: "));
+        assert!(read(&dir, "Plain.md").starts_with("---\ntodo-id: "));
     }
 
     #[test]

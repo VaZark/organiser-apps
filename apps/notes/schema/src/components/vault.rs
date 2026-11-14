@@ -16,13 +16,14 @@
 //! * [`Vault::sync`] reads the files: new ones become notes, changed ones update their note, moved
 //!   ones move it, missing ones send it to the trash.
 //! * [`Vault::flush`] writes the notes: every change made in the app reaches its file (a rename
-//!   or a move included), and a note that is deleted for good loses its file.
+//!   or a move included), and a note that is deleted for good in the app loses its file. A file deleted outside only sends
+//!   its note to the trash, and the trash is cleared only by the person, in the app.
 //!
 //! Sync always runs first, so what was changed outside is never overwritten. If a file and its
 //! note were both changed since they last agreed, the file wins and the note's version is kept
 //! beside it as `<name> (conflict).md`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,8 +32,8 @@ use organiser_vault::{
     MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, now, prune, read_dir, read_toml,
     rel_of, unique, write_atomic, write_toml,
 };
-pub use organiser_vault::{Report, sanitise};
-use serde_json::Value;
+use organiser_vault::{FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped, remove_deleted, settle_claims, without_id};
+pub use organiser_vault::{Known, KnownFile, Report, sanitise};
 
 use super::lifecycle::{self, NewNote};
 use crate::primitives::color::Color;
@@ -49,10 +50,6 @@ const FOLDER_META: &str = ".folder.toml";
 #[derive(Debug, Clone)]
 pub struct Vault {
     dir: PathBuf,
-}
-
-fn field<'a>(item: &'a Item, key: &str) -> Option<&'a str> {
-    item.fields.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
 /// The names of the directories, from the folders in the database.
@@ -128,7 +125,22 @@ struct Found {
     dir: PathBuf,
     trashed: bool,
     /// The `id` it named, when another file has it: this one is a note of its own.
-    lost: Option<i64>,
+    lost: Option<String>,
+}
+
+impl FoundFile for Found {
+    fn rel(&self) -> &str {
+        &self.rel
+    }
+    fn created(&self) -> Option<i64> {
+        self.note.created
+    }
+    fn uid(&self) -> Option<&str> {
+        self.note.id.as_deref()
+    }
+    fn lose_claim(&mut self) {
+        self.lost = self.note.id.take();
+    }
 }
 
 /// The directories found, relative to the vault, parents before the directories in them.
@@ -166,28 +178,15 @@ impl Vault {
     /// note and folder is removed, so none is written out again as a directory in the new place.
     /// The old folder is not touched; the next sync reads the new one.
     pub fn forget(db: &mut Db) -> Result<()> {
-        for kind in [NOTE, FOLDER, crate::SECTION] {
-            for i in db.list(&Query { kind: Some(kind.into()), ..Query::default() })? {
-                match db.delete(i.id) {
-                    // A note or folder goes with its parent, which may already have taken it.
-                    Ok(_) | Err(Error::NotFound(_)) => {}
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-        Ok(())
+        organiser_vault::forget(db, &[NOTE, FOLDER, crate::SECTION])
     }
 
     /// The note's file gets its front matter now, if it has none yet: called when the note is
     /// first opened, not when its file is found.
     pub fn stamp(&self, db: &mut Db, id: i64) -> Result<Report> {
-        let item = db.get(id)?;
-        let Some(file) = field(&item, "file") else { return Ok(Report::default()) };
-        let bare = fs::read_to_string(self.dir.join(file)).is_ok_and(|t| parse_file(&t, "").id.is_none());
-        if !bare {
+        if !mark_unstamped(db, &self.dir, id, |t| parse_file(t, "").id)? {
             return Ok(Report::default());
         }
-        db.update(id, ItemPatch::default().field("file_sig", ""))?;
         let known = self.known(db)?;
         self.flush(db, &known)
     }
@@ -227,89 +226,38 @@ impl Vault {
 
         // Two files claiming one note: the one that comes first by path keeps it, then the older
         // (by its `created`); the others are notes of their own.
-        let mut claims: HashMap<i64, Vec<usize>> = HashMap::new();
-        for (i, f) in found.iter().enumerate() {
-            if let Some(id) = f.note.id {
-                claims.entry(id).or_default().push(i);
-            }
-        }
-        for (_, mut idx) in claims {
-            if idx.len() < 2 {
-                continue;
-            }
-            idx.sort_by(|a, b| {
-                let (fa, fb) = (&found[*a], &found[*b]);
-                fa.rel
-                    .to_lowercase()
-                    .cmp(&fb.rel.to_lowercase())
-                    .then(fa.rel.cmp(&fb.rel))
-                    .then(fa.note.created.unwrap_or(i64::MAX).cmp(&fb.note.created.unwrap_or(i64::MAX)))
-            });
-            for loser in &idx[1..] {
-                found[*loser].lost = found[*loser].note.id.take();
-            }
-        }
+        settle_claims(&mut found);
 
         let items: Vec<Item> = self.note_items(db)?;
-        let by_id: HashMap<i64, &Item> = items.iter().map(|i| (i.id, i)).collect();
-        let mut seen: HashSet<i64> = HashSet::new();
-        // A file with no id of its own is the note that has its path (a plain file already read).
-        let by_file: HashMap<String, i64> = items
-            .iter()
-            .filter_map(|i| field(i, "file").map(|f| (f.to_string(), i.id)))
-            .collect();
-        // Notes not yet tied to a file, to adopt a plain file that is the same note.
-        let mut untied: HashMap<(Option<i64>, String), i64> = HashMap::new();
-        for i in &items {
-            if field(i, "file").is_none() {
-                let n = Note::from(i);
-                untied.insert((n.folder_id, n.title.clone()), n.id);
-            }
-        }
+        let mut matcher = Matcher::new(&items, |i| {
+            let n = Note::from(i);
+            (n.folder_id, n.title)
+        });
 
         for f in &found {
             let folder = self.place_of(&layout, f);
-            let note_id = f
-                .note
-                .id
-                .filter(|id| by_id.contains_key(id) && !seen.contains(id))
-                .or_else(|| {
-                    // A file with no id: the note that has this path, else one filed where the
-                    // file is, with its title.
-                    // (An id no note has, from another database, names nothing here.)
-                    let named = f.note.id.or(f.lost);
-                    if named.is_some_and(|id| by_id.contains_key(&id)) {
-                        return None;
-                    }
-                    by_file
-                        .get(&f.rel)
-                        .copied()
-                        .filter(|id| !seen.contains(id))
-                        .or_else(|| untied.remove(&(folder, f.note.title.clone())))
-                });
+            let note_id = matcher.find(f.note.id.as_deref(), &f.rel, (folder, f.note.title.clone()));
             match note_id {
                 Some(id) => {
-                    seen.insert(id);
+                    matcher.see(id);
                     let item = db.get(id)?;
                     self.read_into(db, &item, f, folder, &layout, &mut rep)?;
                 }
                 None => {
                     let id = self.create_from(db, f, folder)?;
-                    seen.insert(id);
+                    matcher.see(id);
                     rep.created += 1;
                 }
             }
         }
 
-        // A note whose file is gone: to the trash; if it was already there, gone for good.
+        // A note whose file is gone: to the trash. One already there stays: only the person deleting
+        // it in the app clears the trash, and the next flush writes its file again.
         for i in &items {
-            if seen.contains(&i.id) || field(i, "file").is_none() {
+            if matcher.seen(i.id) || field(i, "file").is_none() {
                 continue;
             }
-            let n = Note::from(i);
-            if n.is_trashed() {
-                db.delete(i.id)?;
-            } else {
+            if !Note::from(i).is_trashed() {
                 lifecycle::trash(db, i.id, now())?;
                 rep.trashed += 1;
             }
@@ -373,11 +321,13 @@ impl Vault {
     /// once more by the next flush (it lacks the note's id, say).
     fn tie(&self, db: &mut Db, id: i64, f: &Found, again: bool) -> Result<()> {
         let item = db.get(id)?;
-        let note = Note::from(&item);
+        let mut note = Note::from(&item);
+        // The id the file carries is the note's.
+        note.uid = adopt_uid(db, id, note.uid.take(), f.note.id.as_ref())?;
         let layout = Layout::load(db)?;
         // A file with no id is left as it is until its note is first opened (or changed in the
-        // app); one naming another note's id is rewritten at once.
-        let sig = if again || f.lost.is_some() || f.note.id.is_some_and(|i| i != id) {
+        // app); one that had another file's id (its claim lost) is rewritten at once.
+        let sig = if again || f.lost.is_some() {
             String::new()
         } else {
             self.sig(&layout, &note)
@@ -517,16 +467,8 @@ impl Vault {
 
     /// Save the note's own version next to the file that won, as a note without an id.
     fn keep_conflict(&self, note: &Note, layout: &Layout, rel: &str, rep: &mut Report) -> Result<()> {
-        let path = self.dir.join(rel);
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("note").to_string();
-        let dir = path.parent().unwrap_or(&self.dir).to_path_buf();
-        let mut copy = dir.join(format!("{stem} (conflict).md"));
-        let mut n = 1;
-        while copy.exists() {
-            n += 1;
-            copy = dir.join(format!("{stem} (conflict {n}).md"));
-        }
-        let text = render_file(note, self.from_for(layout, note).as_deref(), None).replacen(&format!("id: {}\n", note.id), "", 1);
+        let copy = conflict_path(&self.dir, rel, "note");
+        let text = without_id(&render_file(note, self.from_for(layout, note).as_deref(), None), "notes-id");
         write_atomic(&copy, &text)?;
         rep.warnings.push(format!(
             "{rel} was changed in the app and outside it; the file was kept, the app's version is {}",
@@ -642,35 +584,20 @@ impl Vault {
 
     /// The file each note has now, to hand back to [`flush`](Self::flush): that is how a note
     /// deleted for good is known to have had one.
-    pub fn known(&self, db: &Db) -> Result<BTreeMap<i64, String>> {
-        Ok(self
-            .note_items(db)?
-            .iter()
-            .filter_map(|i| field(i, "file").map(|f| (i.id, f.to_string())))
-            .collect())
+    pub fn known(&self, db: &Db) -> Result<Known> {
+        Ok(known_of(&self.note_items(db)?))
     }
 
     /// Bring the files up to date with the notes. `before` is [`known`](Self::known) from before
     /// the changes: a note in it that is gone loses its file.
-    pub fn flush(&self, db: &mut Db, before: &BTreeMap<i64, String>) -> Result<Report> {
+    pub fn flush(&self, db: &mut Db, before: &Known) -> Result<Report> {
         let mut rep = Report::default();
         let layout = Layout::load(db)?;
         let items = self.note_items(db)?;
         let live: HashSet<i64> = items.iter().map(|i| i.id).collect();
 
         // A note deleted for good: its file, if it is still that note's.
-        for (id, rel) in before {
-            if live.contains(id) {
-                continue;
-            }
-            let path = self.dir.join(rel);
-            let mine = fs::read_to_string(&path)
-                .map(|t| parse_file(&t, "").id == Some(*id))
-                .unwrap_or(false);
-            if mine && fs::remove_file(&path).is_ok() {
-                rep.removed += 1;
-            }
-        }
+        rep.removed += remove_deleted(&self.dir, before, &live, |t| parse_file(t, "").id);
 
         self.write_meta(db, &layout)?;
 
@@ -764,7 +691,7 @@ impl Vault {
     }
 
     fn write_one(&self, db: &mut Db, layout: &Layout, item: &Item, want: &str, rep: &mut Report) -> Result<()> {
-        let note = Note::from(item);
+        let mut note = Note::from(item);
         let recorded = field(item, "file").map(String::from);
         let old_path = recorded.as_ref().map(|r| self.dir.join(r));
         let on_disk = old_path.as_ref().and_then(|p| fs::read_to_string(p).ok());
@@ -787,6 +714,9 @@ impl Vault {
             let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
             want = rel_of(p.parent().unwrap_or(Path::new("")), &format!("{stem}-{n}"));
         }
+        // A note gets its id the first time it is written.
+        note.uid = Some(ensure_uid(db, note.id, note.uid.take())?);
+        let sig = self.sig(layout, &note);
         let previous = on_disk.as_deref().map(|t| parse_file(t, "").front).unwrap_or(None);
         let text = render_file(&note, self.from_for(layout, &note).as_deref(), previous.as_ref());
         let new_path = self.dir.join(&want);
@@ -819,19 +749,7 @@ impl Vault {
     /// (another file system, say) a link to it is put in the vault instead. Then call
     /// [`sync`](Self::sync). Returns the new path and whether it is a link.
     pub fn add_file(&self, db: &Db, src: &Path, folder: Option<i64>) -> Result<(PathBuf, bool)> {
-        if !src.is_file() || !is_markdown(src) {
-            return Err(Error::Invalid(format!("{} is not a Markdown file", src.display())));
-        }
-        let layout = Layout::load(db)?;
-        let dir = self.dir.join(layout.dir_of(folder.or(layout.default)));
-        fs::create_dir_all(&dir).map_err(|e| io(e, &dir))?;
-        let stem = src.file_stem().and_then(|s| s.to_str()).map_or_else(|| "Untitled".to_string(), sanitise);
-        let mut dest = dir.join(format!("{stem}.md"));
-        let mut n = 1;
-        while dest.exists() || is_symlink(&dest) {
-            n += 1;
-            dest = dir.join(format!("{stem}-{n}.md"));
-        }
+        let dest = self.import_dest(db, src, folder)?;
         match fs::rename(src, &dest) {
             Ok(()) => Ok((dest, false)),
             Err(_) => {
@@ -841,6 +759,98 @@ impl Vault {
             }
         }
     }
+
+    /// Bring the Markdown file `src`, from anywhere, into the vault in `folder` (the default
+    /// folder if none), as a copy (the original is left alone) or as a link to it (the app and any
+    /// editor then work on the one file, where it is). Then call [`sync`](Self::sync). Returns the
+    /// new path.
+    pub fn import_file(&self, db: &Db, src: &Path, folder: Option<i64>, how: Import) -> Result<PathBuf> {
+        let dest = self.import_dest(db, src, folder)?;
+        Self::bring(src, &dest, how)?;
+        Ok(dest)
+    }
+
+    /// Bring every Markdown file in the directory `src`, and in the directories in it, into the
+    /// vault: each directory becomes a section of that name in `folder` (the default folder if
+    /// none). Hidden directories and links to directories are skipped. Returns how many files came
+    /// in. Then call [`sync`](Self::sync).
+    pub fn import_dir(&self, db: &Db, src: &Path, folder: Option<i64>, how: Import) -> Result<usize> {
+        if !src.is_dir() {
+            return Err(Error::Invalid(format!("{} is not a directory", src.display())));
+        }
+        let layout = Layout::load(db)?;
+        let base = self.dir.join(layout.dir_of(folder.or(layout.default)));
+        let mut n = 0;
+        self.import_walk(src, &base, 0, how, &mut n)?;
+        Ok(n)
+    }
+
+    fn import_walk(&self, src: &Path, into: &Path, depth: usize, how: Import, n: &mut usize) -> Result<()> {
+        let mut entries = read_dir(src);
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().to_string();
+            let path = e.path();
+            if name.starts_with('.') {
+                continue;
+            }
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < MAX_DEPTH {
+                    self.import_walk(&path, &into.join(sanitise(&name)), depth + 1, how, n)?;
+                }
+            } else if is_markdown(&path) && path.is_file() {
+                let dest = self.free_path(into, &path)?;
+                Self::bring(&path, &dest, how)?;
+                *n += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn bring(src: &Path, dest: &Path, how: Import) -> Result<()> {
+        match how {
+            Import::Copy => {
+                fs::copy(src, dest).map_err(|e| io(e, src))?;
+            }
+            Import::Link => {
+                let target = fs::canonicalize(src).map_err(|e| io(e, src))?;
+                link(&target, dest).map_err(|e| io(e, dest))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A free path in the vault, in `folder`, for the file `src`.
+    fn import_dest(&self, db: &Db, src: &Path, folder: Option<i64>) -> Result<PathBuf> {
+        if !src.is_file() || !is_markdown(src) {
+            return Err(Error::Invalid(format!("{} is not a Markdown file", src.display())));
+        }
+        let layout = Layout::load(db)?;
+        let dir = self.dir.join(layout.dir_of(folder.or(layout.default)));
+        self.free_path(&dir, src)
+    }
+
+    /// A free file name in `dir` (made if it is not there) for the file `src`.
+    fn free_path(&self, dir: &Path, src: &Path) -> Result<PathBuf> {
+        fs::create_dir_all(dir).map_err(|e| io(e, dir))?;
+        let stem = src.file_stem().and_then(|s| s.to_str()).map_or_else(|| "Untitled".to_string(), sanitise);
+        let mut dest = dir.join(format!("{stem}.md"));
+        let mut n = 1;
+        while dest.exists() || is_symlink(&dest) {
+            n += 1;
+            dest = dir.join(format!("{stem}-{n}.md"));
+        }
+        Ok(dest)
+    }
+}
+
+/// How a file is brought into the vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Import {
+    /// A copy: the original is left where it is.
+    Copy,
+    /// A link to the original, so there is one file.
+    Link,
 }
 
 #[cfg(test)]
@@ -901,10 +911,12 @@ mod tests {
         let a = lifecycle::create(&mut db, &NewNote { title: "Plan".into(), body: "text".into(), folder: Some(work.id), ..NewNote::default() }).unwrap();
         let b = lifecycle::create(&mut db, &NewNote { title: "Wires".into(), folder: Some(design.id), ..NewNote::default() }).unwrap();
         lifecycle::create(&mut db, &NewNote::new("Loose")).unwrap();
-        let r = v.flush(&mut db, &BTreeMap::new()).unwrap();
+        let r = v.flush(&mut db, &Known::new()).unwrap();
         assert_eq!(r.written, 3);
         assert!(read(&dir, "Work/Plan.md").contains("# Plan\n\ntext\n"));
-        assert!(read(&dir, "Work/Plan.md").starts_with(&format!("---\nid: {}\n", a.id)));
+        let uid = Note::from(&db.get(a.id).unwrap()).uid.expect("written with an id");
+        assert!(organiser_vault::is_uuid(&uid));
+        assert!(read(&dir, "Work/Plan.md").starts_with(&format!("---\nnotes-id: {uid}\n")));
         assert!(dir.join("Work/Design/Wires.md").exists());
         assert!(dir.join("Loose.md").exists(), "the default folder is the vault itself");
         assert!(dir.join("Work/.folder.toml").exists());
@@ -920,7 +932,7 @@ mod tests {
         fs::create_dir_all(dir.join("Ideas/Later")).unwrap();
         fs::create_dir_all(dir.join("Ideas/Later/too/deep")).unwrap();
         fs::write(dir.join("Top.md"), "# Top\n\nhello\n").unwrap();
-        fs::write(dir.join("Ideas/Spark.md"), "---\ntags: [a, b]\npinned: true\n---\n# Spark\n\nbody\n").unwrap();
+        fs::write(dir.join("Ideas/Spark.md"), "---\nnotes-tags: [a, b]\nnotes-pinned: true\n---\n# Spark\n\nbody\n").unwrap();
         fs::write(dir.join("Ideas/Later/Maybe.md"), "no heading here\n").unwrap();
         fs::write(dir.join("Ideas/Later/too/Deep.md"), "# Deep\n").unwrap();
         fs::write(dir.join("Ideas/readme.txt"), "not a note").unwrap();
@@ -971,10 +983,10 @@ mod tests {
     #[test]
     fn files_with_an_id_no_note_has_are_not_read_twice_either() {
         let (mut db, v, dir) = setup();
-        let text = "---\nid: 7001\n---\n# Dup\n\nsame\n";
+        let text = "---\nnotes-id: 01934f3a-7b2c-7d11-8a55-3c1e9f0a7001\n---\n# Dup\n\nsame\n";
         fs::write(dir.join("A.md"), text).unwrap();
         fs::write(dir.join("B.md"), text).unwrap();
-        fs::write(dir.join("C.md"), "---\nid: 555\n---\n# Stranger\n").unwrap();
+        fs::write(dir.join("C.md"), "---\nnotes-id: 01934f3a-7b2c-7d11-8a55-3c1e9f0a0555\n---\n# Stranger\n").unwrap();
         assert_eq!(v.sync(&mut db).unwrap().created, 3);
         let r = v.sync(&mut db).unwrap();
         assert!(!r.changed(), "{r:?}");
@@ -1034,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_file_sends_its_note_to_the_trash_and_a_second_time_deletes_it() {
+    fn a_deleted_file_sends_its_note_to_the_trash_and_the_trash_is_only_cleared_in_the_app() {
         let (mut db, v, dir) = setup();
         let n = lifecycle::create(&mut db, &NewNote::new("Gone")).unwrap();
         sync_flush(&mut db, &v);
@@ -1043,6 +1055,11 @@ mod tests {
         assert_eq!(r.trashed, 1, "{r:?}");
         assert!(Note::from(&db.get(n.id).unwrap()).is_trashed());
         assert!(dir.join(".trash/Gone.md").exists(), "kept in the vault's trash");
+        // Deleting the trashed file outside is no way to clear the trash: it is written again.
+        fs::remove_file(dir.join(".trash/Gone.md")).unwrap();
+        sync_flush(&mut db, &v);
+        assert!(Note::from(&db.get(n.id).unwrap()).is_trashed());
+        assert!(dir.join(".trash/Gone.md").exists());
         // Restored in the app: back out of the trash.
         lifecycle::restore(&mut db, n.id).unwrap();
         sync_flush(&mut db, &v);
@@ -1291,8 +1308,49 @@ mod tests {
         assert_eq!(read(&other, "Fresh/Idea.md"), "just text\n", "found, not touched");
         let id = db.list(&Query { kind: Some(NOTE.into()), ..Query::default() }).unwrap()[0].id;
         assert_eq!(v2.stamp(&mut db, id).unwrap().written, 1);
-        assert!(read(&other, "Fresh/Idea.md").starts_with("---\nid: "));
+        assert!(read(&other, "Fresh/Idea.md").starts_with("---\nnotes-id: "));
         assert!(dir.join("Work/Plan.md").exists());
+    }
+
+    #[test]
+    fn imported_files_are_copied_or_linked_from_anywhere() {
+        let (mut db, v, dir) = setup();
+        let outside = temp();
+        let a = outside.join("Copied.md");
+        let b = outside.join("Linked.md");
+        fs::write(&a, "# Copied\n\none\n").unwrap();
+        fs::write(&b, "# Linked\n\ntwo\n").unwrap();
+        let ca = v.import_file(&db, &a, None, Import::Copy).unwrap();
+        let cb = v.import_file(&db, &b, None, Import::Link).unwrap();
+        assert!(a.exists() && !is_symlink(&ca) && ca.exists(), "a copy leaves the original");
+        assert!(is_symlink(&cb) && b.exists());
+        // The same name again is numbered, not overwritten.
+        assert_eq!(v.import_file(&db, &a, None, Import::Copy).unwrap(), dir.join("Copied-2.md"));
+        assert!(v.import_file(&db, &outside.join("x.txt"), None, Import::Copy).is_err());
+        v.sync(&mut db).unwrap();
+        assert_eq!(titles(&db), ["Copied", "Copied", "Linked"]);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn importing_a_directory_brings_every_markdown_file_and_its_directories() {
+        let (mut db, v, dir) = setup();
+        let src = temp();
+        fs::create_dir_all(src.join("Trip/Day 1")).unwrap();
+        fs::create_dir_all(src.join(".hidden")).unwrap();
+        fs::write(src.join("Top.md"), "# Top\n").unwrap();
+        fs::write(src.join("Trip/Plan.md"), "# Plan\n").unwrap();
+        fs::write(src.join("Trip/Day 1/Hotel.md"), "# Hotel\n").unwrap();
+        fs::write(src.join(".hidden/Secret.md"), "# Secret\n").unwrap();
+        fs::write(src.join("Trip/readme.txt"), "not a note").unwrap();
+        assert_eq!(v.import_dir(&db, &src, None, Import::Copy).unwrap(), 3);
+        assert!(dir.join("Top.md").exists() && dir.join("Trip/Plan.md").exists() && dir.join("Trip/Day 1/Hotel.md").exists());
+        assert!(!dir.join(".hidden").exists() && !dir.join("Trip/readme.txt").exists());
+        v.sync(&mut db).unwrap();
+        assert_eq!(titles(&db), ["Hotel", "Plan", "Top"]);
+        assert!(src.join("Top.md").exists(), "copies leave the originals");
+        assert!(v.import_dir(&db, &src.join("Top.md"), None, Import::Copy).is_err());
+        let _ = fs::remove_dir_all(src);
     }
 
     #[test]

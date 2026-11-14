@@ -371,7 +371,7 @@ impl App {
         if d.is_new() || !matches!(d.subject, Subject::Task(_)) || self.vault.is_none() {
             return space().into();
         }
-        let Some(rel) = self.vault_known.get(&d.id()) else {
+        let Some(rel) = self.vault_known.get(&d.id()).map(|k| &k.rel) else {
             return space().into();
         };
         let linked = self

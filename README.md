@@ -130,7 +130,7 @@ same way as Notes: the files are the tasks, the database an index. **An epic is 
 (its `.epic.toml` holds its colour, icon, dates and sections), **a task with no subtasks is a file**
 (`Buy milk.md`), and **a task with subtasks is a directory with an `index.md`** and its subtasks
 inside, to any depth. Status (by name), priority, dates, tags, pin and section are front matter;
-the notes are the body. A task gaining its first subtask moves to `Name/index.md` by itself, and
+the notes are the body. Front matter keys are named for the app, `todo-id`, `todo-status`, `todo-due` and so on, so a file can carry the keys of several apps; the `todo-id` is a UUID version 7 written the first time the task is opened, and keys that are not `todo-` ones are left alone. A task gaining its first subtask moves to `Name/index.md` by itself, and
 back to `Name.md` when it loses the last. Archived tasks live in `.archive/`; a file that goes
 missing archives its task.
 
@@ -148,12 +148,12 @@ todo archive 12; todo archived      # the Archived view, grouped by epic
 Notes can live as `.md` files in a folder you choose, such as `Documents/Notes`, the way QOwnNotes
 and Obsidian keep them: **a section is a directory, and a section in a section a directory in it, to
 any depth**; the notes of no section are the files at the top. Tags, colour, pin, favourite and rating
-are front matter at the top of the file (it is optional on files that come from elsewhere); a
+are front matter at the top of the file (it is optional on files that come from elsewhere), as `notes-id` (a UUID version 7), `notes-color`, `notes-rating` and so on; keys that are not `notes-` ones are left alone; a
 section's description, colour and icon are in its `.folder.toml`. The database stays an index (so
 Sticky keeps its links) and keeps what a file cannot. The folder is the export and reading it is
 the import: edit the files in any editor, or move them between directories, and the notes follow.
 
-It is read when the app starts, when its window is focused and on request (**Sync now**). A file
+It is read when the app starts, when its window is focused and on request (**Load from folder** in Preferences). A file
 and its note both changed in between: the file wins and the note's version is kept beside it as
 `<name> (conflict).md`. A file that goes missing sends its note to the trash (`.trash/` in the
 vault); two files claiming one note are settled by path, then age, and the rest become notes of

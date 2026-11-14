@@ -9,6 +9,9 @@ use super::color::Color;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     pub id: i64,
+    /// The id its Markdown file carries (a UUID version 7), once it has one.
+    #[serde(default)]
+    pub uid: Option<String>,
     /// The folder it is filed in, if any.
     #[serde(default)]
     pub folder_id: Option<i64>,
@@ -44,6 +47,7 @@ impl From<&Item> for Note {
         let f = &i.fields;
         Self {
             id: i.id,
+            uid: f.get("uid").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from),
             folder_id: i.parent_id,
             title: i.title.clone(),
             body: f.get("body").and_then(Value::as_str).unwrap_or("").into(),
