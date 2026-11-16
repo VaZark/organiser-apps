@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-vault", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui", "crates/organiser-sticky", "apps/sticky/engine", "apps/sticky/cli", "apps/sticky/gui"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 license = "MIT"
 
