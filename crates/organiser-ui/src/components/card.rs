@@ -6,7 +6,7 @@ use iced::widget::button;
 use iced::{Background, Border, Color, Length};
 
 use crate::Element;
-use crate::iad::color::mix;
+use crate::iad::color::{color_contrast, mix};
 use crate::iad::styles::container::card as card_surface;
 use crate::iad::{Role, Theme};
 
@@ -14,8 +14,8 @@ use crate::iad::{Role, Theme};
 const TINT_ALPHA: f32 = 0.22;
 
 /// The card's fill. An untinted card keeps iad's card surface; a tinted one is its tint at a soft
-/// alpha. Hovering and pressing lift it: more opaque over a translucent surface (dark themes),
-/// darker over an opaque one (light themes).
+/// alpha. Hovering and pressing lift it: more opaque over a translucent surface,
+/// lighter or darker over an opaque one, according to its contrast.
 fn fill(theme: &Theme, tint: Option<Color>, status: button::Status) -> Color {
     let surface = match card_surface(theme).background {
         Some(Background::Color(c)) => c,
@@ -35,7 +35,11 @@ fn fill(theme: &Theme, tint: Option<Color>, status: button::Status) -> Color {
             ..base
         }
     } else {
-        mix(base, Color::BLACK, lift)
+        mix(
+            base,
+            color_contrast(base, &[Color::BLACK, Color::WHITE]),
+            lift,
+        )
     }
 }
 
@@ -83,9 +87,48 @@ mod tests {
         a: 1.0,
     };
 
+    fn themes() -> [Theme; 4] {
+        // Only the libadwaita card colors are needed; do not depend on installed theme files
+        // or install global config that could affect parallel tests.
+        let config = crate::iad::theme_config::ThemeConfig::builder("card-test")
+            .files(false)
+            .app_text(
+                "[colors]\ncard-bg=#ffffff\ncard-fg=#000006\n\
+                 [dark:colors]\ncard-bg=rgba(255, 255, 255, 0.08)\ncard-fg=#ffffff\n",
+            )
+            .build();
+        [
+            Theme::dark(),
+            Theme::light(),
+            Theme::dark().with_theme_config(&config),
+            Theme::light().with_theme_config(&config),
+        ]
+    }
+
+    #[test]
+    fn fixtures_cover_neutral_and_configured_card_surfaces() {
+        let [
+            neutral_dark,
+            neutral_light,
+            configured_dark,
+            configured_light,
+        ] = themes();
+        let rest = |theme: &Theme| fill(theme, None, button::Status::Active);
+        assert_eq!(rest(&neutral_dark), Color::BLACK);
+        assert_eq!(rest(&neutral_light), Color::WHITE);
+        assert_eq!(
+            rest(&configured_dark),
+            Color {
+                a: 0.08,
+                ..Color::WHITE
+            }
+        );
+        assert_eq!(rest(&configured_light), Color::WHITE);
+    }
+
     #[test]
     fn a_tint_replaces_the_surface_with_a_soft_wash_of_its_colour() {
-        for theme in [Theme::dark(), Theme::light()] {
+        for theme in themes() {
             let tinted = fill(&theme, Some(RED), button::Status::Active);
             assert_eq!((tinted.r, tinted.g, tinted.b), (1.0, 0.0, 0.0));
             assert_eq!(tinted.a, TINT_ALPHA);
@@ -93,14 +136,43 @@ mod tests {
     }
 
     #[test]
-    fn hover_and_press_lift_the_card_on_both_themes() {
-        for theme in [Theme::dark(), Theme::light()] {
+    fn hover_and_press_lift_neutral_and_configured_cards() {
+        for theme in themes() {
             for tint in [None, Some(RED)] {
                 let rest = fill(&theme, tint, button::Status::Active);
                 let hover = fill(&theme, tint, button::Status::Hovered);
                 let press = fill(&theme, tint, button::Status::Pressed);
                 assert_ne!(hover, rest, "hover changes the fill");
                 assert_ne!(press, hover, "press goes further");
+                assert_eq!(fill(&theme, tint, button::Status::Disabled), rest);
+                if rest.a < 0.9 {
+                    assert_eq!((hover.r, hover.g, hover.b), (rest.r, rest.g, rest.b));
+                    assert!(hover.a > rest.a);
+                    assert!(press.a > hover.a);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_custom_surfaces_use_their_color_not_the_theme_scheme() {
+        use crate::iad::color::{hex, relative_luminance};
+
+        for mut theme in [Theme::dark(), Theme::light()] {
+            for base in [Color::BLACK, hex(0x242424), Color::WHITE, hex(0xfafafa)] {
+                theme.semantic.card.bg = base;
+                let hover = fill(&theme, None, button::Status::Hovered);
+                let press = fill(&theme, None, button::Status::Pressed);
+                let luminance = relative_luminance(base);
+                if color_contrast(base, &[Color::BLACK, Color::WHITE]) == Color::WHITE {
+                    assert!(relative_luminance(hover) > luminance);
+                    assert!(relative_luminance(press) > relative_luminance(hover));
+                } else {
+                    assert!(relative_luminance(hover) < luminance);
+                    assert!(relative_luminance(press) < relative_luminance(hover));
+                }
+                assert_eq!(hover.a, 1.0);
+                assert_eq!(press.a, 1.0);
             }
         }
     }

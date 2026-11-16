@@ -20,7 +20,7 @@ organiser-cli-kit = { path = "crates/organiser-cli-kit" }
 organiser-ui = { path = "crates/organiser-ui" }
 organiser-sticky = { path = "crates/organiser-sticky" }
 sticky-engine = { path = "apps/sticky/engine" }
-iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "353edd850720f03b0068e30290c9bf1e976df933" }
+iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "65b1a9ea38e68922565c36e131480e54634f3058" }
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "wayland", "advanced", "svg", "image", "tokio", "canvas"] }
 rusqlite = "0.37"
 serde = { version = "1", features = ["derive"] }
