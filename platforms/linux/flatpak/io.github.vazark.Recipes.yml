@@ -12,8 +12,13 @@ finish-args:
   # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
   # host's, since the sandbox's own would hide it.
   - --filesystem=xdg-data/recipes:create
-  # The toolkit's desktop-wide settings (scheme, accent, density), read-only.
+  # The toolkit's desktop-wide settings (`desktop.conf`: scheme, accent, density, ...), read-only.
+  # The theme itself is read from xdg-data/iad below.
   - --filesystem=xdg-config/iced-adaptive-design:ro
+  # The selected theme (`default.conf`, a symlink the theme editor sets) and the themes it points to.
+  - --filesystem=xdg-data/iad:ro
+  # This app's own optional theme override (`theme.conf`), read-only.
+  - --filesystem=xdg-config/io.github.vazark.Recipes:ro
 modules:
   - name: recipes
     buildsystem: simple

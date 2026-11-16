@@ -1,11 +1,11 @@
 //! A whole note as a Markdown file: the title as a first-level heading, then the body.
 
 use super::color::Color;
-use organiser_vault::is_uuid;
-use organiser_vault::front_matter::{self, FrontMatter};
 use super::note::Note;
 use organiser_markdown::export::export;
 use organiser_markdown::parse::parse;
+use organiser_vault::front_matter::{self, FrontMatter};
+use organiser_vault::is_uuid;
 
 /// `# Title`, a blank line, and the body written back out as clean Markdown.
 pub fn to_markdown(note: &Note) -> String {
@@ -83,8 +83,12 @@ pub fn parse_file(text: &str, fallback: &str) -> FileNote {
             .and_then(|r| u8::try_from(r).ok())
             .filter(|r| (1..=5).contains(r));
         note.archived = fm.get_bool(&k("archived")).unwrap_or(false);
-        note.created = fm.get(&k("created")).and_then(|c| front_matter::parse_iso(&c));
-        note.trashed = fm.get(&k("trashed")).and_then(|c| front_matter::parse_iso(&c));
+        note.created = fm
+            .get(&k("created"))
+            .and_then(|c| front_matter::parse_iso(&c));
+        note.trashed = fm
+            .get(&k("trashed"))
+            .and_then(|c| front_matter::parse_iso(&c));
         note.from = fm.get(&k("from"));
     }
     note.front = front;
@@ -230,7 +234,10 @@ mod tests {
     #[test]
     fn a_plain_file_has_no_front_matter_and_keeps_everything() {
         let f = parse_file("# Title\n\nhello\n", "stem");
-        assert_eq!((f.id, f.title.as_str(), f.body.as_str()), (None, "Title", "hello"));
+        assert_eq!(
+            (f.id, f.title.as_str(), f.body.as_str()),
+            (None, "Title", "hello")
+        );
         assert!(f.front.is_none());
         let f = parse_file("just text\n", "stem");
         assert_eq!((f.title.as_str(), f.body.as_str()), ("stem", "just text"));
@@ -238,19 +245,34 @@ mod tests {
 
     #[test]
     fn keys_of_other_tools_are_kept_and_cleared_flags_leave() {
-        let f = parse_file("---\nnotes-pinned: true\npinned: true\naliases: [x]\ntodo-due: 2026-01-01\n---\n# T\n", "s");
+        let f = parse_file(
+            "---\nnotes-pinned: true\npinned: true\naliases: [x]\ntodo-due: 2026-01-01\n---\n# T\n",
+            "s",
+        );
         let n = note("T", "");
         let text = render_file(&n, None, f.front.as_ref());
         assert!(text.contains("aliases: [x]") && text.contains("todo-due: 2026-01-01"));
-        assert!(!text.contains("notes-pinned"), "the note is no longer pinned");
-        assert!(text.contains("\npinned: true"), "another tool's key is not ours to change");
+        assert!(
+            !text.contains("notes-pinned"),
+            "the note is no longer pinned"
+        );
+        assert!(
+            text.contains("\npinned: true"),
+            "another tool's key is not ours to change"
+        );
     }
 
     #[test]
     fn only_keys_with_this_apps_name_are_read() {
-        let f = parse_file(&format!("---\ntodo-id: {UID}\nid: 12\nrating: 3\n---\n# T\n"), "s");
+        let f = parse_file(
+            &format!("---\ntodo-id: {UID}\nid: 12\nrating: 3\n---\n# T\n"),
+            "s",
+        );
         assert!(f.id.is_none() && f.rating.is_none());
-        let f = parse_file(&format!("---\nnotes-id: {UID}\nnotes-rating: 3\n---\n# T\n"), "s");
+        let f = parse_file(
+            &format!("---\nnotes-id: {UID}\nnotes-rating: 3\n---\n# T\n"),
+            "s",
+        );
         assert_eq!((f.id.as_deref(), f.rating), (Some(UID), Some(3)));
     }
 

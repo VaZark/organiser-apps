@@ -15,7 +15,10 @@ use crate::{Known, KnownFile, uuid7};
 
 /// A text field of an item, if it has one that is not empty.
 pub fn field<'a>(item: &'a Item, key: &str) -> Option<&'a str> {
-    item.fields.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
+    item.fields
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
 }
 
 // ---- which file is which ----------------------------------------------------------------------
@@ -51,7 +54,11 @@ pub fn settle_claims<F: FoundFile>(found: &mut [F]) {
                 .to_lowercase()
                 .cmp(&fb.rel().to_lowercase())
                 .then(fa.rel().cmp(fb.rel()))
-                .then(fa.created().unwrap_or(i64::MAX).cmp(&fb.created().unwrap_or(i64::MAX)))
+                .then(
+                    fa.created()
+                        .unwrap_or(i64::MAX)
+                        .cmp(&fb.created().unwrap_or(i64::MAX)),
+                )
         });
         for loser in &idx[1..] {
             found[*loser].lose_claim();
@@ -124,7 +131,12 @@ impl<K: Hash + Eq> Matcher<K> {
 // ---- ids ------------------------------------------------------------------------------------
 
 /// The id the file carries becomes the item's. Returns the item's id after.
-pub fn adopt_uid(db: &mut Db, id: i64, current: Option<String>, file: Option<&String>) -> Result<Option<String>> {
+pub fn adopt_uid(
+    db: &mut Db,
+    id: i64,
+    current: Option<String>,
+    file: Option<&String>,
+) -> Result<Option<String>> {
     match file {
         Some(u) if current.as_ref() != Some(u) => {
             db.update(id, ItemPatch::default().field("uid", u.as_str()))?;
@@ -148,9 +160,16 @@ pub fn ensure_uid(db: &mut Db, id: i64, current: Option<String>) -> Result<Strin
 
 /// Whether the item's file has no id yet; if so, it is marked to be written by the next flush.
 /// This is how a file gets its front matter when first opened, not when found.
-pub fn mark_unstamped(db: &mut Db, dir: &Path, id: i64, uid_of: impl Fn(&str) -> Option<String>) -> Result<bool> {
+pub fn mark_unstamped(
+    db: &mut Db,
+    dir: &Path,
+    id: i64,
+    uid_of: impl Fn(&str) -> Option<String>,
+) -> Result<bool> {
     let item = db.get(id)?;
-    let Some(file) = field(&item, "file") else { return Ok(false) };
+    let Some(file) = field(&item, "file") else {
+        return Ok(false);
+    };
     let bare = fs::read_to_string(dir.join(file)).is_ok_and(|t| uid_of(&t).is_none());
     if bare {
         db.update(id, ItemPatch::default().field("file_sig", ""))?;
@@ -166,14 +185,27 @@ pub fn known_of(items: &[Item]) -> Known {
     items
         .iter()
         .filter_map(|i| {
-            field(i, "file").map(|f| (i.id, KnownFile { rel: f.to_string(), uid: field(i, "uid").map(String::from) }))
+            field(i, "file").map(|f| {
+                (
+                    i.id,
+                    KnownFile {
+                        rel: f.to_string(),
+                        uid: field(i, "uid").map(String::from),
+                    },
+                )
+            })
         })
         .collect()
 }
 
 /// An item deleted for good loses its file, if the file is still that item's (it carries its id).
 /// Returns how many files went.
-pub fn remove_deleted(dir: &Path, before: &Known, live: &HashSet<i64>, uid_of: impl Fn(&str) -> Option<String>) -> usize {
+pub fn remove_deleted(
+    dir: &Path,
+    before: &Known,
+    live: &HashSet<i64>,
+    uid_of: impl Fn(&str) -> Option<String>,
+) -> usize {
     let mut removed = 0;
     for (id, was) in before {
         if live.contains(id) || was.uid.is_none() {
@@ -192,7 +224,10 @@ pub fn remove_deleted(dir: &Path, before: &Known, live: &HashSet<i64>, uid_of: i
 /// kept to be written into the new. An item that went with its parent is not an error.
 pub fn forget(db: &mut Db, kinds: &[&str]) -> Result<()> {
     for kind in kinds {
-        for i in db.list(&Query { kind: Some((*kind).into()), ..Query::default() })? {
+        for i in db.list(&Query {
+            kind: Some((*kind).into()),
+            ..Query::default()
+        })? {
             match db.delete(i.id) {
                 Ok(_) | Err(Error::NotFound(_)) => {}
                 Err(e) => return Err(e),
@@ -208,12 +243,19 @@ pub fn forget(db: &mut Db, kinds: &[&str]) -> Result<()> {
 /// the file, as `<name> (conflict).md` (an `index.md` is named for its directory, beside that).
 pub fn conflict_path(vault: &Path, rel: &str, fallback: &str) -> PathBuf {
     let path = vault.join(rel);
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(fallback).to_string();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fallback)
+        .to_string();
     let (dir, stem) = if stem == "index" {
         let d = path.parent().unwrap_or(vault);
         (
             d.parent().unwrap_or(vault).to_path_buf(),
-            d.file_name().and_then(|n| n.to_str()).unwrap_or(fallback).to_string(),
+            d.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(fallback)
+                .to_string(),
         )
     } else {
         (path.parent().unwrap_or(vault).to_path_buf(), stem)

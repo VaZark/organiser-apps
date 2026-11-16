@@ -105,11 +105,19 @@ impl App {
                     rows = rows.push(caption("Others"));
                 }
             }
-            rows.extend(others.into_iter().map(|t| self.compact_row(t))).into()
+            rows.extend(others.into_iter().map(|t| self.compact_row(t)))
+                .into()
         };
-        let body = column![head, if grid { scrolled_window(list).height(Length::Fill).into() } else { list }]
-            .spacing(8)
-            .width(Length::Fill);
+        let body = column![
+            head,
+            if grid {
+                scrolled_window(list).height(Length::Fill).into()
+            } else {
+                list
+            }
+        ]
+        .spacing(8)
+        .width(Length::Fill);
         container(body)
             .padding(12)
             .width(Length::FillPortion(1))
@@ -142,6 +150,10 @@ impl App {
         if let Some(d) = self.status_dot(t) {
             line = line.push(d);
         }
-        selectable(container(line).padding([4, 8]), selected, Message::Select(id))
+        selectable(
+            container(line).padding([4, 8]),
+            selected,
+            Message::Select(id),
+        )
     }
 }

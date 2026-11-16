@@ -224,16 +224,14 @@ impl App {
             }
             Subject::Task(_) => return None,
         };
-        Some(
-            field(
-                "Progress",
-                column![
-                    progress_bar(0.0..=1.0, p),
-                    caption(format!("{done} of {total} tasks done"))
-                ]
-                .spacing(4),
-            ),
-        )
+        Some(field(
+            "Progress",
+            column![
+                progress_bar(0.0..=1.0, p),
+                caption(format!("{done} of {total} tasks done"))
+            ]
+            .spacing(4),
+        ))
     }
 
     fn subtasks<'a>(&'a self, d: &'a Details) -> Element<'a, Message> {
@@ -276,10 +274,8 @@ impl App {
             Subject::Task(t) => self.task_menu(t, d.is_new()),
             Subject::Epic(e) => menu_button(
                 Icon::ViewMore,
-                Menu::new("Epic").section([MenuItem::action(
-                    "Add section",
-                    Message::NewSection(e.id),
-                )]),
+                Menu::new("Epic")
+                    .section([MenuItem::action("Add section", Message::NewSection(e.id))]),
             )
             .tooltip("More")
             .into(),
@@ -296,15 +292,15 @@ impl App {
             if draft {
                 return space().into();
             }
-            menu = menu.section([MenuItem::action("Convert to task", Message::DConvert(t.id))
-                .icon(Icon::GoUp)]);
+            menu = menu.section([
+                MenuItem::action("Convert to task", Message::DConvert(t.id)).icon(Icon::GoUp)
+            ]);
         } else {
             let mut placement = vec![MenuItem::submenu(
                 "Move to epic",
-                Menu::new("Move to epic")
-                    .section(self.epic_choices.iter().map(|c| {
-                        MenuItem::select(c.title.clone(), c.id == t.epic, Message::DEpic(c.clone()))
-                    })),
+                Menu::new("Move to epic").section(self.epic_choices.iter().map(|c| {
+                    MenuItem::select(c.title.clone(), c.id == t.epic, Message::DEpic(c.clone()))
+                })),
             )];
             // Sections belong to an epic.
             if let Some(sections) = t
@@ -312,21 +308,19 @@ impl App {
                 .and_then(|e| self.epic_sections.get(&e))
                 .filter(|v| !v.is_empty())
             {
-                let none = MenuItem::select(
-                    "No section",
-                    t.section.is_none(),
-                    Message::DSection(None),
-                );
+                let none =
+                    MenuItem::select("No section", t.section.is_none(), Message::DSection(None));
                 placement.push(MenuItem::submenu(
                     "Move to section",
-                    Menu::new("Move to section")
-                        .section(std::iter::once(none).chain(sections.iter().map(|s| {
+                    Menu::new("Move to section").section(std::iter::once(none).chain(
+                        sections.iter().map(|s| {
                             MenuItem::select(
                                 s.section.title.clone(),
                                 t.section == Some(s.section.id),
                                 Message::DSection(Some(s.section.id)),
                             )
-                        }))),
+                        }),
+                    )),
                 ));
             }
             menu = menu.section(placement);
@@ -374,12 +368,15 @@ impl App {
         let Some(rel) = self.vault_known.get(&d.id()).map(|k| &k.rel) else {
             return space().into();
         };
-        let linked = self
-            .vault
-            .as_ref()
-            .is_some_and(|v| std::fs::symlink_metadata(v.dir().join(rel)).is_ok_and(|m| m.file_type().is_symlink()));
+        let linked = self.vault.as_ref().is_some_and(|v| {
+            std::fs::symlink_metadata(v.dir().join(rel)).is_ok_and(|m| m.file_type().is_symlink())
+        });
         IconToggle::new(if linked { Icon::Link } else { Icon::FileShow }, false)
-            .tooltip(if linked { "Show the file (a link to a file elsewhere)" } else { "Show the file" })
+            .tooltip(if linked {
+                "Show the file (a link to a file elsewhere)"
+            } else {
+                "Show the file"
+            })
             .on_toggle(|_| Message::ShowFile)
             .into()
     }

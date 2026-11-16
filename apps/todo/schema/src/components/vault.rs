@@ -30,12 +30,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use organiser_engine::{Db, Error, Item, ItemPatch, Query, Result};
-use organiser_vault::{FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped, remove_deleted, settle_claims, without_id};
 use organiser_vault::{
-    MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, prune, read_dir, unique, 
-    write_atomic,
+    FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped,
+    remove_deleted, settle_claims, without_id,
 };
 pub use organiser_vault::{Known, KnownFile, Report, sanitise};
+use organiser_vault::{
+    MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, prune, read_dir, unique,
+    write_atomic,
+};
 
 use super::lifecycle::{self, NewTask};
 use crate::primitives::md_task::{FileTask, parse_file, render_file};
@@ -168,6 +171,29 @@ impl Vault {
         &self.dir
     }
 
+    /// The folders imported into the vault, as (name, target): links, nothing is copied.
+    pub fn imports(&self) -> Vec<(String, PathBuf)> {
+        organiser_vault::linked_folders(&self.dir)
+    }
+
+    /// Import `target` as an epic of the vault, by linking it, and read it. Returns the name.
+    pub fn import_folder(&self, db: &mut Db, target: &Path) -> Result<(String, Report)> {
+        let name = organiser_vault::link_folder(&self.dir, target)?;
+        Ok((name, self.sync(db)?))
+    }
+
+    /// Stop importing a folder: its tasks and epic leave the app and only the link is removed; the
+    /// folder and its files are not touched (and none is archived or written elsewhere).
+    pub fn remove_import(&self, db: &mut Db, name: &str) -> Result<()> {
+        if !self.imports().iter().any(|(n, _)| n == name) {
+            return Err(Error::Invalid(format!("{name} is not an imported folder")));
+        }
+        if let Some(epic) = Layout::load(db)?.by_dir.get(name) {
+            lifecycle::delete_epic_and_tasks(db, *epic)?;
+        }
+        organiser_vault::unlink_folder(&self.dir, name)
+    }
+
     /// The file of a task, if it has one.
     pub fn file_of(&self, db: &Db, id: i64) -> Option<PathBuf> {
         let item = db.get(id).ok()?;
@@ -217,7 +243,11 @@ impl Vault {
         });
         let mut resolved: Vec<i64> = Vec::new();
         for f in &found {
-            let epic = f.epic_dir.as_ref().and_then(|d| layout.by_dir.get(d)).copied();
+            let epic = f
+                .epic_dir
+                .as_ref()
+                .and_then(|d| layout.by_dir.get(d))
+                .copied();
             let parent = f.parent.map(|p| resolved[p]);
             let task_id = matcher.find(f.task.id.as_deref(), &f.rel, (epic, f.task.title.clone()));
             let id = match task_id {
@@ -435,7 +465,10 @@ impl Vault {
             changed = true;
         }
         // The status is named in the file; an unknown name leaves it alone.
-        if let Some(s) = want.status.as_deref().and_then(|n| names.statuses.by_name(n))
+        if let Some(s) = want
+            .status
+            .as_deref()
+            .and_then(|n| names.statuses.by_name(n))
             && names.statuses.resolve(cur.status).map(|r| r.id) != Some(s.id)
         {
             db.update(id, ItemPatch::default().field("status", s.id))?;
@@ -450,11 +483,23 @@ impl Vault {
     }
 
     /// Save the task's own version next to the file that won, as a task without an id.
-    fn keep_conflict(&self, task: &Task, names: &Names, layout: &Layout, rel: &str, rep: &mut Report) -> Result<()> {
+    fn keep_conflict(
+        &self,
+        task: &Task,
+        names: &Names,
+        layout: &Layout,
+        rel: &str,
+        rep: &mut Report,
+    ) -> Result<()> {
         let _ = layout;
         let copy = conflict_path(&self.dir, rel, "task");
         let text = without_id(
-            &render_file(task, names.status(task).as_deref(), names.section(task).as_deref(), None),
+            &render_file(
+                task,
+                names.status(task).as_deref(),
+                names.section(task).as_deref(),
+                None,
+            ),
             "todo-id",
         );
         write_atomic(&copy, &text)?;
@@ -479,9 +524,24 @@ impl Vault {
 
     /// The top of the vault (or of its archive): the files in it are tasks of no epic, a directory
     /// with an `index.md` is a task, and any other is an epic.
-    fn scan_base(&self, base: &Path, archived: bool, out: &mut Vec<Found>, epics: &mut Vec<String>, rep: &mut Report) {
+    fn scan_base(
+        &self,
+        base: &Path,
+        archived: bool,
+        out: &mut Vec<Found>,
+        epics: &mut Vec<String>,
+        rep: &mut Report,
+    ) {
         self.scan_files(base, None, None, archived, out, rep);
-        for name in subdirs(base) {
+        // DECISION (user, 2026-11-16): a folder is imported by linking it into the tasks folder, and
+        // shows as an epic. Only links at the top of the vault are followed (never in the archive or
+        // inside a task or epic), so a link cannot make a loop. Revisit if nested imports are wanted.
+        let names = if archived {
+            subdirs(base)
+        } else {
+            subdirs_following_links(base)
+        };
+        for name in names {
             let path = base.join(&name);
             if path.join(INDEX).is_file() {
                 self.scan_task_dir(&path, None, None, archived, 1, out, rep);
@@ -512,7 +572,15 @@ impl Vault {
         rep: &mut Report,
     ) {
         let before = out.len();
-        self.read_one(&path.join(INDEX), epic, parent, archived, path.file_name().and_then(|n| n.to_str()), out, rep);
+        self.read_one(
+            &path.join(INDEX),
+            epic,
+            parent,
+            archived,
+            path.file_name().and_then(|n| n.to_str()),
+            out,
+            rep,
+        );
         if out.len() == before || depth >= MAX_DEPTH {
             return;
         }
@@ -526,7 +594,15 @@ impl Vault {
         }
     }
 
-    fn scan_files(&self, path: &Path, epic: Option<&str>, parent: Option<usize>, archived: bool, out: &mut Vec<Found>, rep: &mut Report) {
+    fn scan_files(
+        &self,
+        path: &Path,
+        epic: Option<&str>,
+        parent: Option<usize>,
+        archived: bool,
+        out: &mut Vec<Found>,
+        rep: &mut Report,
+    ) {
         self.scan_files_except(path, epic, parent, archived, "", out, rep);
     }
 
@@ -568,13 +644,18 @@ impl Vault {
         out: &mut Vec<Found>,
         rep: &mut Report,
     ) {
-        let rel = p.strip_prefix(&self.dir).unwrap_or(p).to_string_lossy().replace('\\', "/");
+        let rel = p
+            .strip_prefix(&self.dir)
+            .unwrap_or(p)
+            .to_string_lossy()
+            .replace('\\', "/");
         // A link to a file is followed; one that leads nowhere is reported.
         let meta = match fs::metadata(p) {
             Ok(m) if m.is_file() => m,
             Ok(_) => return,
             Err(_) => {
-                rep.warnings.push(format!("{rel} is a link to a file that is not there"));
+                rep.warnings
+                    .push(format!("{rel} is a link to a file that is not there"));
                 return;
             }
         };
@@ -642,7 +723,9 @@ impl Vault {
         // Its sections, in the order the file lists them.
         if let Some(list) = table.get("section").and_then(toml::Value::as_array) {
             for (at, s) in list.iter().filter_map(toml::Value::as_table).enumerate() {
-                let Some(title) = s.get("title").and_then(toml::Value::as_str) else { continue };
+                let Some(title) = s.get("title").and_then(toml::Value::as_str) else {
+                    continue;
+                };
                 let sid = self.section_named(db, id, title)?;
                 let sget = |k: &str| s.get(k).and_then(toml::Value::as_str).map(String::from);
                 let cur = crate::primitives::task::Section::from(&db.get(sid)?);
@@ -699,17 +782,36 @@ impl Vault {
         let plan = self.plan(db, &layout, &items);
         // A file whose place is held by another task's file that has yet to move waits for it: a
         // few rounds settle a swap or a shuffle, and the last bumps a name rather than wait.
-        let mut pending: Vec<i64> = items.iter().map(|i| i.id).filter(|id| plan.contains_key(id)).collect();
+        let mut pending: Vec<i64> = items
+            .iter()
+            .map(|i| i.id)
+            .filter(|id| plan.contains_key(id))
+            .collect();
         for round in 0..4 {
-            let now_items: HashMap<i64, Item> = self.task_items(db)?.into_iter().map(|i| (i.id, i)).collect();
+            let now_items: HashMap<i64, Item> = self
+                .task_items(db)?
+                .into_iter()
+                .map(|i| (i.id, i))
+                .collect();
             let owners: HashMap<String, i64> = now_items
                 .values()
                 .filter_map(|i| field(i, "file").map(|f| (f.to_string(), i.id)))
                 .collect();
             let mut next = Vec::new();
             for id in pending {
-                let (Some(item), Some(want)) = (now_items.get(&id), plan.get(&id)) else { continue };
-                match self.write_one(db, &layout, &names, item, want, &owners, round == 3, &mut rep) {
+                let (Some(item), Some(want)) = (now_items.get(&id), plan.get(&id)) else {
+                    continue;
+                };
+                match self.write_one(
+                    db,
+                    &layout,
+                    &names,
+                    item,
+                    want,
+                    &owners,
+                    round == 3,
+                    &mut rep,
+                ) {
                     Ok(true) => {}
                     Ok(false) => next.push(id),
                     Err(e) => rep.warnings.push(e.to_string()),
@@ -736,7 +838,13 @@ impl Vault {
             }
         }
         prune(&self.dir, Path::new(""), 0, &keep, EPIC_META);
-        prune(&self.dir.join(ARCHIVE), Path::new(""), 0, &keep_archive, EPIC_META);
+        prune(
+            &self.dir.join(ARCHIVE),
+            Path::new(""),
+            0,
+            &keep_archive,
+            EPIC_META,
+        );
         Ok(rep)
     }
 
@@ -750,7 +858,9 @@ impl Vault {
             .map(Epic::from)
             .collect();
         for e in &epics {
-            let Some(dir) = layout.dir_of.get(&e.id) else { continue };
+            let Some(dir) = layout.dir_of.get(&e.id) else {
+                continue;
+            };
             let mut t = toml::Table::new();
             t.insert("title".into(), e.title.clone().into());
             if !e.notes.is_empty() {
@@ -769,7 +879,11 @@ impl Vault {
                 t.insert("due".into(), d.to_string().into());
             }
             let mut sections = Vec::new();
-            for s in db.children(Some(e.id))?.iter().filter(|i| i.kind == SECTION) {
+            for s in db
+                .children(Some(e.id))?
+                .iter()
+                .filter(|i| i.kind == SECTION)
+            {
                 let s = crate::primitives::task::Section::from(s);
                 let mut st = toml::Table::new();
                 st.insert("title".into(), s.title.into());
@@ -841,9 +955,15 @@ impl Vault {
             let p = Path::new(f);
             let (stem, parent) = if p.file_name().and_then(|n| n.to_str()) == Some(INDEX) {
                 let d = p.parent()?;
-                (d.file_name()?.to_str()?.to_string(), d.parent()?.to_string_lossy().replace('\\', "/"))
+                (
+                    d.file_name()?.to_str()?.to_string(),
+                    d.parent()?.to_string_lossy().replace('\\', "/"),
+                )
             } else {
-                (p.file_stem()?.to_str()?.to_string(), p.parent()?.to_string_lossy().replace('\\', "/"))
+                (
+                    p.file_stem()?.to_str()?.to_string(),
+                    p.parent()?.to_string_lossy().replace('\\', "/"),
+                )
             };
             let suits = stem == base
                 || stem
@@ -856,7 +976,13 @@ impl Vault {
             Some(s) if set.insert(s.to_lowercase()) => s,
             _ => unique(&base, set),
         };
-        let join = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { format!("{a}/{b}") };
+        let join = |a: &str, b: &str| {
+            if a.is_empty() {
+                b.to_string()
+            } else {
+                format!("{a}/{b}")
+            }
+        };
         let has_kids = !children.is_empty() && depth < MAX_DEPTH;
         let (rel, own_dir) = if has_kids {
             let d = join(dir, &stem);
@@ -868,7 +994,9 @@ impl Vault {
             item.id,
             Place {
                 rel,
-                dir: own_dir.clone().or_else(|| (!dir.is_empty()).then(|| dir.to_string())),
+                dir: own_dir
+                    .clone()
+                    .or_else(|| (!dir.is_empty()).then(|| dir.to_string())),
             },
         );
         if let Some(d) = own_dir {
@@ -919,9 +1047,18 @@ impl Vault {
             n += 1;
             let p = Path::new(&want.rel);
             let (head, name) = if p.file_name().and_then(|x| x.to_str()) == Some(INDEX) {
-                (p.parent().and_then(|d| d.parent()), p.parent().and_then(|d| d.file_name()).and_then(|x| x.to_str()).unwrap_or("task"))
+                (
+                    p.parent().and_then(|d| d.parent()),
+                    p.parent()
+                        .and_then(|d| d.file_name())
+                        .and_then(|x| x.to_str())
+                        .unwrap_or("task"),
+                )
             } else {
-                (p.parent(), p.file_stem().and_then(|x| x.to_str()).unwrap_or("task"))
+                (
+                    p.parent(),
+                    p.file_stem().and_then(|x| x.to_str()).unwrap_or("task"),
+                )
             };
             let stem = format!("{name}-{n}");
             let joined = head.map_or_else(PathBuf::new, Path::to_path_buf);
@@ -937,7 +1074,12 @@ impl Vault {
         task.uid = Some(ensure_uid(db, task.id, task.uid.take())?);
         let sig = self::sig(names, layout, &task);
         let previous = on_disk.as_deref().and_then(|t| parse_file(t, "").front);
-        let text = render_file(&task, names.status(&task).as_deref(), names.section(&task).as_deref(), previous.as_ref());
+        let text = render_file(
+            &task,
+            names.status(&task).as_deref(),
+            names.section(&task).as_deref(),
+            previous.as_ref(),
+        );
         let new_path = self.dir.join(&rel);
         if let Some(p) = new_path.parent() {
             fs::create_dir_all(p).map_err(|e| io(e, p))?;
@@ -969,7 +1111,10 @@ impl Vault {
     /// whether it is a link.
     pub fn add_file(&self, db: &Db, src: &Path, epic: Option<i64>) -> Result<(PathBuf, bool)> {
         if !src.is_file() || !is_markdown(src) {
-            return Err(Error::Invalid(format!("{} is not a Markdown file", src.display())));
+            return Err(Error::Invalid(format!(
+                "{} is not a Markdown file",
+                src.display()
+            )));
         }
         let layout = Layout::load(db)?;
         let dir = match epic.and_then(|e| layout.dir_of.get(&e)) {
@@ -977,7 +1122,10 @@ impl Vault {
             None => self.dir.clone(),
         };
         fs::create_dir_all(&dir).map_err(|e| io(e, &dir))?;
-        let stem = src.file_stem().and_then(|s| s.to_str()).map_or_else(|| "Untitled".to_string(), sanitise);
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map_or_else(|| "Untitled".to_string(), sanitise);
         let mut dest = dir.join(format!("{stem}.md"));
         let mut n = 1;
         while dest.exists() || is_symlink(&dest) {
@@ -1007,7 +1155,12 @@ struct Place {
 fn sig(names: &Names, layout: &Layout, t: &Task) -> String {
     hash(&format!(
         "{}\n{:?}\n{:?}\n{}",
-        render_file(t, names.status(t).as_deref(), names.section(t).as_deref(), None),
+        render_file(
+            t,
+            names.status(t).as_deref(),
+            names.section(t).as_deref(),
+            None
+        ),
         t.epic.and_then(|e| layout.dir_of.get(&e)),
         t.parent_id,
         t.archived
@@ -1017,7 +1170,9 @@ fn sig(names: &Names, layout: &Layout, t: &Task) -> String {
 fn epic_title(meta: &Path) -> Option<String> {
     let text = fs::read_to_string(meta).ok()?;
     let t = text.parse::<toml::Table>().ok()?;
-    t.get("title").and_then(toml::Value::as_str).map(String::from)
+    t.get("title")
+        .and_then(toml::Value::as_str)
+        .map(String::from)
 }
 
 /// The directories of a directory, by name, not the dot ones.
@@ -1026,6 +1181,18 @@ fn subdirs(p: &Path) -> Vec<String> {
         .into_iter()
         // A directory that is really one: a link to somewhere else is not followed.
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    v.sort();
+    v
+}
+
+/// Like [`subdirs`], but a link to a directory counts as one: the imported folders.
+fn subdirs_following_links(p: &Path) -> Vec<String> {
+    let mut v: Vec<String> = read_dir(p)
+        .into_iter()
+        .filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| !n.starts_with('.'))
         .collect();
@@ -1081,12 +1248,22 @@ mod tests {
     }
 
     fn sub(db: &mut Db, parent: i64, title: &str) -> Task {
-        lifecycle::create(db, &NewTask { parent: Some(parent), ..NewTask::new(title) }).unwrap()
+        lifecycle::create(
+            db,
+            &NewTask {
+                parent: Some(parent),
+                ..NewTask::new(title)
+            },
+        )
+        .unwrap()
     }
 
     fn titles(db: &Db) -> Vec<String> {
         let mut t: Vec<String> = db
-            .list(&Query { kind: Some(TASK.into()), ..Query::default() })
+            .list(&Query {
+                kind: Some(TASK.into()),
+                ..Query::default()
+            })
             .unwrap()
             .iter()
             .map(|i| i.title.clone())
@@ -1096,47 +1273,106 @@ mod tests {
     }
 
     fn task_named(db: &Db, title: &str) -> Task {
-        db.list(&Query { kind: Some(TASK.into()), ..Query::default() })
-            .unwrap()
-            .iter()
-            .find(|i| i.title == title)
-            .map(Task::from)
-            .unwrap_or_else(|| panic!("no task {title}"))
+        db.list(&Query {
+            kind: Some(TASK.into()),
+            ..Query::default()
+        })
+        .unwrap()
+        .iter()
+        .find(|i| i.title == title)
+        .map(Task::from)
+        .unwrap_or_else(|| panic!("no task {title}"))
     }
 
     #[test]
     fn a_task_is_a_file_in_its_epics_directory() {
         let (mut db, v, dir) = setup();
         let e = lifecycle::create_epic(&mut db, "Holiday").unwrap();
-        let a = lifecycle::create(&mut db, &NewTask { epic: Some(e.id), notes: "text".into(), ..NewTask::new("Pack") }).unwrap();
+        let a = lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(e.id),
+                notes: "text".into(),
+                ..NewTask::new("Pack")
+            },
+        )
+        .unwrap();
         new(&mut db, "Loose");
         let r = flush(&mut db, &v);
         assert_eq!(r.written, 2, "{r:?}");
         assert!(read(&dir, "Holiday/Pack.md").contains("# Pack\n\ntext\n"));
-        let uid = Task::from(&db.get(a.id).unwrap()).uid.expect("written with an id");
+        let uid = Task::from(&db.get(a.id).unwrap())
+            .uid
+            .expect("written with an id");
         assert!(organiser_vault::is_uuid(&uid));
         assert!(read(&dir, "Holiday/Pack.md").starts_with(&format!("---\ntodo-id: {uid}\n")));
-        assert!(dir.join("Loose.md").exists(), "a task in no epic is a file at the top");
+        assert!(
+            dir.join("Loose.md").exists(),
+            "a task in no epic is a file at the top"
+        );
         assert!(read(&dir, "Holiday/.epic.toml").contains("title = \"Holiday\""));
         let known = v.known(&db).unwrap();
-        assert_eq!(v.flush(&mut db, &known).unwrap().written, 0, "nothing changed: nothing written");
+        assert_eq!(
+            v.flush(&mut db, &known).unwrap().written,
+            0,
+            "nothing changed: nothing written"
+        );
     }
 
     #[test]
     fn subtasks_make_their_parent_a_directory_with_an_index_and_losing_them_collapses_it() {
         let (mut db, v, dir) = setup();
         let e = lifecycle::create_epic(&mut db, "Trip").unwrap();
-        let p = lifecycle::create(&mut db, &NewTask { epic: Some(e.id), ..NewTask::new("Book flights") }).unwrap();
+        let p = lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(e.id),
+                ..NewTask::new("Book flights")
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
         assert!(dir.join("Trip/Book flights.md").exists());
-        let c1 = lifecycle::create(&mut db, &NewTask { parent: Some(p.id), epic: Some(e.id), ..NewTask::new("Prices") }).unwrap();
-        let hotel = lifecycle::create(&mut db, &NewTask { parent: Some(p.id), epic: Some(e.id), ..NewTask::new("Hotel") }).unwrap();
-        lifecycle::create(&mut db, &NewTask { parent: Some(hotel.id), epic: Some(e.id), ..NewTask::new("Reviews") }).unwrap();
+        let c1 = lifecycle::create(
+            &mut db,
+            &NewTask {
+                parent: Some(p.id),
+                epic: Some(e.id),
+                ..NewTask::new("Prices")
+            },
+        )
+        .unwrap();
+        let hotel = lifecycle::create(
+            &mut db,
+            &NewTask {
+                parent: Some(p.id),
+                epic: Some(e.id),
+                ..NewTask::new("Hotel")
+            },
+        )
+        .unwrap();
+        lifecycle::create(
+            &mut db,
+            &NewTask {
+                parent: Some(hotel.id),
+                epic: Some(e.id),
+                ..NewTask::new("Reviews")
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
-        for f in ["Trip/Book flights/index.md", "Trip/Book flights/Prices.md", "Trip/Book flights/Hotel/index.md", "Trip/Book flights/Hotel/Reviews.md"] {
+        for f in [
+            "Trip/Book flights/index.md",
+            "Trip/Book flights/Prices.md",
+            "Trip/Book flights/Hotel/index.md",
+            "Trip/Book flights/Hotel/Reviews.md",
+        ] {
             assert!(dir.join(f).exists(), "{f}");
         }
-        assert!(!dir.join("Trip/Book flights.md").exists(), "it moved to index.md");
+        assert!(
+            !dir.join("Trip/Book flights.md").exists(),
+            "it moved to index.md"
+        );
         assert!(read(&dir, "Trip/Book flights/index.md").contains("# Book flights"));
         // It is the same task, and reading the tree back changes nothing.
         assert!(!sync_flush(&mut db, &v).changed());
@@ -1146,7 +1382,10 @@ mod tests {
         db.delete(hotel.id).unwrap();
         v.flush(&mut db, &before).unwrap();
         assert!(dir.join("Trip/Book flights.md").exists());
-        assert!(!dir.join("Trip/Book flights").exists(), "the empty directory went");
+        assert!(
+            !dir.join("Trip/Book flights").exists(),
+            "the empty directory went"
+        );
         assert_eq!(Task::from(&db.get(p.id).unwrap()).title, "Book flights");
     }
 
@@ -1165,16 +1404,26 @@ mod tests {
         fs::write(dir.join("Work/readme.txt"), "not a task").unwrap();
         let r = sync_flush(&mut db, &v);
         assert_eq!(r.created, 6, "{r:?}");
-        assert_eq!(titles(&db), ["Draft", "Intro", "Outline", "Plain", "Report", "Top"]);
+        assert_eq!(
+            titles(&db),
+            ["Draft", "Intro", "Outline", "Plain", "Report", "Top"]
+        );
         let work = lifecycle::epic_by_title(&db, "Work").unwrap();
         let report = task_named(&db, "Report");
         assert_eq!((report.epic, report.parent_id), (Some(work), None));
         assert_eq!(report.priority, crate::primitives::priority::Priority::High);
-        assert_eq!(report.due.map(|d| d.to_string()).as_deref(), Some("2026-12-01"));
+        assert_eq!(
+            report.due.map(|d| d.to_string()).as_deref(),
+            Some("2026-12-01")
+        );
         assert_eq!(report.tags, ["a", "b"]);
         let st = statuses::load(&db).unwrap();
         assert_eq!(st.resolve(report.status).unwrap().name, "In progress");
-        for (child, parent) in [("Intro", "Report"), ("Draft", "Report"), ("Outline", "Draft")] {
+        for (child, parent) in [
+            ("Intro", "Report"),
+            ("Draft", "Report"),
+            ("Outline", "Draft"),
+        ] {
             let c = task_named(&db, child);
             assert_eq!(c.parent_id, Some(task_named(&db, parent).id), "{child}");
             assert_eq!(c.epic, Some(work), "{child} is in the epic too");
@@ -1189,9 +1438,18 @@ mod tests {
     #[test]
     fn a_file_changed_outside_updates_its_task_and_a_status_by_name_works() {
         let (mut db, v, dir) = setup();
-        let t = lifecycle::create(&mut db, &NewTask { notes: "one".into(), ..NewTask::new("Doc") }).unwrap();
+        let t = lifecycle::create(
+            &mut db,
+            &NewTask {
+                notes: "one".into(),
+                ..NewTask::new("Doc")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
-        let text = read(&dir, "Doc.md").replace("one", "two").replace("status: To do", "status: Done");
+        let text = read(&dir, "Doc.md")
+            .replace("one", "two")
+            .replace("status: To do", "status: Done");
         fs::write(dir.join("Doc.md"), text).unwrap();
         let r = sync_flush(&mut db, &v);
         assert_eq!(r.updated, 1, "{r:?}");
@@ -1202,7 +1460,11 @@ mod tests {
         let text = read(&dir, "Doc.md").replace("status: Done", "status: Waiting for review");
         fs::write(dir.join("Doc.md"), text).unwrap();
         sync_flush(&mut db, &v);
-        assert!(statuses::load(&db).unwrap().is_closed(Task::from(&db.get(t.id).unwrap()).status));
+        assert!(
+            statuses::load(&db)
+                .unwrap()
+                .is_closed(Task::from(&db.get(t.id).unwrap()).status)
+        );
     }
 
     #[test]
@@ -1210,15 +1472,39 @@ mod tests {
         let (mut db, v, dir) = setup();
         let t = new(&mut db, "Doc");
         sync_flush(&mut db, &v);
-        lifecycle::edit(&mut db, t.id, &Edit { title: Some("Renamed".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            t.id,
+            &Edit {
+                title: Some("Renamed".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
         assert!(dir.join("Renamed.md").exists() && !dir.join("Doc.md").exists());
         let e = lifecycle::create_epic(&mut db, "Box").unwrap();
-        lifecycle::edit(&mut db, t.id, &Edit { epic: Some(Some(e.id)), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            t.id,
+            &Edit {
+                epic: Some(Some(e.id)),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
         assert!(dir.join("Box/Renamed.md").exists() && !dir.join("Renamed.md").exists());
         // Renaming the epic renames the directory.
-        lifecycle::edit_epic(&mut db, e.id, &Edit { title: Some("Crate".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit_epic(
+            &mut db,
+            e.id,
+            &Edit {
+                title: Some("Crate".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
         assert!(dir.join("Crate/Renamed.md").exists() && !dir.join("Box").exists());
         assert!(!sync_flush(&mut db, &v).changed());
@@ -1229,8 +1515,23 @@ mod tests {
         let (mut db, v, dir) = setup();
         let a = lifecycle::create_epic(&mut db, "A").unwrap();
         let b = lifecycle::create_epic(&mut db, "B").unwrap();
-        let p = lifecycle::create(&mut db, &NewTask { epic: Some(a.id), ..NewTask::new("Parent") }).unwrap();
-        lifecycle::create(&mut db, &NewTask { parent: Some(p.id), epic: Some(a.id), ..NewTask::new("Child") }).unwrap();
+        let p = lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(a.id),
+                ..NewTask::new("Parent")
+            },
+        )
+        .unwrap();
+        lifecycle::create(
+            &mut db,
+            &NewTask {
+                parent: Some(p.id),
+                epic: Some(a.id),
+                ..NewTask::new("Child")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         fs::rename(dir.join("A/Parent"), dir.join("B/Parent")).unwrap();
         let r = sync_flush(&mut db, &v);
@@ -1259,12 +1560,24 @@ mod tests {
         let (mut db, v, dir) = setup();
         let e = lifecycle::create_epic(&mut db, "Trip").unwrap();
         let sec = lifecycle::create_section(&mut db, e.id, "Booking").unwrap();
-        let t = lifecycle::create(&mut db, &NewTask { epic: Some(e.id), section: Some(sec.id), ..NewTask::new("Flights") }).unwrap();
+        let t = lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(e.id),
+                section: Some(sec.id),
+                ..NewTask::new("Flights")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         assert!(read(&dir, "Trip/Flights.md").contains("section: Booking"));
         assert!(read(&dir, "Trip/.epic.toml").contains("title = \"Booking\""));
         // A new name in a file makes the section.
-        fs::write(dir.join("Trip/Hotel.md"), "---\ntodo-section: Stay\n---\n# Hotel\n").unwrap();
+        fs::write(
+            dir.join("Trip/Hotel.md"),
+            "---\ntodo-section: Stay\n---\n# Hotel\n",
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let hotel = task_named(&db, "Hotel");
         let stay = db.get(hotel.section.unwrap()).unwrap();
@@ -1276,7 +1589,14 @@ mod tests {
     fn a_deleted_file_archives_its_task_which_then_lives_in_the_archive() {
         let (mut db, v, dir) = setup();
         let e = lifecycle::create_epic(&mut db, "Trip").unwrap();
-        let t = lifecycle::create(&mut db, &NewTask { epic: Some(e.id), ..NewTask::new("Gone") }).unwrap();
+        let t = lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(e.id),
+                ..NewTask::new("Gone")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         fs::remove_file(dir.join("Trip/Gone.md")).unwrap();
         let r = sync_flush(&mut db, &v);
@@ -1308,7 +1628,10 @@ mod tests {
         sync_flush(&mut db, &v);
         let t = task_named(&db, "Done thing");
         assert!(t.archived);
-        assert!(t.epic.is_some(), "the epic directory of the archive is the same epic");
+        assert!(
+            t.epic.is_some(),
+            "the epic directory of the archive is the same epic"
+        );
         assert!(!sync_flush(&mut db, &v).changed());
     }
 
@@ -1343,7 +1666,11 @@ mod tests {
             .filter(|n| n.ends_with(".md"))
             .collect();
         files.sort();
-        assert_eq!(files, ["Orig-2.md", "Orig-3.md", "Orig.md"], "three tasks, three files, none lost");
+        assert_eq!(
+            files,
+            ["Orig-2.md", "Orig-3.md", "Orig.md"],
+            "three tasks, three files, none lost"
+        );
         assert!(!sync_flush(&mut db, &v).changed());
         assert_eq!(titles(&db), ["Orig", "Orig", "Orig"]);
     }
@@ -1351,9 +1678,24 @@ mod tests {
     #[test]
     fn when_both_changed_the_file_wins_and_the_task_is_kept_beside_it() {
         let (mut db, v, dir) = setup();
-        let t = lifecycle::create(&mut db, &NewTask { notes: "start".into(), ..NewTask::new("Both") }).unwrap();
+        let t = lifecycle::create(
+            &mut db,
+            &NewTask {
+                notes: "start".into(),
+                ..NewTask::new("Both")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
-        lifecycle::edit(&mut db, t.id, &Edit { notes: Some("app".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            t.id,
+            &Edit {
+                notes: Some("app".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         let text = read(&dir, "Both.md").replace("start", "file");
         fs::write(dir.join("Both.md"), text).unwrap();
         let r = v.sync(&mut db).unwrap();
@@ -1381,12 +1723,23 @@ mod tests {
         .unwrap();
         flush(&mut db, &v);
         let toml = read(&dir, "Trip/.epic.toml");
-        fs::write(dir.join("Trip/.epic.toml"), toml.replace("#112233", "#445566").replace("2026-12-24", "2027-01-02")).unwrap();
+        fs::write(
+            dir.join("Trip/.epic.toml"),
+            toml.replace("#112233", "#445566")
+                .replace("2026-12-24", "2027-01-02"),
+        )
+        .unwrap();
         v.sync(&mut db).unwrap();
         let now = Epic::from(&db.get(e.id).unwrap());
         assert_eq!(now.color.as_deref(), Some("#445566"));
-        assert_eq!(now.due.map(|d| d.to_string()).as_deref(), Some("2027-01-02"));
-        assert_eq!((now.notes.as_str(), now.icon.as_deref()), ("About \"it\"", Some("star")));
+        assert_eq!(
+            now.due.map(|d| d.to_string()).as_deref(),
+            Some("2027-01-02")
+        );
+        assert_eq!(
+            (now.notes.as_str(), now.icon.as_deref()),
+            ("About \"it\"", Some("star"))
+        );
     }
 
     #[test]
@@ -1404,7 +1757,15 @@ mod tests {
         sync_flush(&mut db, &v);
         assert_eq!(titles(&db), ["Draft", "Linked"]);
         let id = task_named(&db, "Linked").id;
-        lifecycle::edit(&mut db, id, &Edit { notes: Some("new".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            id,
+            &Edit {
+                notes: Some("new".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         flush(&mut db, &v);
         assert!(is_symlink(&at));
         assert!(fs::read_to_string(&src2).unwrap().contains("new"));
@@ -1412,12 +1773,13 @@ mod tests {
     }
 
     #[test]
-    fn dead_links_are_reported_and_linked_directories_not_followed() {
+    fn dead_links_are_reported_and_nested_linked_directories_not_followed() {
         let (mut db, v, dir) = setup();
         let outside = temp();
         link(&outside.join("nope.md"), &dir.join("Dead.md")).unwrap();
         fs::write(outside.join("Inside.md"), "# Inside\n").unwrap();
-        link(&outside, &dir.join("Linked")).unwrap();
+        fs::create_dir_all(dir.join("Epic")).unwrap();
+        link(&outside, &dir.join("Epic").join("Linked")).unwrap();
         let r = v.sync(&mut db).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains("Dead.md")), "{r:?}");
         assert!(titles(&db).is_empty());
@@ -1429,17 +1791,45 @@ mod tests {
         let (mut db, v, dir) = setup();
         let e = lifecycle::create_epic(&mut db, "Trip").unwrap();
         lifecycle::create_section(&mut db, e.id, "Booking").unwrap();
-        lifecycle::create(&mut db, &NewTask { epic: Some(e.id), ..NewTask::new("Flights") }).unwrap();
+        lifecycle::create(
+            &mut db,
+            &NewTask {
+                epic: Some(e.id),
+                ..NewTask::new("Flights")
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let other = temp();
         let v2 = Vault::open(&other, None).unwrap();
         Vault::forget(&mut db).unwrap();
         sync_flush(&mut db, &v2);
         assert!(titles(&db).is_empty());
-        assert!(db.list(&Query { kind: Some(EPIC.into()), ..Query::default() }).unwrap().is_empty());
-        assert!(db.list(&Query { kind: Some(SECTION.into()), ..Query::default() }).unwrap().is_empty());
-        assert_eq!(fs::read_dir(&other).unwrap().count(), 0, "no folders made in the new place");
-        assert!(dir.join("Trip/Flights.md").exists(), "the old folder is untouched");
+        assert!(
+            db.list(&Query {
+                kind: Some(EPIC.into()),
+                ..Query::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            db.list(&Query {
+                kind: Some(SECTION.into()),
+                ..Query::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(
+            fs::read_dir(&other).unwrap().count(),
+            0,
+            "no folders made in the new place"
+        );
+        assert!(
+            dir.join("Trip/Flights.md").exists(),
+            "the old folder is untouched"
+        );
     }
 
     #[test]
@@ -1459,5 +1849,72 @@ mod tests {
         let db = dir.join("todo.db");
         fs::write(&db, "").unwrap();
         assert!(Vault::open(&dir, Some(&db)).is_err());
+    }
+
+    #[test]
+    fn an_imported_folder_is_a_linked_epic_written_through_and_unlinked_cleanly() {
+        let (mut db, v, dir) = setup();
+        let outside = temp();
+        let work = outside.join("Work");
+        fs::create_dir_all(&work).unwrap();
+        fs::write(work.join("Report.md"), "# Report\n\nold\n").unwrap();
+        let (name, rep) = v.import_folder(&mut db, &work).unwrap();
+        assert_eq!(name, "Work");
+        assert!(rep.changed());
+        // Linked, not copied, and the tasks are in an epic of that name.
+        assert!(is_symlink(&dir.join("Work")));
+        assert_eq!(v.imports().len(), 1);
+        let t = task_named(&db, "Report");
+        let epic = t.epic.expect("in an epic");
+        assert_eq!(db.get(epic).unwrap().title, "Work");
+        // Edits reach the original file.
+        lifecycle::edit(
+            &mut db,
+            t.id,
+            &Edit {
+                notes: Some("new".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
+        flush(&mut db, &v);
+        assert!(is_symlink(&dir.join("Work")));
+        assert!(read(&work, "Report.md").contains("new"));
+        // Unlinking removes the link, the tasks and the epic; the folder is untouched.
+        v.remove_import(&mut db, "Work").unwrap();
+        sync_flush(&mut db, &v);
+        assert!(!dir.join("Work").exists() && v.imports().is_empty());
+        assert!(titles(&db).is_empty());
+        assert!(work.join("Report.md").exists());
+        assert!(!dir.join(ARCHIVE).join("Work").exists());
+        assert!(v.remove_import(&mut db, "Work").is_err());
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn an_imported_folder_refuses_the_vault_itself_and_real_folders_stay() {
+        let (mut db, v, dir) = setup();
+        fs::create_dir_all(dir.join("Real")).unwrap();
+        assert!(v.import_folder(&mut db, &dir).is_err());
+        assert!(v.import_folder(&mut db, &dir.join("Real")).is_err());
+        assert!(v.remove_import(&mut db, "Real").is_err());
+        assert!(dir.join("Real").exists());
+    }
+
+    #[test]
+    fn a_task_deleted_in_an_imported_folder_is_archived_in_the_vault_not_the_folder() {
+        let (mut db, v, dir) = setup();
+        let outside = temp();
+        let work = outside.join("Work");
+        fs::create_dir_all(&work).unwrap();
+        fs::write(work.join("Gone.md"), "# Gone\n").unwrap();
+        v.import_folder(&mut db, &work).unwrap();
+        sync_flush(&mut db, &v);
+        fs::remove_file(work.join("Gone.md")).unwrap();
+        v.sync(&mut db).unwrap();
+        flush(&mut db, &v);
+        assert!(!work.join("Gone.md").exists());
+        assert!(dir.join(ARCHIVE).join("Work").join("Gone.md").exists());
+        let _ = fs::remove_dir_all(outside);
     }
 }

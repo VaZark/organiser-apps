@@ -65,7 +65,10 @@ pub fn plain_line(markdown: &str, max: usize) -> String {
             s = rest;
         }
     }
-    let plain: String = s.chars().filter(|c| !matches!(c, '*' | '`' | '~')).collect();
+    let plain: String = s
+        .chars()
+        .filter(|c| !matches!(c, '*' | '`' | '~'))
+        .collect();
     ellipsize(plain.trim(), max)
 }
 
@@ -79,7 +82,10 @@ mod tests {
         assert_eq!(plain_line("- [x] Milk\n- [ ] Eggs", 80), "Milk");
         assert_eq!(plain_line("> The best way", 80), "The best way");
         assert_eq!(plain_line("3. Third item", 80), "Third item");
-        assert_eq!(plain_line("A habit tracker that *never* nags.", 80), "A habit tracker that never nags.");
+        assert_eq!(
+            plain_line("A habit tracker that *never* nags.", 80),
+            "A habit tracker that never nags."
+        );
         assert_eq!(plain_line("Network: `casa-5g`.", 80), "Network: casa-5g.");
         // A rule or blank lines first are skipped; nothing at all is empty.
         assert_eq!(plain_line("\n---\nText", 80), "Text");

@@ -49,7 +49,9 @@ impl App {
             empty(Icon::Check, title, text)
         } else {
             match self.epic_filter.filter(|_| self.scope == Scope::All) {
-                Some(epic) if self.group_by_section => self.epic_sections_list(epic, &rows, stacked),
+                Some(epic) if self.group_by_section => {
+                    self.epic_sections_list(epic, &rows, stacked)
+                }
                 // Not in sections: the tasks, pinned first, as anywhere else.
                 Some(_) => self.pinned_and_rest(&rows, stacked),
                 None if matches!(self.scope, Scope::All | Scope::Archived) => {
@@ -168,14 +170,16 @@ impl App {
                             .hint(DropHint::new("Make a separate task, in no section")),
                     );
                 } else if dragging {
-                    col = col.push(drop_zone(
-                        container(caption("Drop here for no section"))
-                            .padding(12)
-                            .width(Length::Fill),
-                        true,
-                        Message::DropInSection(None),
-                    )
-                    .hint(DropHint::new("Make a separate task, in no section")));
+                    col = col.push(
+                        drop_zone(
+                            container(caption("Drop here for no section"))
+                                .padding(12)
+                                .width(Length::Fill),
+                            true,
+                            Message::DropInSection(None),
+                        )
+                        .hint(DropHint::new("Make a separate task, in no section")),
+                    );
                 }
                 continue;
             };
@@ -192,13 +196,23 @@ impl App {
                 // hold it to carry the section to another place.
                 {
                     let mut name = column![text(sec.section.title.clone()).size(15)].spacing(1);
-                    if let Some(line) = sec.section.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
-                        name = name.push(text(ellipsize(line, 110))
+                    if let Some(line) = sec
+                        .section
+                        .notes
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                    {
+                        name = name.push(
+                            text(ellipsize(line, 110))
                                 .size(11)
-                                .style(organiser_ui::iad::styles::text::dim));
+                                .style(organiser_ui::iad::styles::text::dim),
+                        );
                     }
-                    container(drag_source(name, Message::SectionDragStart(sid)).ghost_padding([4, 10]))
-                        .width(Length::Fill)
+                    container(
+                        drag_source(name, Message::SectionDragStart(sid)).ghost_padding([4, 10]),
+                    )
+                    .width(Length::Fill)
                 },
                 caption(format!("{}/{}", sec.total - sec.open, sec.total)),
                 tooltip(
@@ -297,8 +311,11 @@ impl App {
         }
         drop_zone(source, active, Message::DropOnTask(id))
             .hint(
-                DropHint::new(format!("Make a subtask of {}", ellipsize(&r.value.title, 28)))
-                    .shrink(),
+                DropHint::new(format!(
+                    "Make a subtask of {}",
+                    ellipsize(&r.value.title, 28)
+                ))
+                .shrink(),
             )
             .into()
     }
@@ -333,7 +350,11 @@ impl App {
     /// The heading of a group of tasks: the epic's icon in its colour and its name, with how many
     /// tasks (and a button to open the epic) when `count` is given; or "Unassigned" for the tasks
     /// in no epic.
-    pub(super) fn epic_group_header(&self, epic: Option<i64>, count: Option<usize>) -> Element<'_, Message> {
+    pub(super) fn epic_group_header(
+        &self,
+        epic: Option<i64>,
+        count: Option<usize>,
+    ) -> Element<'_, Message> {
         match epic.and_then(|id| self.epics.iter().find(|s| s.epic.id == id)) {
             Some(s) => group_header(
                 Some((
@@ -353,11 +374,15 @@ impl App {
     /// when the page is grouped by epic, a group for each epic and the tasks in none last under
     /// "Unassigned"; otherwise the rest under "Others". A task's subtasks stay with it. Without
     /// pinned tasks or groups, just the list.
-    fn pinned_and_rest<'a>(&'a self, rows: &[Row<'a, Task>], stacked: bool) -> Element<'a, Message> {
+    fn pinned_and_rest<'a>(
+        &'a self,
+        rows: &[Row<'a, Task>],
+        stacked: bool,
+    ) -> Element<'a, Message> {
         // The rest, each row with the epic of the top-level task it belongs to, and whether it is
         // that top-level task.
-        let (mut pinned, mut rest): (Vec<Element<'a, Message>>, Vec<(Option<i64>, bool, Element<'a, Message>)>) =
-            (Vec::new(), Vec::new());
+        let mut pinned: Vec<Element<'a, Message>> = Vec::new();
+        let mut rest: Vec<(Option<i64>, bool, Element<'a, Message>)> = Vec::new();
         let (mut in_pinned, mut epic) = (false, None);
         for r in rows {
             if r.depth == 0 {
@@ -400,20 +425,18 @@ impl App {
                 );
             }
         } else if !rest.is_empty() {
-            col = col.push(caption("Others")).push(self.open_ground(rest.into_iter().map(|r| r.2).collect()));
+            col = col
+                .push(caption("Others"))
+                .push(self.open_ground(rest.into_iter().map(|r| r.2).collect()));
         }
         col.into()
     }
 
     /// `rows` as one list that is also open ground: dropped on it, a task leaves its parent.
     fn open_ground<'a>(&'a self, items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-        drop_zone(
-            boxed_list(items),
-            self.dragging.is_some(),
-            Message::DropOut,
-        )
-        .hint(DropHint::new("Make a separate task"))
-        .into()
+        drop_zone(boxed_list(items), self.dragging.is_some(), Message::DropOut)
+            .hint(DropHint::new("Make a separate task"))
+            .into()
     }
 
     fn task_row<'a>(&'a self, r: &Row<'a, Task>, stacked: bool) -> Element<'a, Message> {
@@ -449,7 +472,12 @@ impl App {
             && self.statuses.first_open().map(|f| f.id) != Some(s.id)
         {
             // The colour is the dot before the chips; here just the name.
-            push(text(s.name.clone()).size(13).style(organiser_ui::iad::styles::text::dim).into());
+            push(
+                text(s.name.clone())
+                    .size(13)
+                    .style(organiser_ui::iad::styles::text::dim)
+                    .into(),
+            );
         }
         if t.priority.is_urgent() {
             let role = if t.priority == Priority::Highest {
@@ -483,7 +511,11 @@ impl App {
             && !self.grouped_by_epic()
             && let Some(e) = t.epic.and_then(|id| self.epic_titles.get(&id))
         {
-            side = side.push(icons::folder_chip(e, t.epic.and_then(|id| self.epic_color(id)), t.epic.and_then(|id| self.epic_icon(id))));
+            side = side.push(icons::folder_chip(
+                e,
+                t.epic.and_then(|id| self.epic_color(id)),
+                t.epic.and_then(|id| self.epic_icon(id)),
+            ));
         }
         // The section as a chip, unless the epic's page shows it as a heading.
         if !(self.epic_filter.is_some() && self.group_by_section)

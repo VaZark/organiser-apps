@@ -34,7 +34,10 @@ impl From<&Item> for Folder {
             title: i.title.clone(),
             notes: f.get("notes").and_then(Value::as_str).unwrap_or("").into(),
             rated: f.get("rated").and_then(Value::as_bool).unwrap_or(false),
-            color: f.get("color").and_then(Value::as_str).and_then(Color::parse),
+            color: f
+                .get("color")
+                .and_then(Value::as_str)
+                .and_then(Color::parse),
             icon: f.get("icon").and_then(Value::as_str).map(String::from),
             is_default: f.get("default").and_then(Value::as_bool).unwrap_or(false),
             parent: i.parent_id,

@@ -70,36 +70,36 @@ pub static SCHEMA: Schema = Schema {
             ],
         },
         Kind {
-        name: NOTE,
-        fields: &[
-            Field::new("body", FieldType::Markdown).searchable(),
-            Field::new("favorite", FieldType::Bool).indexed(),
-            // Kept when its folder stops rating: see `views::notes`, which leaves out the rating
-            // of a note whose folder does not offer one.
-            Field::new("rating", FieldType::Rating).indexed(),
-            // Legacy: the section it was in. Only read by `lifecycle::migrate_sections`, which
-            // turns a section into a folder and clears this.
-            Field::new("section", FieldType::Reference(SECTION))
-                .indexed()
-                .internal(),
-            // Any `#rrggbb`; see `color::Color`. Absent means the default card.
-            Field::new("color", FieldType::Text),
-            Field::new("pinned", FieldType::Bool).indexed(),
-            // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
-            Field::new("sticky", FieldType::Bool).indexed().internal(),
-            Field::new("sticky_color", FieldType::Text).internal(),
-            // The vault (see `components::vault`): the note's file, relative to the vault, a hash of
-            // that file as last read or written, and of the file this note would be written as then.
-            Field::new("file", FieldType::Text).internal(),
-            // The id its file carries in its front matter (a UUID version 7).
-            Field::new("uid", FieldType::Text).internal(),
-            Field::new("file_hash", FieldType::Text).internal(),
-            Field::new("file_sig", FieldType::Text).internal(),
-            // Unix seconds when moved to the trash; absent means not trashed.
-            Field::new("trashed", FieldType::Number)
-                .indexed()
-                .internal(),
-        ],
+            name: NOTE,
+            fields: &[
+                Field::new("body", FieldType::Markdown).searchable(),
+                Field::new("favorite", FieldType::Bool).indexed(),
+                // Kept when its folder stops rating: see `views::notes`, which leaves out the rating
+                // of a note whose folder does not offer one.
+                Field::new("rating", FieldType::Rating).indexed(),
+                // Legacy: the section it was in. Only read by `lifecycle::migrate_sections`, which
+                // turns a section into a folder and clears this.
+                Field::new("section", FieldType::Reference(SECTION))
+                    .indexed()
+                    .internal(),
+                // Any `#rrggbb`; see `color::Color`. Absent means the default card.
+                Field::new("color", FieldType::Text),
+                Field::new("pinned", FieldType::Bool).indexed(),
+                // A desktop sticky (see organiser-sticky); `sticky_color` is `#rrggbb`.
+                Field::new("sticky", FieldType::Bool).indexed().internal(),
+                Field::new("sticky_color", FieldType::Text).internal(),
+                // The vault (see `components::vault`): the note's file, relative to the vault, a hash of
+                // that file as last read or written, and of the file this note would be written as then.
+                Field::new("file", FieldType::Text).internal(),
+                // The id its file carries in its front matter (a UUID version 7).
+                Field::new("uid", FieldType::Text).internal(),
+                Field::new("file_hash", FieldType::Text).internal(),
+                Field::new("file_sig", FieldType::Text).internal(),
+                // Unix seconds when moved to the trash; absent means not trashed.
+                Field::new("trashed", FieldType::Number)
+                    .indexed()
+                    .internal(),
+            ],
         },
     ],
 };

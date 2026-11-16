@@ -66,13 +66,17 @@ pub fn parse_file(text: &str, fallback: &str) -> FileTask {
         t.id = fm.get(&k("id")).filter(|i| is_uuid(i));
         t.tags = fm.list(&k("tags"));
         t.pinned = fm.get_bool(&k("pinned")).unwrap_or(false);
-        t.priority = fm.get(&k("priority")).and_then(|p| Priority::parse(&p.to_lowercase()));
+        t.priority = fm
+            .get(&k("priority"))
+            .and_then(|p| Priority::parse(&p.to_lowercase()));
         t.start = fm.get(&k("start")).and_then(|d| d.parse().ok());
         t.due = fm.get(&k("due")).and_then(|d| d.parse().ok());
         t.status = fm.get(&k("status"));
         t.section = fm.get(&k("section"));
         t.archived = fm.get_bool(&k("archived")).unwrap_or(false);
-        t.created = fm.get(&k("created")).and_then(|c| front_matter::parse_iso(&c));
+        t.created = fm
+            .get(&k("created"))
+            .and_then(|c| front_matter::parse_iso(&c));
     }
     t.front = front;
     t
@@ -182,13 +186,24 @@ mod tests {
         assert_eq!(back.section.as_deref(), Some("Booking"));
         assert_eq!(back.created, Some(1_759_305_600));
         // Written again from what was read, it is the same file.
-        assert_eq!(render_file(&t, Some("In progress"), Some("Booking"), back.front.as_ref()), text);
+        assert_eq!(
+            render_file(
+                &t,
+                Some("In progress"),
+                Some("Booking"),
+                back.front.as_ref()
+            ),
+            text
+        );
     }
 
     #[test]
     fn a_plain_file_is_a_task_with_its_name_as_title() {
         let f = parse_file("just words\n", "Buy milk");
-        assert_eq!((f.title.as_str(), f.notes.as_str()), ("Buy milk", "just words"));
+        assert_eq!(
+            (f.title.as_str(), f.notes.as_str()),
+            ("Buy milk", "just words")
+        );
         assert!(f.id.is_none() && f.front.is_none() && f.status.is_none());
         let f = parse_file("# Title\n\nbody\n", "stem");
         assert_eq!((f.title.as_str(), f.notes.as_str()), ("Title", "body"));
@@ -196,7 +211,10 @@ mod tests {
 
     #[test]
     fn keys_of_other_tools_are_kept_and_cleared_ones_leave() {
-        let f = parse_file("---\ntodo-pinned: true\ncssclass: wide\ntodo-due: 2026-01-01\nnotes-color: red\n---\n# T\n", "s");
+        let f = parse_file(
+            "---\ntodo-pinned: true\ncssclass: wide\ntodo-due: 2026-01-01\nnotes-color: red\n---\n# T\n",
+            "s",
+        );
         let t = task("T", "");
         let text = render_file(&t, None, None, f.front.as_ref());
         assert!(text.contains("cssclass: wide") && text.contains("notes-color: red"));
@@ -205,10 +223,21 @@ mod tests {
 
     #[test]
     fn only_keys_with_this_apps_name_are_read() {
-        let f = parse_file(&format!("---\nnotes-id: {UID}\npriority: high\nid: 12\nnotes-priority: high\n---\n# T\n"), "s");
+        let f = parse_file(
+            &format!(
+                "---\nnotes-id: {UID}\npriority: high\nid: 12\nnotes-priority: high\n---\n# T\n"
+            ),
+            "s",
+        );
         assert!(f.id.is_none() && f.priority.is_none());
-        let f = parse_file(&format!("---\nnotes-id: x\ntodo-id: {UID}\ntodo-priority: high\n---\n# T\n"), "s");
-        assert_eq!((f.id.as_deref(), f.priority), (Some(UID), Some(Priority::High)));
+        let f = parse_file(
+            &format!("---\nnotes-id: x\ntodo-id: {UID}\ntodo-priority: high\n---\n# T\n"),
+            "s",
+        );
+        assert_eq!(
+            (f.id.as_deref(), f.priority),
+            (Some(UID), Some(Priority::High))
+        );
         let f = parse_file("---\ntodo-id: 12\n---\n# T\n", "s");
         assert!(f.id.is_none(), "a number is not a UUID");
     }

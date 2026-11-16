@@ -60,8 +60,11 @@ fn query(f: &Filter) -> Query {
     if let Some(e) = f.epic {
         q.filters.push(FieldFilter::new("epic", Op::Eq, e));
     } else if f.no_epic {
-        q.filters
-            .push(FieldFilter::new("epic", Op::IsNull, serde_json::Value::Null));
+        q.filters.push(FieldFilter::new(
+            "epic",
+            Op::IsNull,
+            serde_json::Value::Null,
+        ));
     }
     q
 }
@@ -112,7 +115,9 @@ pub fn tasks(db: &Db, f: &Filter, _today: NaiveDate) -> Result<Vec<Task>> {
         }
         Scope::Current => {
             let mut current: Vec<Task> = found
-                .filter(|t| in_progress.is_some() && all.resolve(t.status).map(|s| s.id) == in_progress)
+                .filter(|t| {
+                    in_progress.is_some() && all.resolve(t.status).map(|s| s.id) == in_progress
+                })
                 .collect();
             // Pinned first, then as the other views are sorted; the sort is stable, so ties stay
             // in the person's own order.
@@ -170,7 +175,11 @@ pub fn unassigned(db: &Db) -> Result<(usize, usize)> {
         .list(&Query {
             kind: Some(TASK.into()),
             archived: Some(false),
-            filters: vec![FieldFilter::new("epic", Op::IsNull, serde_json::Value::Null)],
+            filters: vec![FieldFilter::new(
+                "epic",
+                Op::IsNull,
+                serde_json::Value::Null,
+            )],
             ..Query::default()
         })?
         .iter()

@@ -27,18 +27,34 @@ impl App {
                 .on_toggle(move |_| message.clone())
                 .into()
         };
-        let mut buttons = iced::widget::row![button(Icon::FolderOpen, "Choose a folder…", Message::ChooseVault)]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let mut buttons = iced::widget::row![button(
+            Icon::FolderOpen,
+            "Choose a folder…",
+            Message::ChooseVault
+        )]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
         match &self.vault {
             Some(_) => {
                 buttons = buttons
                     .push(button(Icon::Sync, "Load from folder", Message::SyncVault))
-                    .push(button(Icon::FileShow, "Show in the file manager", Message::OpenVault))
-                    .push(button(Icon::WindowClose, "Keep the notes in the database alone", Message::VaultOff));
+                    .push(button(
+                        Icon::FileShow,
+                        "Show in the file manager",
+                        Message::OpenVault,
+                    ))
+                    .push(button(
+                        Icon::WindowClose,
+                        "Keep the notes in the database alone",
+                        Message::VaultOff,
+                    ));
             }
             None => {
-                buttons = buttons.push(button(Icon::Home, "Use Notes in the documents folder", Message::UseDefaultVault));
+                buttons = buttons.push(button(
+                    Icon::Home,
+                    "Use Notes in the documents folder",
+                    Message::UseDefaultVault,
+                ));
             }
         }
         let subtitle = match &self.vault {
@@ -72,7 +88,9 @@ impl App {
             self.prefs.settings.notes.group_by_folder,
             Message::PrefGroupByFolder,
         )
-        .description("In All, Favorites, Archive and Trash, show the notes in groups, one for each section.")
+        .description(
+            "In All, Favorites, Archive and Trash, show the notes in groups, one for each section.",
+        )
         .flat(true);
         let group_sections = EntryRow::switch(
             "Group by section in a section",
@@ -102,7 +120,7 @@ impl App {
             wide,
             "Notes",
             page.into(),
-            None,
+            Vec::new(),
             self.tag_manager.view().map(Message::Tags),
             self.tag_manager.in_editor(),
             Message::Pref,

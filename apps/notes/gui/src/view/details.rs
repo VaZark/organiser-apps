@@ -65,16 +65,13 @@ impl App {
         {
             let linked = std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink());
             actions = actions.push(
-                IconToggle::new(
-                    if linked { Icon::Link } else { Icon::FileShow },
-                    false,
-                )
-                .tooltip(if linked {
-                    "Show the file (a link to a file elsewhere)"
-                } else {
-                    "Show the file"
-                })
-                .on_toggle(|_| Message::ShowFile),
+                IconToggle::new(if linked { Icon::Link } else { Icon::FileShow }, false)
+                    .tooltip(if linked {
+                        "Show the file (a link to a file elsewhere)"
+                    } else {
+                        "Show the file"
+                    })
+                    .on_toggle(|_| Message::ShowFile),
             );
         }
 
@@ -192,7 +189,11 @@ impl App {
 
     /// The colour swatch that ends the title row: a picker with the presets, for any colour. A
     /// note without one has the default card, shown as the default swatch.
-    fn colour_at_title_end<'a>(&'a self, current: Option<Color>, typed: &'a str) -> Element<'a, Message> {
+    fn colour_at_title_end<'a>(
+        &'a self,
+        current: Option<Color>,
+        typed: &'a str,
+    ) -> Element<'a, Message> {
         color_swatch_with(
             current.map_or(organiser_ui::components::color_pick::UNSET, paint),
             typed,

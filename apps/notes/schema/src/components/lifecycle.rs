@@ -151,14 +151,21 @@ pub fn create_folder(db: &mut Db, title: &str, rated: bool) -> Result<Folder> {
 }
 
 /// A folder, last, in `parent` (or at the top). Folders nest to any depth, but not in "Unassigned".
-pub fn create_folder_in(db: &mut Db, parent: Option<i64>, title: &str, rated: bool) -> Result<Folder> {
+pub fn create_folder_in(
+    db: &mut Db,
+    parent: Option<i64>,
+    title: &str,
+    rated: bool,
+) -> Result<Folder> {
     if let Some(p) = parent {
         let item = db.get(p)?;
         if item.kind != FOLDER {
             return Err(Error::Invalid(format!("item {p} is not a folder")));
         }
         if Folder::from(&item).is_default {
-            return Err(Error::Invalid("the Unassigned folder cannot hold folders".into()));
+            return Err(Error::Invalid(
+                "the Unassigned folder cannot hold folders".into(),
+            ));
         }
     }
     let mut new = NewItem::new(FOLDER, title).field("rated", rated);
@@ -260,7 +267,9 @@ pub fn move_folder_into(db: &mut Db, id: i64, parent: Option<i64>) -> Result<()>
         return Err(Error::Invalid(format!("item {id} is not a folder")));
     }
     if Folder::from(&item).is_default {
-        return Err(Error::Invalid("the Unassigned folder stays at the top".into()));
+        return Err(Error::Invalid(
+            "the Unassigned folder stays at the top".into(),
+        ));
     }
     if let Some(p) = parent {
         let target = db.get(p)?;
@@ -268,7 +277,9 @@ pub fn move_folder_into(db: &mut Db, id: i64, parent: Option<i64>) -> Result<()>
             return Err(Error::Invalid(format!("item {p} is not a folder")));
         }
         if Folder::from(&target).is_default {
-            return Err(Error::Invalid("the Unassigned folder cannot hold folders".into()));
+            return Err(Error::Invalid(
+                "the Unassigned folder cannot hold folders".into(),
+            ));
         }
         if p == id || descendants(db, id)?.iter().any(|f| f.id == p) {
             return Err(Error::Invalid(
@@ -374,7 +385,12 @@ pub fn migrate_sections(db: &mut Db) -> Result<usize> {
         };
         let mut new = NewItem::new(FOLDER, &s.title).field("rated", rated);
         new.parent_id = s.parent_id;
-        if let Some(n) = s.fields.get("notes").and_then(Value::as_str).filter(|n| !n.is_empty()) {
+        if let Some(n) = s
+            .fields
+            .get("notes")
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+        {
             new = new.field("notes", n);
         }
         if let Some(c) = s.fields.get("color").and_then(Value::as_str) {

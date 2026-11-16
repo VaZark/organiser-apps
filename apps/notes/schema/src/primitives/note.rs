@@ -47,7 +47,11 @@ impl From<&Item> for Note {
         let f = &i.fields;
         Self {
             id: i.id,
-            uid: f.get("uid").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from),
+            uid: f
+                .get("uid")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(String::from),
             folder_id: i.parent_id,
             title: i.title.clone(),
             body: f.get("body").and_then(Value::as_str).unwrap_or("").into(),

@@ -171,7 +171,9 @@ pub fn quote(s: &str) -> String {
         && !s.contains(": ")
         && !s.contains(" #")
         && !s.contains(['\n', '"', '\\'])
-        && !s.starts_with(['[', ']', '{', '}', '&', '*', '!', '|', '>', '\'', '%', '@', '`', '#', ',', '?'])
+        && !s.starts_with([
+            '[', ']', '{', '}', '&', '*', '!', '|', '>', '\'', '%', '@', '`', '#', ',', '?',
+        ])
         && !s.starts_with("- ")
         && !s.ends_with(':')
         && !is_reserved(s);
@@ -370,7 +372,8 @@ mod tests {
 
     #[test]
     fn lists_in_every_spelling() {
-        let (fm, _) = split("---\na: [x, \"y, z\"]\nb:\n  - one\n  - 'two'\nc: p, q\nd: lone\n---\n");
+        let (fm, _) =
+            split("---\na: [x, \"y, z\"]\nb:\n  - one\n  - 'two'\nc: p, q\nd: lone\n---\n");
         let fm = fm.unwrap();
         assert_eq!(fm.list("a"), ["x", "y, z"]);
         assert_eq!(fm.list("b"), ["one", "two"]);
@@ -382,8 +385,19 @@ mod tests {
     #[test]
     fn values_that_would_be_misread_are_quoted_and_come_back() {
         for s in [
-            "plain", "a: b", "# not a comment", "with \"quotes\"", "back\\slash", " padded ", "true",
-            "42", "", "- dash", "[x]", "multi\nline", "ends:",
+            "plain",
+            "a: b",
+            "# not a comment",
+            "with \"quotes\"",
+            "back\\slash",
+            " padded ",
+            "true",
+            "42",
+            "",
+            "- dash",
+            "[x]",
+            "multi\nline",
+            "ends:",
         ] {
             let mut fm = FrontMatter::default();
             fm.set("k", s);

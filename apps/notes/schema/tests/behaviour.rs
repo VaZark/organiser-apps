@@ -302,12 +302,22 @@ mod folders {
         let mut db = db();
         let loose = note_in(&mut db, None, "Loose");
         let home = ensure_default_folder(&mut db).unwrap();
-        assert_eq!(loose.folder_id, Some(home), "no folder is the default folder");
+        assert_eq!(
+            loose.folder_id,
+            Some(home),
+            "no folder is the default folder"
+        );
         let f = create_folder(&mut db, "Work", false).unwrap();
-        assert_eq!(move_note(&mut db, loose.id, f.id).unwrap().folder_id, Some(f.id));
+        assert_eq!(
+            move_note(&mut db, loose.id, f.id).unwrap().folder_id,
+            Some(f.id)
+        );
         assert_eq!(titles(&in_scope(&db, Scope::Folder(f.id))), ["Loose"]);
         // Out of a folder is back into the default one.
-        assert_eq!(move_note(&mut db, loose.id, None).unwrap().folder_id, Some(home));
+        assert_eq!(
+            move_note(&mut db, loose.id, None).unwrap().folder_id,
+            Some(home)
+        );
         assert!(in_scope(&db, Scope::Folder(f.id)).is_empty());
         // Folders are not notes: they never show among them.
         assert_eq!(titles(&in_scope(&db, Scope::Notes)), ["Loose"]);
@@ -343,8 +353,15 @@ mod folders {
         delete_folder(&mut db, keep.id).unwrap();
         assert_eq!(in_scope(&db, Scope::Notes).len(), 2);
         let home = ensure_default_folder(&mut db).unwrap();
-        let stays = in_scope(&db, Scope::Notes).into_iter().find(|n| n.title == "stays").unwrap();
-        assert_eq!(stays.folder_id, Some(home), "its notes are in the default folder");
+        let stays = in_scope(&db, Scope::Notes)
+            .into_iter()
+            .find(|n| n.title == "stays")
+            .unwrap();
+        assert_eq!(
+            stays.folder_id,
+            Some(home),
+            "its notes are in the default folder"
+        );
         assert_eq!(delete_folder_and_notes(&mut db, gone.id).unwrap(), 1);
         assert_eq!(titles(&in_scope(&db, Scope::Notes)), ["stays"]);
     }
@@ -383,7 +400,10 @@ mod folders {
             },
         )
         .unwrap();
-        assert_eq!(db.get(n.id).map(|i| Note::from(&i)).unwrap().rating, Some(5));
+        assert_eq!(
+            db.get(n.id).map(|i| Note::from(&i)).unwrap().rating,
+            Some(5)
+        );
         assert_eq!(in_scope(&db, Scope::Notes)[0].rating, None);
         assert!(notes(&db, &five).unwrap().is_empty());
         // Back on: it is there again.
@@ -399,8 +419,15 @@ mod folders {
         assert_eq!(in_scope(&db, Scope::Notes)[0].rating, Some(5));
         // Moving it out keeps the stored rating, hidden.
         move_note(&mut db, n.id, None).unwrap();
-        assert_eq!(db.get(n.id).map(|i| Note::from(&i)).unwrap().rating, Some(5));
-        assert!(in_scope(&db, Scope::Notes).iter().all(|n| n.rating.is_none()));
+        assert_eq!(
+            db.get(n.id).map(|i| Note::from(&i)).unwrap().rating,
+            Some(5)
+        );
+        assert!(
+            in_scope(&db, Scope::Notes)
+                .iter()
+                .all(|n| n.rating.is_none())
+        );
     }
 
     #[test]
@@ -435,7 +462,11 @@ mod folders {
         assert_eq!(titles(&by(&db)), ["Five", "Four", "Unrated"]);
         let four = by(&db)[1].id;
         set_pinned(&mut db, four, true).unwrap();
-        assert_eq!(titles(&by(&db)), ["Four", "Five", "Unrated"], "pinned first");
+        assert_eq!(
+            titles(&by(&db)),
+            ["Four", "Five", "Unrated"],
+            "pinned first"
+        );
         let _ = five;
     }
 
@@ -495,10 +526,18 @@ mod nesting {
     fn folders_nest_to_any_depth_and_have_a_path() {
         let mut db = db();
         let [a, b, c, d] = chain(&mut db);
-        let path: Vec<String> = folder_path(&db, d).unwrap().into_iter().map(|f| f.title).collect();
+        let path: Vec<String> = folder_path(&db, d)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.title)
+            .collect();
         assert_eq!(path, ["A", "B", "C", "D"]);
         let below: Vec<i64> = {
-            let mut v: Vec<i64> = descendants(&db, a).unwrap().into_iter().map(|f| f.id).collect();
+            let mut v: Vec<i64> = descendants(&db, a)
+                .unwrap()
+                .into_iter()
+                .map(|f| f.id)
+                .collect();
             v.sort();
             v
         };
@@ -516,11 +555,18 @@ mod nesting {
         assert!(move_folder_into(&mut db, a, Some(d)).is_err());
         assert!(move_folder_into(&mut db, b, Some(home)).is_err());
         assert!(create_folder_in(&mut db, Some(home), "X", false).is_err());
-        assert!(move_folder_into(&mut db, home, Some(a)).is_err(), "it stays at the top");
+        assert!(
+            move_folder_into(&mut db, home, Some(a)).is_err(),
+            "it stays at the top"
+        );
         // A folder can go up and across.
         move_folder_into(&mut db, d, None).unwrap();
         move_folder_into(&mut db, b, Some(d)).unwrap();
-        let path: Vec<String> = folder_path(&db, b).unwrap().into_iter().map(|f| f.title).collect();
+        let path: Vec<String> = folder_path(&db, b)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.title)
+            .collect();
         assert_eq!(path, ["D", "B"]);
     }
 
@@ -541,12 +587,24 @@ mod nesting {
         // A folder's page is its own notes; with `recursive`, the ones below too.
         let direct = in_scope(&db, Scope::Folder(b));
         assert_eq!(titles(&direct).len(), 2);
-        let deep = notes(&db, &Filter { scope: Scope::Folder(a), recursive: true, ..Filter::default() }).unwrap();
+        let deep = notes(
+            &db,
+            &Filter {
+                scope: Scope::Folder(a),
+                recursive: true,
+                ..Filter::default()
+            },
+        )
+        .unwrap();
         assert_eq!(deep.len(), 4);
         // All shows every depth.
         assert_eq!(in_scope(&db, Scope::Notes).len(), 4);
         // The folders are not notes.
-        assert!(in_scope(&db, Scope::Notes).iter().all(|n| !["A", "B", "C", "D"].contains(&n.title.as_str())));
+        assert!(
+            in_scope(&db, Scope::Notes)
+                .iter()
+                .all(|n| !["A", "B", "C", "D"].contains(&n.title.as_str()))
+        );
     }
 
     #[test]
@@ -555,7 +613,10 @@ mod nesting {
         let [a, _, _, d] = chain(&mut db);
         let n = filed(&mut db, Some(a), "n");
         assert_eq!(move_note(&mut db, n.id, d).unwrap().folder_id, Some(d));
-        assert!(move_note(&mut db, n.id, n.id).is_err(), "a note is not a folder");
+        assert!(
+            move_note(&mut db, n.id, n.id).is_err(),
+            "a note is not a folder"
+        );
     }
 
     #[test]
@@ -568,14 +629,25 @@ mod nesting {
         assert!(db.get(b).is_err());
         // Its note is in A now, and C (with D) is a folder of A.
         assert_eq!(Note::from(&db.get(nb.id).unwrap()).folder_id, Some(a));
-        let path: Vec<String> = folder_path(&db, d).unwrap().into_iter().map(|f| f.title).collect();
+        let path: Vec<String> = folder_path(&db, d)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.title)
+            .collect();
         assert_eq!(path, ["A", "C", "D"]);
         assert_eq!(Note::from(&db.get(nd.id).unwrap()).folder_id, Some(d));
         // A top folder's notes go to Unassigned, its folders to the top.
         delete_folder(&mut db, a).unwrap();
         let home = notes_schema::lifecycle::ensure_default_folder(&mut db).unwrap();
         assert_eq!(Note::from(&db.get(nb.id).unwrap()).folder_id, Some(home));
-        assert_eq!(children_of(&db, None).unwrap().iter().filter(|s| s.folder.id == c).count(), 1);
+        assert_eq!(
+            children_of(&db, None)
+                .unwrap()
+                .iter()
+                .filter(|s| s.folder.id == c)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -586,7 +658,11 @@ mod nesting {
         filed(&mut db, Some(b), "gone 1");
         let gone = filed(&mut db, Some(d), "gone 2");
         trash(&mut db, gone.id, 1).unwrap();
-        assert_eq!(delete_folder_and_notes(&mut db, b).unwrap(), 2, "trashed ones too");
+        assert_eq!(
+            delete_folder_and_notes(&mut db, b).unwrap(),
+            2,
+            "trashed ones too"
+        );
         assert_eq!(titles(&in_scope(&db, Scope::Notes)), ["kept"]);
         assert_eq!(descendants(&db, a).unwrap().len(), 0);
     }
@@ -600,7 +676,11 @@ mod nesting {
         let c = create_folder_in(&mut db, Some(f.id), "C", false).unwrap();
         let other = create_folder(&mut db, "Other", false).unwrap();
         let order = |db: &Db| -> Vec<String> {
-            children_of(db, Some(f.id)).unwrap().into_iter().map(|s| s.folder.title).collect()
+            children_of(db, Some(f.id))
+                .unwrap()
+                .into_iter()
+                .map(|s| s.folder.title)
+                .collect()
         };
         assert_eq!(order(&db), ["A", "B", "C"]);
         move_folder(&mut db, c.id, Some(a.id)).unwrap();
@@ -619,8 +699,28 @@ mod nesting {
         let plain = create_folder_in(&mut db, Some(rated.id), "Plain", false).unwrap();
         let a = filed(&mut db, Some(rated.id), "a");
         let b = filed(&mut db, Some(plain.id), "b");
-        assert!(edit(&mut db, a.id, &Edit { rating: Some(Some(4)), ..Edit::default() }).is_ok());
-        assert!(edit(&mut db, b.id, &Edit { rating: Some(Some(4)), ..Edit::default() }).is_err());
+        assert!(
+            edit(
+                &mut db,
+                a.id,
+                &Edit {
+                    rating: Some(Some(4)),
+                    ..Edit::default()
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            edit(
+                &mut db,
+                b.id,
+                &Edit {
+                    rating: Some(Some(4)),
+                    ..Edit::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -630,7 +730,9 @@ mod nesting {
         let other = create_folder(&mut db, "Other", false).unwrap();
         // What a database from before nesting holds: sections, and notes that point at them.
         let section = |db: &mut Db, parent: i64, title: &str, color: &str| {
-            let mut s = NewItem::new("section", title).field("notes", "About it").field("color", color);
+            let mut s = NewItem::new("section", title)
+                .field("notes", "About it")
+                .field("color", color);
             s.parent_id = Some(parent);
             db.create(s).unwrap().id
         };
@@ -639,7 +741,11 @@ mod nesting {
         let lone = section(&mut db, other.id, "Lone", "#112233");
         let in_section = |db: &mut Db, parent: i64, sec: i64, title: &str| {
             let n = filed(db, Some(parent), title);
-            db.update(n.id, organiser_engine::ItemPatch::default().field("section", sec)).unwrap();
+            db.update(
+                n.id,
+                organiser_engine::ItemPatch::default().field("section", sec),
+            )
+            .unwrap();
             n.id
         };
         let alien = in_section(&mut db, f.id, classics, "Alien");
@@ -647,7 +753,10 @@ mod nesting {
         let _ = in_section(&mut db, other.id, lone, "Solo");
         let loose = filed(&mut db, Some(f.id), "Loose");
 
-        assert_eq!(notes_schema::lifecycle::migrate_sections(&mut db).unwrap(), 3);
+        assert_eq!(
+            notes_schema::lifecycle::migrate_sections(&mut db).unwrap(),
+            3
+        );
         // Each is a folder in the folder it was in, in order, with its title, description, colour
         // and the folder's ratings; the sections are gone.
         let kids = children_of(&db, Some(f.id)).unwrap();
@@ -662,7 +771,10 @@ mod nesting {
         assert_eq!(at(loose.id), Some(f.id), "a note in no section stays");
         assert!(db.get(classics).is_err() && db.get(recent).is_err());
         // It is done once, and starting the app runs it.
-        assert_eq!(notes_schema::lifecycle::migrate_sections(&mut db).unwrap(), 0);
+        assert_eq!(
+            notes_schema::lifecycle::migrate_sections(&mut db).unwrap(),
+            0
+        );
         notes_schema::lifecycle::ensure_default_folder(&mut db).unwrap();
         assert_eq!(children_of(&db, Some(f.id)).unwrap().len(), 2);
     }
@@ -681,7 +793,10 @@ fn the_default_folder_is_made_once_adopts_loose_notes_and_cannot_be_deleted() {
     assert_eq!(ensure_default_folder(&mut db).unwrap(), home, "made once");
     let all = folders(&db).unwrap();
     assert_eq!(all.len(), 1);
-    assert_eq!((all[0].folder.title.as_str(), all[0].folder.is_default), ("Unassigned", true));
+    assert_eq!(
+        (all[0].folder.title.as_str(), all[0].folder.is_default),
+        ("Unassigned", true)
+    );
     assert_eq!(
         Note::from(&db.get(loose.id).unwrap()).folder_id,
         Some(home),
@@ -701,9 +816,16 @@ fn a_folder_can_be_moved_before_another_and_the_default_stays_last() {
     let b = create_folder(&mut db, "B", false).unwrap();
     let c = create_folder(&mut db, "C", false).unwrap();
     let order = |db: &Db| -> Vec<String> {
-        folders(db).unwrap().into_iter().map(|s| s.folder.title).collect()
+        folders(db)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.folder.title)
+            .collect()
     };
-    let user: Vec<String> = order(&db).into_iter().filter(|t| ["A", "B", "C"].contains(&t.as_str())).collect();
+    let user: Vec<String> = order(&db)
+        .into_iter()
+        .filter(|t| ["A", "B", "C"].contains(&t.as_str()))
+        .collect();
     assert_eq!(user, ["A", "B", "C"]);
     move_folder(&mut db, c.id, Some(a.id)).unwrap();
     let now = order(&db);

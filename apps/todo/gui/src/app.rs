@@ -16,13 +16,12 @@ use organiser_ui::iad::primitives::tag_groups::{GroupEvent, TagGroups};
 use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::expand::{Folds, flat_rows};
 use organiser_ui::primitives::scheme::Mode;
-use organiser_ui::shell;
 use organiser_ui::primitives::search::Search;
 use organiser_ui::primitives::text::ellipsize;
+use organiser_ui::shell;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
 use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
-use todo_schema::{EPIC, SECTION};
 use todo_schema::board::BoardView;
 use todo_schema::lifecycle::{self, NewTask};
 use todo_schema::priority::Priority;
@@ -33,6 +32,7 @@ use todo_schema::statuses::{self, StatusEdit};
 use todo_schema::task::{Edit, Epic, EpicSummary, Section, SectionSummary, Task as TodoTask};
 use todo_schema::vault::Vault;
 use todo_schema::views::{self, Filter, Scope};
+use todo_schema::{EPIC, SECTION};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -128,6 +128,11 @@ pub enum Message {
     OpenVault,
     /// Pick Markdown files to bring into the vault.
     AddFiles,
+    /// Pick a folder to import into the tasks folder, as a link.
+    ImportFolder,
+    FolderPicked(Option<std::path::PathBuf>),
+    /// Stop importing a folder (by its name in the tasks folder): only the link goes.
+    UnlinkFolder(String),
     FilesPicked(Vec<std::path::PathBuf>),
     /// Show the selected task's file in the file manager.
     ShowFile,
@@ -547,6 +552,7 @@ impl App {
             app.prefs.page = match page.as_str() {
                 "tags" => organiser_ui::widgets::preferences::Page::Tags,
                 "statuses" => organiser_ui::widgets::preferences::Page::Extra,
+                "folders" => organiser_ui::widgets::preferences::Page::Folders,
                 "app" => organiser_ui::widgets::preferences::Page::App,
                 _ => organiser_ui::widgets::preferences::Page::Appearance,
             };
@@ -709,7 +715,10 @@ impl App {
 
     /// Change the folder, after the person has said what becomes of a new task not yet saved.
     fn request_vault(&mut self, dir: std::path::PathBuf) {
-        let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
+        let same = self
+            .vault
+            .as_ref()
+            .is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
         if !same && self.details.as_ref().is_some_and(Details::is_new) {
             self.pending_vault = Some(dir);
         } else {
@@ -721,7 +730,8 @@ impl App {
         // Choosing a folder loads it: whatever the app held before (from the old folder or the
         // database alone) goes, so nothing is carried over and written into the new one.
         let same = self.vault.as_ref().is_some_and(|v| {
-            dir.as_ref().is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
+            dir.as_ref()
+                .is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
         });
         if dir.is_some() && !same {
             if let Err(e) = Vault::forget(&mut self.db) {
@@ -788,13 +798,10 @@ impl App {
                 id: None,
                 title: "No epic".into(),
             })
-            .chain(
-                all.iter()
-                    .map(|s| EpicChoice {
-                        id: Some(s.epic.id),
-                        title: s.epic.title.clone(),
-                    }),
-            )
+            .chain(all.iter().map(|s| EpicChoice {
+                id: Some(s.epic.id),
+                title: s.epic.title.clone(),
+            }))
             .collect();
             self.epic_sections = all
                 .iter()
@@ -855,8 +862,11 @@ impl App {
                 };
                 // Pinned first, then by the chosen order: all the cards as one list, not a tree.
                 let mut tasks = tasks;
-                let subtasks: HashMap<i64, usize> =
-                    self.sub_progress.iter().map(|(id, (_, n))| (*id, *n)).collect();
+                let subtasks: HashMap<i64, usize> = self
+                    .sub_progress
+                    .iter()
+                    .map(|(id, (_, n))| (*id, *n))
+                    .collect();
                 sort_tasks(&mut tasks, self.sort, &subtasks);
                 self.board = tasks;
             }
@@ -953,7 +963,11 @@ impl App {
         {
             self.toast = Some(e.to_string());
         }
-        self.vault_known = self.vault.as_ref().and_then(|v| v.known(&self.db).ok()).unwrap_or_default();
+        self.vault_known = self
+            .vault
+            .as_ref()
+            .and_then(|v| v.known(&self.db).ok())
+            .unwrap_or_default();
         let item = match self.db.get(id) {
             Ok(i) => i,
             Err(e) => return self.fail(e),
@@ -1302,16 +1316,14 @@ impl App {
                     }
                 }
             }
-            Message::DConvert(id) => {
-                match lifecycle::reparent(&mut self.db, id, None) {
-                    Ok(_) => {
-                        self.folds = Folds::default();
-                        self.refresh_details();
-                        self.reload();
-                    }
-                    Err(e) => self.fail(e),
+            Message::DConvert(id) => match lifecycle::reparent(&mut self.db, id, None) {
+                Ok(_) => {
+                    self.folds = Folds::default();
+                    self.refresh_details();
+                    self.reload();
                 }
-            }
+                Err(e) => self.fail(e),
+            },
             Message::DropOut => {
                 if let Some(id) = self.dragging.take() {
                     match lifecycle::reparent(&mut self.db, id, None) {
@@ -1462,7 +1474,8 @@ impl App {
             }
             Message::VaultOff => {
                 self.set_vault(None);
-                self.toast = Some("The tasks are kept in the database alone; the files stay".into());
+                self.toast =
+                    Some("The tasks are kept in the database alone; the files stay".into());
             }
             Message::OpenVault => {
                 if let Some(v) = &self.vault {
@@ -1475,6 +1488,46 @@ impl App {
                 {
                     let file = v.dir().join(rel);
                     reveal(file.parent().unwrap_or(v.dir()));
+                }
+            }
+            Message::ImportFolder => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Import a folder of tasks")
+                            .pick_folder()
+                            .await
+                            .map(|f| f.path().to_path_buf())
+                    },
+                    Message::FolderPicked,
+                );
+            }
+            Message::FolderPicked(dir) => {
+                if let (Some(v), Some(d)) = (self.vault.clone(), dir) {
+                    match v.import_folder(&mut self.db, &d) {
+                        Ok((name, _)) => {
+                            self.vault_sync(false);
+                            self.toast =
+                                Some(format!("Imported {name} as a link; nothing was copied"));
+                        }
+                        Err(e) => self.fail(e),
+                    }
+                }
+            }
+            Message::UnlinkFolder(name) => {
+                if let Some(v) = self.vault.clone() {
+                    match v.remove_import(&mut self.db, &name) {
+                        Ok(()) => {
+                            self.vault_known = v.known(&self.db).unwrap_or_default();
+                            self.epic_filter = None;
+                            self.refresh_details();
+                            self.reload();
+                            self.toast = Some(format!(
+                                "{name} is no longer imported; the folder was not touched"
+                            ));
+                        }
+                        Err(e) => self.fail(e),
+                    }
                 }
             }
             Message::AddFiles => {
@@ -1902,13 +1955,15 @@ impl App {
                 }
                 self.set_color(hex);
             }
-            Message::NewSection(epic) => match lifecycle::create_section(&mut self.db, epic, "New section") {
-                Ok(sec) => {
-                    self.reload();
-                    self.open(sec.id);
+            Message::NewSection(epic) => {
+                match lifecycle::create_section(&mut self.db, epic, "New section") {
+                    Ok(sec) => {
+                        self.reload();
+                        self.open(sec.id);
+                    }
+                    Err(e) => self.fail(e),
                 }
-                Err(e) => self.fail(e),
-            },
+            }
             Message::SectionFold(id) => {
                 if !self.folded_sections.remove(&id) {
                     self.folded_sections.insert(id);
@@ -2012,7 +2067,10 @@ impl App {
                 if let Some(id) = self.confirm_epic_delete.take() {
                     let result = if all {
                         lifecycle::delete_epic_and_tasks(&mut self.db, id).map(|n| {
-                            format!("Deleted the epic and {n} task{}", if n == 1 { "" } else { "s" })
+                            format!(
+                                "Deleted the epic and {n} task{}",
+                                if n == 1 { "" } else { "s" }
+                            )
                         })
                     } else {
                         lifecycle::delete_epic(&mut self.db, id)

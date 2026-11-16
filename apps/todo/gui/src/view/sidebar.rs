@@ -41,10 +41,7 @@ impl App {
             .drop_target("Take out of its epic", |_| Message::DropInEpic(None)),
         );
         let mut first = false;
-        for s in self
-            .epics
-            .iter()
-        {
+        for s in self.epics.iter() {
             let title = format!("{}  ({}/{})", s.epic.title, s.total - s.open, s.total);
             let mut item = SidebarItem::new(title, Message::SetEpic(Some(s.epic.id)))
                 .icon(icons::named(s.epic.icon.as_deref()))
@@ -56,11 +53,9 @@ impl App {
 
             // Press and hold an epic to move it: the others take it before or after themselves.
             let id = s.epic.id;
-            item = item.reorder(
-                Message::EpicDragStart(id),
-                "Move here",
-                move |place| Message::DropEpic(id, place),
-            );
+            item = item.reorder(Message::EpicDragStart(id), "Move here", move |place| {
+                Message::DropEpic(id, place)
+            });
 
             if first {
                 item = item.divider_above();

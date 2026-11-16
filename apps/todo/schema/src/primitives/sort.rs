@@ -83,7 +83,8 @@ mod tests {
             created,
             updated: created,
         };
-        item.fields.insert("priority".into(), priority.as_str().into());
+        item.fields
+            .insert("priority".into(), priority.as_str().into());
         if let Some(d) = due {
             item.fields.insert("due".into(), d.into());
         }

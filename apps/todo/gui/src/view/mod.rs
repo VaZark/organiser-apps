@@ -56,9 +56,19 @@ impl App {
             let page = responsive_dialog::present(window, modal, narrow, size, radius, false);
             // The question about an epic's tasks is a small alert over everything.
             if self.pending_vault.is_some() {
-                return present_dialog(page, self.draft_dialog(), Some(Message::VaultDraftCancel), radius);
+                return present_dialog(
+                    page,
+                    self.draft_dialog(),
+                    Some(Message::VaultDraftCancel),
+                    radius,
+                );
             }
-            present_dialog(page, self.epic_delete_dialog(), Some(Message::EpicDeleteCancel), radius)
+            present_dialog(
+                page,
+                self.epic_delete_dialog(),
+                Some(Message::EpicDeleteCancel),
+                radius,
+            )
         })
         .into();
         let framed = self.chrome().frame(body, Message::Window);
@@ -102,9 +112,21 @@ impl App {
                     summary.epic.title,
                     if n == 1 { "" } else { "s" }
                 ))
-                .response("Cancel", ResponseAppearance::Default, Message::EpicDeleteCancel)
-                .response("Keep tasks", ResponseAppearance::Suggested, Message::EpicDeleteKeep)
-                .response("Delete tasks", ResponseAppearance::Destructive, Message::EpicDeleteAll)
+                .response(
+                    "Cancel",
+                    ResponseAppearance::Default,
+                    Message::EpicDeleteCancel,
+                )
+                .response(
+                    "Keep tasks",
+                    ResponseAppearance::Suggested,
+                    Message::EpicDeleteKeep,
+                )
+                .response(
+                    "Delete tasks",
+                    ResponseAppearance::Destructive,
+                    Message::EpicDeleteAll,
+                )
                 .into(),
         )
     }
@@ -185,15 +207,12 @@ impl App {
     /// The view, the order and what is shown, and Preferences: everything the header does not need a
     /// button for. The views and the orders are submenus; what is shown are switches.
     fn actions_menu(&self) -> Element<'_, Message> {
-        let views = Menu::new("View")
-            .section(
-                View::ALL
-                    .map(|v| MenuItem::select(v.label(), self.view == v, Message::SetView(v))),
-            );
+        let views = Menu::new("View").section(
+            View::ALL.map(|v| MenuItem::select(v.label(), self.view == v, Message::SetView(v))),
+        );
         // The order of the tasks (pinned ones are always first): a submenu, one order ticked.
         let sort = Menu::new("Sort by").section(
-            SortKey::ALL
-                .map(|k| MenuItem::select(k.label(), self.sort == k, Message::SetSort(k))),
+            SortKey::ALL.map(|k| MenuItem::select(k.label(), self.sort == k, Message::SetSort(k))),
         );
         let mut shows = vec![
             MenuItem::switch(
@@ -221,7 +240,7 @@ impl App {
         // Files: bring a Markdown file into the vault.
         if self.vault.is_some() {
             menu = menu.section([
-                MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd),
+                MenuItem::action("Add Markdown file…", Message::AddFiles).icon(Icon::FileAdd)
             ]);
         }
         menu_button(
@@ -268,18 +287,15 @@ impl App {
 
         // The sidebar button: it opens the drawer of a narrow window, and hides or shows the
         // docked sidebar of a wide one.
-        let start: Option<Element<'_, Message>> = Some(
-            tooltip(
-                icon_button(Icon::Sidebar).on_press(if narrow {
-                    Message::Drawer(true)
-                } else {
-                    Message::ToggleSidebar
-                }),
-                "Sidebar",
-                TooltipPosition::Bottom,
-            )
-            .into(),
-        );
+        let start: Option<Element<'_, Message>> = Some(tooltip(
+            icon_button(Icon::Sidebar).on_press(if narrow {
+                Message::Drawer(true)
+            } else {
+                Message::ToggleSidebar
+            }),
+            "Sidebar",
+            TooltipPosition::Bottom,
+        ));
         // The header spans what the sidebar leaves: a quarter of the window, from 180 to 280.
         let room = if collapsed {
             width

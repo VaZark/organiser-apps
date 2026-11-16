@@ -9,7 +9,8 @@ pub fn group_by<T>(
     key: impl Fn(&T) -> Option<i64>,
     order: &[i64],
 ) -> Vec<(Option<i64>, Vec<T>)> {
-    let mut groups: Vec<(Option<i64>, Vec<T>)> = order.iter().map(|id| (Some(*id), Vec::new())).collect();
+    let mut groups: Vec<(Option<i64>, Vec<T>)> =
+        order.iter().map(|id| (Some(*id), Vec::new())).collect();
     let mut unassigned = Vec::new();
     for item in items {
         match key(&item).and_then(|k| groups.iter_mut().find(|(id, _)| *id == Some(k))) {
@@ -30,7 +31,13 @@ mod tests {
 
     #[test]
     fn groups_follow_the_given_order_and_the_unassigned_come_last() {
-        let items = vec![("a", Some(2)), ("b", None), ("c", Some(1)), ("d", Some(2)), ("e", Some(9))];
+        let items = vec![
+            ("a", Some(2)),
+            ("b", None),
+            ("c", Some(1)),
+            ("d", Some(2)),
+            ("e", Some(9)),
+        ];
         let g = group_by(items, |i| i.1, &[1, 2, 3]);
         let names: Vec<(Option<i64>, Vec<&str>)> = g
             .iter()

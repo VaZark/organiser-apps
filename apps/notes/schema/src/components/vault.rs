@@ -29,11 +29,14 @@ use std::path::{Path, PathBuf};
 
 use organiser_engine::{Db, Error, Item, ItemPatch, Query, Result};
 use organiser_vault::{
+    FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped,
+    remove_deleted, settle_claims, without_id,
+};
+pub use organiser_vault::{Known, KnownFile, Report, sanitise};
+use organiser_vault::{
     MAX_DEPTH, MAX_FILE, hash, io, is_markdown, is_symlink, link, now, prune, read_dir, read_toml,
     rel_of, unique, write_atomic, write_toml,
 };
-use organiser_vault::{FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, known_of, mark_unstamped, remove_deleted, settle_claims, without_id};
-pub use organiser_vault::{Known, KnownFile, Report, sanitise};
 
 use super::lifecycle::{self, NewNote};
 use crate::primitives::color::Color;
@@ -105,12 +108,18 @@ impl Layout {
 
     /// The directory (relative to the vault) the notes of this folder live in.
     fn dir_of(&self, folder: Option<i64>) -> PathBuf {
-        folder.and_then(|f| self.folder_dir.get(&f)).cloned().unwrap_or_default()
+        folder
+            .and_then(|f| self.folder_dir.get(&f))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The path of a folder, for a note in the trash to remember where it was: `Work/Design`.
-    fn from_of(&self, folder: Option<i64>) -> Option<String> {
-        let d = self.folder_dir.get(&folder?).filter(|d| !d.as_os_str().is_empty())?;
+    fn origin_of(&self, folder: Option<i64>) -> Option<String> {
+        let d = self
+            .folder_dir
+            .get(&folder?)
+            .filter(|d| !d.as_os_str().is_empty())?;
         Some(d.to_string_lossy().replace('\\', "/"))
     }
 }
@@ -211,7 +220,11 @@ impl Vault {
             let id = match layout.by_dir.get(rel) {
                 Some(id) => *id,
                 None => {
-                    let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("Folder").to_string();
+                    let name = rel
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Folder")
+                        .to_string();
                     let title = self.meta(&meta, "title").unwrap_or(name);
                     let parent = rel
                         .parent()
@@ -236,7 +249,8 @@ impl Vault {
 
         for f in &found {
             let folder = self.place_of(&layout, f);
-            let note_id = matcher.find(f.note.id.as_deref(), &f.rel, (folder, f.note.title.clone()));
+            let note_id =
+                matcher.find(f.note.id.as_deref(), &f.rel, (folder, f.note.title.clone()));
             match note_id {
                 Some(id) => {
                     matcher.see(id);
@@ -351,13 +365,15 @@ impl Vault {
         };
         hash(&format!(
             "{}\n{}",
-            render_file(n, self.from_for(layout, n).as_deref(), None),
+            render_file(n, self.origin_for(layout, n).as_deref(), None),
             place.display()
         ))
     }
 
-    fn from_for(&self, layout: &Layout, n: &Note) -> Option<String> {
-        n.is_trashed().then(|| layout.from_of(n.folder_id)).flatten()
+    fn origin_for(&self, layout: &Layout, n: &Note) -> Option<String> {
+        n.is_trashed()
+            .then(|| layout.origin_of(n.folder_id))
+            .flatten()
     }
 
     /// Make an existing note match its file, if the file has changed (or moved).
@@ -416,7 +432,11 @@ impl Vault {
             favorite: (cur.favorite != want.favorite).then_some(want.favorite),
             ..Edit::default()
         };
-        if edit.title.is_some() || edit.body.is_some() || edit.color.is_some() || edit.favorite.is_some() {
+        if edit.title.is_some()
+            || edit.body.is_some()
+            || edit.color.is_some()
+            || edit.favorite.is_some()
+        {
             lifecycle::edit(db, id, &edit)?;
             changed = true;
         }
@@ -466,9 +486,18 @@ impl Vault {
     }
 
     /// Save the note's own version next to the file that won, as a note without an id.
-    fn keep_conflict(&self, note: &Note, layout: &Layout, rel: &str, rep: &mut Report) -> Result<()> {
+    fn keep_conflict(
+        &self,
+        note: &Note,
+        layout: &Layout,
+        rel: &str,
+        rep: &mut Report,
+    ) -> Result<()> {
         let copy = conflict_path(&self.dir, rel, "note");
-        let text = without_id(&render_file(note, self.from_for(layout, note).as_deref(), None), "notes-id");
+        let text = without_id(
+            &render_file(note, self.origin_for(layout, note).as_deref(), None),
+            "notes-id",
+        );
         write_atomic(&copy, &text)?;
         rep.warnings.push(format!(
             "{rel} was changed in the app and outside it; the file was kept, the app's version is {}",
@@ -487,7 +516,14 @@ impl Vault {
     }
 
     /// `rel` and the directories in it, depth first, each parent before what is in it.
-    fn scan_tree(&self, rel: &Path, depth: usize, found: &mut Vec<Found>, dirs: &mut Dirs, rep: &mut Report) {
+    fn scan_tree(
+        &self,
+        rel: &Path,
+        depth: usize,
+        found: &mut Vec<Found>,
+        dirs: &mut Dirs,
+        rep: &mut Report,
+    ) {
         dirs.push(rel.to_path_buf());
         self.scan_files(&self.dir.join(rel), rel, false, found, rep);
         if depth >= MAX_DEPTH {
@@ -506,7 +542,14 @@ impl Vault {
         }
     }
 
-    fn scan_files(&self, path: &Path, dir: &Path, trashed: bool, out: &mut Vec<Found>, rep: &mut Report) {
+    fn scan_files(
+        &self,
+        path: &Path,
+        dir: &Path,
+        trashed: bool,
+        out: &mut Vec<Found>,
+        rep: &mut Report,
+    ) {
         let mut files: Vec<_> = read_dir(path)
             .into_iter()
             .filter(|e| is_markdown(&e.path()) && !e.file_name().to_string_lossy().starts_with('.'))
@@ -514,13 +557,18 @@ impl Vault {
         files.sort_by_key(|e| e.file_name());
         for e in files {
             let p = e.path();
-            let rel = p.strip_prefix(&self.dir).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+            let rel = p
+                .strip_prefix(&self.dir)
+                .unwrap_or(&p)
+                .to_string_lossy()
+                .replace('\\', "/");
             // A link to a file is followed; one that leads nowhere is reported.
             let meta = match fs::metadata(&p) {
                 Ok(m) if m.is_file() => m,
                 Ok(_) => continue,
                 Err(_) => {
-                    rep.warnings.push(format!("{rel} is a link to a file that is not there"));
+                    rep.warnings
+                        .push(format!("{rel} is a link to a file that is not there"));
                     continue;
                 }
             };
@@ -545,7 +593,10 @@ impl Vault {
     }
 
     fn meta(&self, path: &Path, key: &str) -> Option<String> {
-        read_toml(path).into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        read_toml(path)
+            .into_iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     fn read_folder_meta(&self, db: &mut Db, id: i64, path: &Path) -> Result<()> {
@@ -554,16 +605,26 @@ impl Vault {
             return Ok(());
         }
         let cur = Folder::from(&db.get(id)?);
-        let get = |k: &str| pairs.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        let get = |k: &str| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.clone())
+        };
         let mut edit = FolderEdit::default();
-        if !cur.is_default && let Some(t) = get("title").filter(|t| *t != cur.title) {
+        if !cur.is_default
+            && let Some(t) = get("title").filter(|t| *t != cur.title)
+        {
             edit.title = Some(t);
         }
         let notes = get("description").unwrap_or_default();
         if notes != cur.notes {
             edit.notes = Some(notes);
         }
-        if let Some(r) = get("rated").map(|v| v == "true").filter(|r| *r != cur.rated) {
+        if let Some(r) = get("rated")
+            .map(|v| v == "true")
+            .filter(|r| *r != cur.rated)
+        {
             edit.rated = Some(r);
         }
         let color = get("color").and_then(|c| Color::parse(&c));
@@ -574,7 +635,12 @@ impl Vault {
         if icon != cur.icon {
             edit.icon = Some(icon);
         }
-        if edit.title.is_some() || edit.notes.is_some() || edit.rated.is_some() || edit.color.is_some() || edit.icon.is_some() {
+        if edit.title.is_some()
+            || edit.notes.is_some()
+            || edit.rated.is_some()
+            || edit.color.is_some()
+            || edit.icon.is_some()
+        {
             lifecycle::edit_folder(db, id, &edit)?;
         }
         Ok(())
@@ -624,7 +690,9 @@ impl Vault {
             .map(Folder::from)
             .collect();
         for f in &folders {
-            let Some(dir) = layout.folder_dir.get(&f.id) else { continue };
+            let Some(dir) = layout.folder_dir.get(&f.id) else {
+                continue;
+            };
             let mut pairs = vec![("title", f.title.clone())];
             if !f.notes.is_empty() {
                 pairs.push(("description", f.notes.clone()));
@@ -671,7 +739,12 @@ impl Vault {
                 (p.parent() == Some(dir.as_path()) && suits).then_some(stem)
             });
             match keeps {
-                Some(stem) if taken.entry(dir.clone()).or_default().insert(stem.to_lowercase()) => {
+                Some(stem)
+                    if taken
+                        .entry(dir.clone())
+                        .or_default()
+                        .insert(stem.to_lowercase()) =>
+                {
                     out.insert(i.id, rel_of(&dir, &stem));
                 }
                 _ => later.push((dir, base, i)),
@@ -690,7 +763,14 @@ impl Vault {
         out
     }
 
-    fn write_one(&self, db: &mut Db, layout: &Layout, item: &Item, want: &str, rep: &mut Report) -> Result<()> {
+    fn write_one(
+        &self,
+        db: &mut Db,
+        layout: &Layout,
+        item: &Item,
+        want: &str,
+        rep: &mut Report,
+    ) -> Result<()> {
         let mut note = Note::from(item);
         let recorded = field(item, "file").map(String::from);
         let old_path = recorded.as_ref().map(|r| self.dir.join(r));
@@ -702,7 +782,10 @@ impl Vault {
             return Ok(());
         }
         let sig = self.sig(layout, &note);
-        if recorded.as_deref() == Some(want) && field(item, "file_sig") == Some(sig.as_str()) && on_disk.is_some() {
+        if recorded.as_deref() == Some(want)
+            && field(item, "file_sig") == Some(sig.as_str())
+            && on_disk.is_some()
+        {
             return Ok(());
         }
         // A name taken by a file that is not this note's (one not read yet) is not overwritten.
@@ -717,8 +800,15 @@ impl Vault {
         // A note gets its id the first time it is written.
         note.uid = Some(ensure_uid(db, note.id, note.uid.take())?);
         let sig = self.sig(layout, &note);
-        let previous = on_disk.as_deref().map(|t| parse_file(t, "").front).unwrap_or(None);
-        let text = render_file(&note, self.from_for(layout, &note).as_deref(), previous.as_ref());
+        let previous = on_disk
+            .as_deref()
+            .map(|t| parse_file(t, "").front)
+            .unwrap_or(None);
+        let text = render_file(
+            &note,
+            self.origin_for(layout, &note).as_deref(),
+            previous.as_ref(),
+        );
         let new_path = self.dir.join(&want);
         if let Some(p) = new_path.parent() {
             fs::create_dir_all(p).map_err(|e| io(e, p))?;
@@ -764,7 +854,13 @@ impl Vault {
     /// folder if none), as a copy (the original is left alone) or as a link to it (the app and any
     /// editor then work on the one file, where it is). Then call [`sync`](Self::sync). Returns the
     /// new path.
-    pub fn import_file(&self, db: &Db, src: &Path, folder: Option<i64>, how: Import) -> Result<PathBuf> {
+    pub fn import_file(
+        &self,
+        db: &Db,
+        src: &Path,
+        folder: Option<i64>,
+        how: Import,
+    ) -> Result<PathBuf> {
         let dest = self.import_dest(db, src, folder)?;
         Self::bring(src, &dest, how)?;
         Ok(dest)
@@ -774,9 +870,18 @@ impl Vault {
     /// vault: each directory becomes a section of that name in `folder` (the default folder if
     /// none). Hidden directories and links to directories are skipped. Returns how many files came
     /// in. Then call [`sync`](Self::sync).
-    pub fn import_dir(&self, db: &Db, src: &Path, folder: Option<i64>, how: Import) -> Result<usize> {
+    pub fn import_dir(
+        &self,
+        db: &Db,
+        src: &Path,
+        folder: Option<i64>,
+        how: Import,
+    ) -> Result<usize> {
         if !src.is_dir() {
-            return Err(Error::Invalid(format!("{} is not a directory", src.display())));
+            return Err(Error::Invalid(format!(
+                "{} is not a directory",
+                src.display()
+            )));
         }
         let layout = Layout::load(db)?;
         let base = self.dir.join(layout.dir_of(folder.or(layout.default)));
@@ -785,7 +890,14 @@ impl Vault {
         Ok(n)
     }
 
-    fn import_walk(&self, src: &Path, into: &Path, depth: usize, how: Import, n: &mut usize) -> Result<()> {
+    fn import_walk(
+        &self,
+        src: &Path,
+        into: &Path,
+        depth: usize,
+        how: Import,
+        n: &mut usize,
+    ) -> Result<()> {
         let mut entries = read_dir(src);
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
@@ -823,7 +935,10 @@ impl Vault {
     /// A free path in the vault, in `folder`, for the file `src`.
     fn import_dest(&self, db: &Db, src: &Path, folder: Option<i64>) -> Result<PathBuf> {
         if !src.is_file() || !is_markdown(src) {
-            return Err(Error::Invalid(format!("{} is not a Markdown file", src.display())));
+            return Err(Error::Invalid(format!(
+                "{} is not a Markdown file",
+                src.display()
+            )));
         }
         let layout = Layout::load(db)?;
         let dir = self.dir.join(layout.dir_of(folder.or(layout.default)));
@@ -833,7 +948,10 @@ impl Vault {
     /// A free file name in `dir` (made if it is not there) for the file `src`.
     fn free_path(&self, dir: &Path, src: &Path) -> Result<PathBuf> {
         fs::create_dir_all(dir).map_err(|e| io(e, dir))?;
-        let stem = src.file_stem().and_then(|s| s.to_str()).map_or_else(|| "Untitled".to_string(), sanitise);
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map_or_else(|| "Untitled".to_string(), sanitise);
         let mut dest = dir.join(format!("{stem}.md"));
         let mut n = 1;
         while dest.exists() || is_symlink(&dest) {
@@ -894,7 +1012,10 @@ mod tests {
 
     fn titles(db: &Db) -> Vec<String> {
         let mut t: Vec<String> = db
-            .list(&Query { kind: Some(NOTE.into()), ..Query::default() })
+            .list(&Query {
+                kind: Some(NOTE.into()),
+                ..Query::default()
+            })
             .unwrap()
             .iter()
             .map(|i| i.title.clone())
@@ -908,17 +1029,39 @@ mod tests {
         let (mut db, v, dir) = setup();
         let work = lifecycle::create_folder(&mut db, "Work", false).unwrap();
         let design = lifecycle::create_folder_in(&mut db, Some(work.id), "Design", false).unwrap();
-        let a = lifecycle::create(&mut db, &NewNote { title: "Plan".into(), body: "text".into(), folder: Some(work.id), ..NewNote::default() }).unwrap();
-        let b = lifecycle::create(&mut db, &NewNote { title: "Wires".into(), folder: Some(design.id), ..NewNote::default() }).unwrap();
+        let a = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Plan".into(),
+                body: "text".into(),
+                folder: Some(work.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
+        let b = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Wires".into(),
+                folder: Some(design.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         lifecycle::create(&mut db, &NewNote::new("Loose")).unwrap();
         let r = v.flush(&mut db, &Known::new()).unwrap();
         assert_eq!(r.written, 3);
         assert!(read(&dir, "Work/Plan.md").contains("# Plan\n\ntext\n"));
-        let uid = Note::from(&db.get(a.id).unwrap()).uid.expect("written with an id");
+        let uid = Note::from(&db.get(a.id).unwrap())
+            .uid
+            .expect("written with an id");
         assert!(organiser_vault::is_uuid(&uid));
         assert!(read(&dir, "Work/Plan.md").starts_with(&format!("---\nnotes-id: {uid}\n")));
         assert!(dir.join("Work/Design/Wires.md").exists());
-        assert!(dir.join("Loose.md").exists(), "the default folder is the vault itself");
+        assert!(
+            dir.join("Loose.md").exists(),
+            "the default folder is the vault itself"
+        );
         assert!(dir.join("Work/.folder.toml").exists());
         let _ = b;
         // Nothing changed: nothing written.
@@ -932,7 +1075,11 @@ mod tests {
         fs::create_dir_all(dir.join("Ideas/Later")).unwrap();
         fs::create_dir_all(dir.join("Ideas/Later/too/deep")).unwrap();
         fs::write(dir.join("Top.md"), "# Top\n\nhello\n").unwrap();
-        fs::write(dir.join("Ideas/Spark.md"), "---\nnotes-tags: [a, b]\nnotes-pinned: true\n---\n# Spark\n\nbody\n").unwrap();
+        fs::write(
+            dir.join("Ideas/Spark.md"),
+            "---\nnotes-tags: [a, b]\nnotes-pinned: true\n---\n# Spark\n\nbody\n",
+        )
+        .unwrap();
         fs::write(dir.join("Ideas/Later/Maybe.md"), "no heading here\n").unwrap();
         fs::write(dir.join("Ideas/Later/too/Deep.md"), "# Deep\n").unwrap();
         fs::write(dir.join("Ideas/readme.txt"), "not a note").unwrap();
@@ -943,11 +1090,21 @@ mod tests {
         let spark = Note::from(items.iter().find(|i| i.title == "Spark").unwrap());
         assert_eq!(spark.tags, ["a", "b"]);
         assert!(spark.pinned);
-        let ideas = crate::views::folders(&db).unwrap().into_iter().find(|f| f.folder.title == "Ideas").unwrap();
+        let ideas = crate::views::folders(&db)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.folder.title == "Ideas")
+            .unwrap();
         assert_eq!(spark.folder_id, Some(ideas.folder.id));
         // Ideas > Later > Maybe, Ideas > Later > too > Deep, and the empty Ideas > Later > too > deep.
         let all = crate::views::folders(&db).unwrap();
-        let by = |t: &str| all.iter().find(|f| f.folder.title == t).unwrap().folder.clone();
+        let by = |t: &str| {
+            all.iter()
+                .find(|f| f.folder.title == t)
+                .unwrap()
+                .folder
+                .clone()
+        };
         let (later, too, deep) = (by("Later"), by("too"), by("deep"));
         assert_eq!(later.parent, Some(ideas.folder.id));
         assert_eq!((too.parent, deep.parent), (Some(later.id), Some(too.id)));
@@ -986,7 +1143,11 @@ mod tests {
         let text = "---\nnotes-id: 01934f3a-7b2c-7d11-8a55-3c1e9f0a7001\n---\n# Dup\n\nsame\n";
         fs::write(dir.join("A.md"), text).unwrap();
         fs::write(dir.join("B.md"), text).unwrap();
-        fs::write(dir.join("C.md"), "---\nnotes-id: 01934f3a-7b2c-7d11-8a55-3c1e9f0a0555\n---\n# Stranger\n").unwrap();
+        fs::write(
+            dir.join("C.md"),
+            "---\nnotes-id: 01934f3a-7b2c-7d11-8a55-3c1e9f0a0555\n---\n# Stranger\n",
+        )
+        .unwrap();
         assert_eq!(v.sync(&mut db).unwrap().created, 3);
         let r = v.sync(&mut db).unwrap();
         assert!(!r.changed(), "{r:?}");
@@ -996,7 +1157,15 @@ mod tests {
     #[test]
     fn a_file_changed_outside_updates_its_note() {
         let (mut db, v, dir) = setup();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Doc".into(), body: "one".into(), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Doc".into(),
+                body: "one".into(),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let text = read(&dir, "Doc.md").replace("one", "two");
         fs::write(dir.join("Doc.md"), text).unwrap();
@@ -1008,9 +1177,26 @@ mod tests {
     #[test]
     fn a_change_in_the_app_reaches_the_file_and_a_rename_moves_it() {
         let (mut db, v, dir) = setup();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Doc".into(), body: "one".into(), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Doc".into(),
+                body: "one".into(),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
-        lifecycle::edit(&mut db, n.id, &Edit { title: Some("Renamed".into()), body: Some("two".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            n.id,
+            &Edit {
+                title: Some("Renamed".into()),
+                body: Some("two".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         let r = sync_flush(&mut db, &v);
         assert_eq!(r.written, 1, "{r:?}");
         assert!(!dir.join("Doc.md").exists());
@@ -1022,7 +1208,15 @@ mod tests {
         assert!(dir.join("Box/Renamed.md").exists());
         assert!(!dir.join("Renamed.md").exists());
         // Renaming the folder renames the directory and the empty one goes.
-        lifecycle::edit_folder(&mut db, f.id, &FolderEdit { title: Some("Crate".into()), ..FolderEdit::default() }).unwrap();
+        lifecycle::edit_folder(
+            &mut db,
+            f.id,
+            &FolderEdit {
+                title: Some("Crate".into()),
+                ..FolderEdit::default()
+            },
+        )
+        .unwrap();
         // The app flushes after every change, before anything is read again.
         let known = v.known(&db).unwrap();
         v.flush(&mut db, &known).unwrap();
@@ -1036,7 +1230,15 @@ mod tests {
         let (mut db, v, dir) = setup();
         let a = lifecycle::create_folder(&mut db, "A", false).unwrap();
         let b = lifecycle::create_folder(&mut db, "B", false).unwrap();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Mover".into(), folder: Some(a.id), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Mover".into(),
+                folder: Some(a.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         fs::rename(dir.join("A/Mover.md"), dir.join("B/Mover.md")).unwrap();
         let r = sync_flush(&mut db, &v);
@@ -1054,7 +1256,10 @@ mod tests {
         let r = sync_flush(&mut db, &v);
         assert_eq!(r.trashed, 1, "{r:?}");
         assert!(Note::from(&db.get(n.id).unwrap()).is_trashed());
-        assert!(dir.join(".trash/Gone.md").exists(), "kept in the vault's trash");
+        assert!(
+            dir.join(".trash/Gone.md").exists(),
+            "kept in the vault's trash"
+        );
         // Deleting the trashed file outside is no way to clear the trash: it is written again.
         fs::remove_file(dir.join(".trash/Gone.md")).unwrap();
         sync_flush(&mut db, &v);
@@ -1081,7 +1286,15 @@ mod tests {
         let (mut db, v, dir) = setup();
         let f = lifecycle::create_folder(&mut db, "Work", false).unwrap();
         let s = lifecycle::create_folder_in(&mut db, Some(f.id), "Design", false).unwrap();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Old".into(), folder: Some(s.id), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Old".into(),
+                folder: Some(s.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         lifecycle::trash(&mut db, n.id, 100).unwrap();
         sync_flush(&mut db, &v);
@@ -1103,15 +1316,41 @@ mod tests {
         let b = lifecycle::create_folder_in(&mut db, Some(a.id), "B", false).unwrap();
         let c = lifecycle::create_folder_in(&mut db, Some(b.id), "C", false).unwrap();
         let d = lifecycle::create_folder_in(&mut db, Some(c.id), "D", false).unwrap();
-        for (t, f) in [("One", a.id), ("Two", b.id), ("Three", c.id), ("Four", d.id)] {
-            lifecycle::create(&mut db, &NewNote { title: t.into(), folder: Some(f), ..NewNote::default() }).unwrap();
+        for (t, f) in [
+            ("One", a.id),
+            ("Two", b.id),
+            ("Three", c.id),
+            ("Four", d.id),
+        ] {
+            lifecycle::create(
+                &mut db,
+                &NewNote {
+                    title: t.into(),
+                    folder: Some(f),
+                    ..NewNote::default()
+                },
+            )
+            .unwrap();
         }
         sync_flush(&mut db, &v);
-        for f in ["A/One.md", "A/B/Two.md", "A/B/C/Three.md", "A/B/C/D/Four.md"] {
+        for f in [
+            "A/One.md",
+            "A/B/Two.md",
+            "A/B/C/Three.md",
+            "A/B/C/D/Four.md",
+        ] {
             assert!(dir.join(f).exists(), "{f}");
         }
         // Renaming B renames its directory, with everything below.
-        lifecycle::edit_folder(&mut db, b.id, &FolderEdit { title: Some("Bee".into()), ..FolderEdit::default() }).unwrap();
+        lifecycle::edit_folder(
+            &mut db,
+            b.id,
+            &FolderEdit {
+                title: Some("Bee".into()),
+                ..FolderEdit::default()
+            },
+        )
+        .unwrap();
         let known = v.known(&db).unwrap();
         v.flush(&mut db, &known).unwrap();
         assert!(dir.join("A/Bee/C/D/Four.md").exists() && !dir.join("A/B").exists());
@@ -1131,7 +1370,15 @@ mod tests {
         let (mut db, v, dir) = setup();
         let a = lifecycle::create_folder(&mut db, "A", false).unwrap();
         let b = lifecycle::create_folder_in(&mut db, Some(a.id), "B", false).unwrap();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Deep".into(), folder: Some(b.id), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Deep".into(),
+                folder: Some(b.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         fs::create_dir_all(dir.join("Elsewhere")).unwrap();
         fs::rename(dir.join("A/B"), dir.join("Elsewhere/B")).unwrap();
@@ -1162,7 +1409,15 @@ mod tests {
     #[test]
     fn files_claiming_one_id_are_resolved_by_path_then_age_and_the_rest_are_new_notes() {
         let (mut db, v, dir) = setup();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Orig".into(), body: "x".into(), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Orig".into(),
+                body: "x".into(),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let text = read(&dir, "Orig.md");
         fs::write(dir.join("Zcopy.md"), &text).unwrap();
@@ -1193,10 +1448,26 @@ mod tests {
     #[test]
     fn when_both_changed_the_file_wins_and_the_note_is_kept_beside_it() {
         let (mut db, v, dir) = setup();
-        let n = lifecycle::create(&mut db, &NewNote { title: "Both".into(), body: "start".into(), ..NewNote::default() }).unwrap();
+        let n = lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Both".into(),
+                body: "start".into(),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         // Changed in the app, not yet written...
-        lifecycle::edit(&mut db, n.id, &Edit { body: Some("app".into()), ..Edit::default() }).unwrap();
+        lifecycle::edit(
+            &mut db,
+            n.id,
+            &Edit {
+                body: Some("app".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         // ...and in the file.
         let text = read(&dir, "Both.md").replace("start", "file");
         fs::write(dir.join("Both.md"), text).unwrap();
@@ -1214,7 +1485,16 @@ mod tests {
     fn a_plain_file_that_is_already_a_note_is_not_duplicated() {
         let (mut db, v, dir) = setup();
         let f = lifecycle::create_folder(&mut db, "Docs", false).unwrap();
-        lifecycle::create(&mut db, &NewNote { title: "Known".into(), body: "b".into(), folder: Some(f.id), ..NewNote::default() }).unwrap();
+        lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Known".into(),
+                body: "b".into(),
+                folder: Some(f.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         fs::create_dir_all(dir.join("Docs")).unwrap();
         fs::write(dir.join("Docs/Known.md"), "# Known\n\nb\n").unwrap();
         let r = v.sync(&mut db).unwrap();
@@ -1237,11 +1517,31 @@ mod tests {
         link(&src2, &at).unwrap();
         sync_flush(&mut db, &v);
         assert_eq!(titles(&db), ["Draft", "Linked"]);
-        let id = db.list(&Query { kind: Some(NOTE.into()), ..Query::default() }).unwrap().iter().find(|i| i.title == "Linked").unwrap().id;
-        lifecycle::edit(&mut db, id, &Edit { body: Some("new".into()), ..Edit::default() }).unwrap();
+        let id = db
+            .list(&Query {
+                kind: Some(NOTE.into()),
+                ..Query::default()
+            })
+            .unwrap()
+            .iter()
+            .find(|i| i.title == "Linked")
+            .unwrap()
+            .id;
+        lifecycle::edit(
+            &mut db,
+            id,
+            &Edit {
+                body: Some("new".into()),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         assert!(is_symlink(&at), "still a link");
-        assert!(fs::read_to_string(&src2).unwrap().contains("new"), "written through");
+        assert!(
+            fs::read_to_string(&src2).unwrap().contains("new"),
+            "written through"
+        );
         // Deleting the note for good removes the link, never the original.
         lifecycle::trash(&mut db, id, 1).unwrap();
         sync_flush(&mut db, &v);
@@ -1261,7 +1561,11 @@ mod tests {
         link(&outside, &dir.join("Linked")).unwrap();
         let r = v.sync(&mut db).unwrap();
         assert!(r.warnings.iter().any(|w| w.contains("Dead.md")), "{r:?}");
-        assert_eq!(titles(&db).len(), 0, "nothing was read through the linked directory");
+        assert_eq!(
+            titles(&db).len(),
+            0,
+            "nothing was read through the linked directory"
+        );
         assert!(is_symlink(&dir.join("Dead.md")));
         let _ = fs::remove_dir_all(outside);
     }
@@ -1270,14 +1574,33 @@ mod tests {
     fn folder_settings_travel_in_the_toml_file() {
         let (mut db, v, dir) = setup();
         let f = lifecycle::create_folder(&mut db, "Work", true).unwrap();
-        lifecycle::edit_folder(&mut db, f.id, &FolderEdit { notes: Some("About \"work\"".into()), color: Some(Color::parse("#112233")), ..FolderEdit::default() }).unwrap();
+        lifecycle::edit_folder(
+            &mut db,
+            f.id,
+            &FolderEdit {
+                notes: Some("About \"work\"".into()),
+                color: Some(Color::parse("#112233")),
+                ..FolderEdit::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let toml = read(&dir, "Work/.folder.toml");
-        assert!(toml.contains("rated = true") && toml.contains("color = \"#112233\""), "{toml}");
+        assert!(
+            toml.contains("rated = true") && toml.contains("color = \"#112233\""),
+            "{toml}"
+        );
         // Changed outside, it is read back.
-        fs::write(dir.join("Work/.folder.toml"), toml.replace("#112233", "#445566")).unwrap();
+        fs::write(
+            dir.join("Work/.folder.toml"),
+            toml.replace("#112233", "#445566"),
+        )
+        .unwrap();
         v.sync(&mut db).unwrap();
-        assert_eq!(Folder::from(&db.get(f.id).unwrap()).color, Color::parse("#445566"));
+        assert_eq!(
+            Folder::from(&db.get(f.id).unwrap()).color,
+            Color::parse("#445566")
+        );
         assert_eq!(Folder::from(&db.get(f.id).unwrap()).notes, "About \"work\"");
     }
 
@@ -1294,7 +1617,15 @@ mod tests {
     fn changing_folders_loads_the_new_one_and_keeps_nothing_of_the_old() {
         let (mut db, v, dir) = setup();
         let f = lifecycle::create_folder_in(&mut db, None, "Work", false).unwrap();
-        lifecycle::create(&mut db, &NewNote { title: "Plan".into(), folder: Some(f.id), ..NewNote::default() }).unwrap();
+        lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Plan".into(),
+                folder: Some(f.id),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
         sync_flush(&mut db, &v);
         let other = temp();
         fs::create_dir_all(other.join("Fresh")).unwrap();
@@ -1303,10 +1634,24 @@ mod tests {
         Vault::forget(&mut db).unwrap();
         v2.sync(&mut db).unwrap();
         assert_eq!(titles(&db), ["Idea"]);
-        let dirs: Vec<_> = fs::read_dir(&other).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        let dirs: Vec<_> = fs::read_dir(&other)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
         assert_eq!(dirs, ["Fresh"], "nothing from the old folder was made here");
-        assert_eq!(read(&other, "Fresh/Idea.md"), "just text\n", "found, not touched");
-        let id = db.list(&Query { kind: Some(NOTE.into()), ..Query::default() }).unwrap()[0].id;
+        assert_eq!(
+            read(&other, "Fresh/Idea.md"),
+            "just text\n",
+            "found, not touched"
+        );
+        let id = db
+            .list(&Query {
+                kind: Some(NOTE.into()),
+                ..Query::default()
+            })
+            .unwrap()[0]
+            .id;
         assert_eq!(v2.stamp(&mut db, id).unwrap().written, 1);
         assert!(read(&other, "Fresh/Idea.md").starts_with("---\nnotes-id: "));
         assert!(dir.join("Work/Plan.md").exists());
@@ -1322,11 +1667,20 @@ mod tests {
         fs::write(&b, "# Linked\n\ntwo\n").unwrap();
         let ca = v.import_file(&db, &a, None, Import::Copy).unwrap();
         let cb = v.import_file(&db, &b, None, Import::Link).unwrap();
-        assert!(a.exists() && !is_symlink(&ca) && ca.exists(), "a copy leaves the original");
+        assert!(
+            a.exists() && !is_symlink(&ca) && ca.exists(),
+            "a copy leaves the original"
+        );
         assert!(is_symlink(&cb) && b.exists());
         // The same name again is numbered, not overwritten.
-        assert_eq!(v.import_file(&db, &a, None, Import::Copy).unwrap(), dir.join("Copied-2.md"));
-        assert!(v.import_file(&db, &outside.join("x.txt"), None, Import::Copy).is_err());
+        assert_eq!(
+            v.import_file(&db, &a, None, Import::Copy).unwrap(),
+            dir.join("Copied-2.md")
+        );
+        assert!(
+            v.import_file(&db, &outside.join("x.txt"), None, Import::Copy)
+                .is_err()
+        );
         v.sync(&mut db).unwrap();
         assert_eq!(titles(&db), ["Copied", "Copied", "Linked"]);
         let _ = fs::remove_dir_all(outside);
@@ -1344,12 +1698,19 @@ mod tests {
         fs::write(src.join(".hidden/Secret.md"), "# Secret\n").unwrap();
         fs::write(src.join("Trip/readme.txt"), "not a note").unwrap();
         assert_eq!(v.import_dir(&db, &src, None, Import::Copy).unwrap(), 3);
-        assert!(dir.join("Top.md").exists() && dir.join("Trip/Plan.md").exists() && dir.join("Trip/Day 1/Hotel.md").exists());
+        assert!(
+            dir.join("Top.md").exists()
+                && dir.join("Trip/Plan.md").exists()
+                && dir.join("Trip/Day 1/Hotel.md").exists()
+        );
         assert!(!dir.join(".hidden").exists() && !dir.join("Trip/readme.txt").exists());
         v.sync(&mut db).unwrap();
         assert_eq!(titles(&db), ["Hotel", "Plan", "Top"]);
         assert!(src.join("Top.md").exists(), "copies leave the originals");
-        assert!(v.import_dir(&db, &src.join("Top.md"), None, Import::Copy).is_err());
+        assert!(
+            v.import_dir(&db, &src.join("Top.md"), None, Import::Copy)
+                .is_err()
+        );
         let _ = fs::remove_dir_all(src);
     }
 

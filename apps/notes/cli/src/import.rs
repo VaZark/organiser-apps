@@ -3,8 +3,8 @@
 //! them (by title) are skipped, so it can be run again safely.
 
 use notes_schema::color::Color;
-use notes_schema::lifecycle::{NewNote, create, create_folder, edit_folder};
 use notes_schema::folder::FolderEdit;
+use notes_schema::lifecycle::{NewNote, create, create_folder, edit_folder};
 use notes_schema::views::{Filter, Scope, folders, notes};
 use organiser_cli_kit::Output;
 use organiser_core::AppMeta;
@@ -82,7 +82,11 @@ pub fn run(db: &mut Db, from: Option<&str>) -> Result<Output> {
         let id = match existing {
             Some(id) => id,
             None => {
-                let rated = l.fields.get("rated").and_then(Value::as_bool).unwrap_or(false);
+                let rated = l
+                    .fields
+                    .get("rated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 let f = create_folder(db, &l.title, rated)?;
                 made_folders += 1;
                 edit_folder(
@@ -108,7 +112,10 @@ pub fn run(db: &mut Db, from: Option<&str>) -> Result<Output> {
         ..Query::default()
     })?;
     for e in &entries {
-        let folder = e.parent_id.and_then(|p| folder_of.get(&p).copied()).or(Some(home));
+        let folder = e
+            .parent_id
+            .and_then(|p| folder_of.get(&p).copied())
+            .or(Some(home));
         // Already there (by title, in that folder): leave it.
         let scope = folder.map_or(Scope::Notes, Scope::Folder);
         let there = notes(
@@ -125,20 +132,31 @@ pub fn run(db: &mut Db, from: Option<&str>) -> Result<Output> {
             skipped += 1;
             continue;
         }
-        let rating = e.fields.get("rating").and_then(Value::as_u64).map(|r| r as u8);
+        let rating = e
+            .fields
+            .get("rating")
+            .and_then(Value::as_u64)
+            .map(|r| r as u8);
         let new = NewNote {
             title: e.title.clone(),
             body: text(&e.fields, "notes").unwrap_or_default(),
             color: text(&e.fields, "color").and_then(|c| Color::parse(&c)),
             tags: e.tags.clone(),
             folder,
-            favorite: e.fields.get("favorite").and_then(Value::as_bool).unwrap_or(false),
+            favorite: e
+                .fields
+                .get("favorite")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             // Set below: it is kept even where the folder does not rate, as Faves kept it.
             rating: None,
         };
         let note = create(db, &new)?;
         if let Some(r) = rating {
-            db.update(note.id, organiser_engine::ItemPatch::default().field("rating", r))?;
+            db.update(
+                note.id,
+                organiser_engine::ItemPatch::default().field("rating", r),
+            )?;
         }
         made_notes += 1;
     }

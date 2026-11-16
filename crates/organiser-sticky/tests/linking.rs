@@ -154,11 +154,7 @@ fn sticky_sees_exactly_what_the_linked_apps_flag() {
         }
     }
     seen.sort();
-    assert_eq!(
-        seen,
-        ["notes"],
-        "Todo is off, so its sticky is not shown"
-    );
+    assert_eq!(seen, ["notes"], "Todo is off, so its sticky is not shown");
 
     // Switching Todo on shows it; the apps' own typed reads agree about the flag.
     store::set_enabled_by_id(todo_schema::META.id, true).unwrap();

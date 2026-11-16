@@ -97,7 +97,10 @@ mod tests {
         let soon = Some(d("2026-11-14"));
         let later = Some(d("2026-12-25"));
         assert_eq!(classify(Priority::High, soon, today), Quadrant::DoFirst);
-        assert_eq!(classify(Priority::Highest, later, today), Quadrant::Schedule);
+        assert_eq!(
+            classify(Priority::Highest, later, today),
+            Quadrant::Schedule
+        );
         assert_eq!(classify(Priority::Low, soon, today), Quadrant::Delegate);
         assert_eq!(classify(Priority::Medium, later, today), Quadrant::Backlog);
     }
@@ -107,7 +110,10 @@ mod tests {
         let today = d(TODAY);
         assert!(!is_urgent(None, today));
         assert!(is_urgent(Some(d("2026-10-01")), today), "overdue");
-        assert!(is_urgent(Some(d("2026-11-17")), today), "a week away is the edge");
+        assert!(
+            is_urgent(Some(d("2026-11-17")), today),
+            "a week away is the edge"
+        );
         assert!(!is_urgent(Some(d("2026-11-18")), today));
     }
 
@@ -130,7 +136,8 @@ mod tests {
             created: id,
             updated: id,
         };
-        item.fields.insert("priority".into(), priority.as_str().into());
+        item.fields
+            .insert("priority".into(), priority.as_str().into());
         if let Some(d) = due {
             item.fields.insert("due".into(), d.into());
         }
@@ -139,7 +146,7 @@ mod tests {
 
     #[test]
     fn triage_puts_the_important_first_then_the_closer_date_then_more_subtasks_then_the_title() {
-        let mut v = vec![
+        let mut v = [
             task(1, "no date", Priority::High, None),
             task(2, "later", Priority::High, Some("2026-11-20")),
             task(3, "sooner", Priority::High, Some("2026-11-12")),
@@ -153,7 +160,9 @@ mod tests {
         let names: Vec<&str> = v.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(
             names,
-            ["top", "sooner", "crowded", "a tie", "b tie", "later", "no date"]
+            [
+                "top", "sooner", "crowded", "a tie", "b tie", "later", "no date"
+            ]
         );
         v[6].pinned = true;
         v.sort_by(|a, b| triage_order(a, b, &subs));

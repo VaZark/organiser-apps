@@ -6,18 +6,18 @@
 
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
-use notes_schema::note::Note;
 use notes_schema::folder::FolderSummary;
+use notes_schema::note::Note;
 use notes_schema::views::Scope;
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{chip, hashtag, more};
 use organiser_ui::components::dot::dot;
+use organiser_ui::components::empty::empty;
 use organiser_ui::components::group_header::{UNASSIGNED, group_header};
 use organiser_ui::components::heart::heart;
 use organiser_ui::components::icons;
 use organiser_ui::components::list_item::{self, list_item};
-use organiser_ui::components::empty::empty;
 use organiser_ui::components::tag_groups::tag_groups;
 use organiser_ui::components::tag_query::count as tag_count;
 use organiser_ui::iad::Theme;
@@ -209,19 +209,29 @@ impl App {
                 if grouped {
                     // Pinned first, then a group per top section, then those in none. A note in a
                     // section inside one is in its top one's group (with its own section as a chip).
-                    let order: Vec<i64> = self.children_of(None).iter().map(|s| s.folder.id).collect();
+                    let order: Vec<i64> =
+                        self.children_of(None).iter().map(|s| s.folder.id).collect();
                     let home = self.default_folder_id();
-                    for (folder, notes) in group_by(others, |n| self.base_folder(n.folder_id).or(home), &order) {
+                    for (folder, notes) in
+                        group_by(others, |n| self.base_folder(n.folder_id).or(home), &order)
+                    {
                         // The heading and its notes are one place to drop: a note dropped there
                         // moves to the folder.
-                        let label = match folder.and_then(|id| self.folders.iter().find(|s| s.folder.id == id)) {
+                        let label = match folder
+                            .and_then(|id| self.folders.iter().find(|s| s.folder.id == id))
+                        {
                             Some(s) => format!("Move to {}", s.folder.title),
                             None => "Take out of its section".to_string(),
                         };
-                        let group = column![self.folder_header(folder, notes.len()), block(&notes)].spacing(8);
+                        let group = column![self.folder_header(folder, notes.len()), block(&notes)]
+                            .spacing(8);
                         page = page.push(
-                            drop_zone(group, self.dragging.is_some(), Message::DropInFolder(folder))
-                                .hint(DropHint::new(label)),
+                            drop_zone(
+                                group,
+                                self.dragging.is_some(),
+                                Message::DropInFolder(folder),
+                            )
+                            .hint(DropHint::new(label)),
                         );
                     }
                 } else if !others.is_empty() {
@@ -234,7 +244,9 @@ impl App {
         }
         // A list is kept to a readable width, as in Todo; the cards use all of it.
         let page: Element<'_, Message> = if self.list_view {
-            organiser_ui::iad::prelude::page(page).maximum_size(1000.0).into()
+            organiser_ui::iad::prelude::page(page)
+                .maximum_size(1000.0)
+                .into()
         } else {
             page.into()
         };
@@ -293,7 +305,11 @@ impl App {
         let mut title = column![text(n.title.clone())].spacing(2);
         let body = plain_line(&n.body, 120);
         if !body.is_empty() {
-            title = title.push(text(body).size(13).style(organiser_ui::iad::styles::text::dim));
+            title = title.push(
+                text(body)
+                    .size(13)
+                    .style(organiser_ui::iad::styles::text::dim),
+            );
         }
         let mut chips = row![].spacing(4).align_y(Alignment::Center);
         let mut any = false;
@@ -367,7 +383,12 @@ impl App {
             .map(|s| {
                 let f = &s.folder;
                 let what = if s.subfolders > 0 {
-                    format!("{} · {} section{}", notes_word(s.total), s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+                    format!(
+                        "{} · {} section{}",
+                        notes_word(s.total),
+                        s.subfolders,
+                        if s.subfolders == 1 { "" } else { "s" }
+                    )
                 } else {
                     notes_word(s.total)
                 };
@@ -395,7 +416,8 @@ impl App {
                     }
                 });
                 let source = drag_source(Element::from(card), Message::FolderDragStart(f.id));
-                let active = self.dragging.is_some() || self.dragging_folder.is_some_and(|m| m != f.id);
+                let active =
+                    self.dragging.is_some() || self.dragging_folder.is_some_and(|m| m != f.id);
                 Element::from(
                     drop_zone(source, active, Message::DropOnFolder(f.id)).hint(
                         DropHint::new(format!(
@@ -454,7 +476,13 @@ impl App {
             return space().into();
         };
         let mut name = column![text(s.folder.title.clone()).size(20)].spacing(2);
-        if let Some(line) = s.folder.notes.lines().map(str::trim).find(|l| !l.is_empty()) {
+        if let Some(line) = s
+            .folder
+            .notes
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+        {
             name = name.push(
                 text(organiser_ui::primitives::text::ellipsize(line, 140))
                     .size(12)
@@ -469,7 +497,12 @@ impl App {
             ),
             container(name).width(Length::Fill),
             caption(if s.subfolders > 0 {
-                format!("{} · {} section{}", notes_word(s.notes), s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+                format!(
+                    "{} · {} section{}",
+                    notes_word(s.notes),
+                    s.subfolders,
+                    if s.subfolders == 1 { "" } else { "s" }
+                )
             } else {
                 notes_word(s.notes)
             }),
@@ -498,7 +531,10 @@ impl App {
                             Message::GroupBySection(!self.group_by_section),
                         ),
                     ])
-                    .section([MenuItem::action("New section in here", Message::NewSubfolder(id))]),
+                    .section([MenuItem::action(
+                        "New section in here",
+                        Message::NewSubfolder(id)
+                    )]),
             )
             .tooltip("More"),
         ]
@@ -514,10 +550,13 @@ impl App {
                     crumbs = crumbs.push(caption("›"));
                 }
                 crumbs = crumbs.push(
-                    iced::widget::button(caption(organiser_ui::primitives::text::ellipsize(&a.folder.title, 20)))
-                        .padding([2, 6])
-                        .style(organiser_ui::iad::styles::button::flat)
-                        .on_press(Message::SetScope(Scope::Folder(a.folder.id))),
+                    iced::widget::button(caption(organiser_ui::primitives::text::ellipsize(
+                        &a.folder.title,
+                        20,
+                    )))
+                    .padding([2, 6])
+                    .style(organiser_ui::iad::styles::button::flat)
+                    .on_press(Message::SetScope(Scope::Folder(a.folder.id))),
                 );
             }
             col = col.push(crumbs.wrap());
@@ -556,7 +595,11 @@ impl App {
             tooltip(
                 icon_button(if folded { Icon::GoNext } else { Icon::GoDown })
                     .on_press(Message::FoldSubfolder(id)),
-                if folded { "Show the notes" } else { "Hide the notes" },
+                if folded {
+                    "Show the notes"
+                } else {
+                    "Hide the notes"
+                },
                 TooltipPosition::Bottom,
             ),
         ]
@@ -569,11 +612,19 @@ impl App {
             .on_release(Message::SetScope(Scope::Folder(id)));
         let name = drag_source(name, Message::FolderDragStart(id)).ghost_padding([4, 10]);
         row![
-            icons::tinted(icons::named(f.icon.as_deref()), 18.0, Some(self.folder_color(f))),
+            icons::tinted(
+                icons::named(f.icon.as_deref()),
+                18.0,
+                Some(self.folder_color(f))
+            ),
             name,
             space().width(Length::Fill),
             caption(if s.subfolders > 0 {
-                format!("{shown} · {} section{}", s.subfolders, if s.subfolders == 1 { "" } else { "s" })
+                format!(
+                    "{shown} · {} section{}",
+                    s.subfolders,
+                    if s.subfolders == 1 { "" } else { "s" }
+                )
             } else {
                 shown.to_string()
             }),
@@ -581,7 +632,12 @@ impl App {
         ]
         .spacing(8)
         .align_y(Alignment::Center)
-        .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 10.0 })
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 10.0,
+        })
         .into()
     }
 
@@ -590,9 +646,16 @@ impl App {
     fn folder_header<'a>(&'a self, folder: Option<i64>, count: usize) -> Element<'a, Message> {
         match folder.and_then(|id| self.folders.iter().find(|s| s.folder.id == id)) {
             Some(s) => group_header(
-                Some((icons::named(s.folder.icon.as_deref()), Some(self.folder_color(&s.folder)))),
+                Some((
+                    icons::named(s.folder.icon.as_deref()),
+                    Some(self.folder_color(&s.folder)),
+                )),
                 &s.folder.title,
-                s.folder.notes.lines().map(str::trim).find(|l| !l.is_empty()),
+                s.folder
+                    .notes
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty()),
                 Some(count),
                 Some((Message::OpenFolderSettings(s.folder.id), "Section settings")),
             ),
@@ -616,9 +679,7 @@ impl App {
                 path.get(want)?.folder.clone()
             }
             _ if self.grouped_by_folder() => {
-                if f.parent.is_none() {
-                    return None;
-                }
+                f.parent?;
                 f.clone()
             }
             _ => self.folder_path(f.id).first()?.folder.clone(),
@@ -626,7 +687,11 @@ impl App {
         if shown.is_default {
             return None;
         }
-        Some(icons::folder_chip(&shown.title, Some(self.folder_color(&shown)), shown.icon.as_deref()))
+        Some(icons::folder_chip(
+            &shown.title,
+            Some(self.folder_color(&shown)),
+            shown.icon.as_deref(),
+        ))
     }
 
     fn card<'a>(&'a self, theme: &Theme, n: &'a Note) -> Element<'a, Message> {
@@ -662,6 +727,9 @@ impl App {
         if let Some(f) = self.folder_chip_of(n) {
             body = body.push(f);
         }
-        self.draggable(n, card(body, self.note_tint(n), selected, Message::Select(n.id)))
+        self.draggable(
+            n,
+            card(body, self.note_tint(n), selected, Message::Select(n.id)),
+        )
     }
 }

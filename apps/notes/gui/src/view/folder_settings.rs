@@ -18,11 +18,8 @@ impl App {
         let f = &s.folder;
         let name = self.folder_name.as_deref().unwrap_or(f.title.as_str());
         let head = row![
-            column![
-                text("Section settings").size(18),
-                caption(f.title.clone()),
-            ]
-            .width(iced::Length::Fill),
+            column![text("Section settings").size(18), caption(f.title.clone()),]
+                .width(iced::Length::Fill),
             icon_button(Icon::WindowClose).on_press(Message::CloseFolderSettings),
         ]
         .align_y(iced::Alignment::Start);
@@ -79,10 +76,18 @@ impl App {
         if f.is_default {
             return space().into();
         }
-        let current = self.parent_choices.iter().find(|c| c.id == f.parent).cloned();
+        let current = self
+            .parent_choices
+            .iter()
+            .find(|c| c.id == f.parent)
+            .cloned();
         column![
             caption("In section"),
-            dropdown(&self.parent_choices, current, |c: crate::app::FolderChoice| Message::SetFolderParent(c.id)),
+            dropdown(
+                &self.parent_choices,
+                current,
+                |c: crate::app::FolderChoice| Message::SetFolderParent(c.id)
+            ),
         ]
         .spacing(4)
         .into()
@@ -104,7 +109,10 @@ impl App {
     pub(super) fn import_dialog(&self) -> Option<Element<'_, Message>> {
         let n = self.pending_import.len();
         let title = match self.pending_import.as_slice() {
-            [d] if d.is_dir() => format!("Import the files in “{}”?", d.file_name().and_then(|n| n.to_str()).unwrap_or("folder")),
+            [d] if d.is_dir() => format!(
+                "Import the files in “{}”?",
+                d.file_name().and_then(|n| n.to_str()).unwrap_or("folder")
+            ),
             _ => format!("Import {n} file{}?", if n == 1 { "" } else { "s" }),
         };
         Some(
@@ -146,11 +154,27 @@ impl App {
                     "“{}” has {n} note{}{}. {what}",
                     s.folder.title,
                     if n == 1 { "" } else { "s" },
-                    if sub > 0 { " with the sections in it" } else { "" },
+                    if sub > 0 {
+                        " with the sections in it"
+                    } else {
+                        ""
+                    },
                 ))
-                .response("Cancel", ResponseAppearance::Default, Message::FolderDeleteCancel)
-                .response("Keep", ResponseAppearance::Suggested, Message::FolderDeleteKeep)
-                .response("Delete all", ResponseAppearance::Destructive, Message::FolderDeleteAll)
+                .response(
+                    "Cancel",
+                    ResponseAppearance::Default,
+                    Message::FolderDeleteCancel,
+                )
+                .response(
+                    "Keep",
+                    ResponseAppearance::Suggested,
+                    Message::FolderDeleteKeep,
+                )
+                .response(
+                    "Delete all",
+                    ResponseAppearance::Destructive,
+                    Message::FolderDeleteAll,
+                )
                 .into(),
         )
     }

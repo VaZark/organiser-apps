@@ -120,8 +120,8 @@ fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
         let rows = app.settings.sticky.palette.iter().take(5).map(|hex| {
             let on = current.is_some_and(|c| c.eq_ignore_ascii_case(hex));
             let fill = color::paper(Some(hex), app.default_color());
-            let swatch = container(space().width(16).height(16)).style(move |_: &Theme| {
-                container::Style {
+            let swatch =
+                container(space().width(16).height(16)).style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(fill)),
                     border: Border {
                         color: mix(fill, ink, 0.35),
@@ -129,8 +129,7 @@ fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
                         radius: 8.0.into(),
                     },
                     ..container::Style::default()
-                }
-            });
+                });
             let mark: Element<'a, Message> = if on {
                 Icon::Check.colored(14.0, ink).into()
             } else {
@@ -179,29 +178,30 @@ fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
     };
     let surface = move |page: Element<'a, Message>| {
         container(page)
-        .width(190)
-        .padding(6)
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(paper)),
-            border: Border {
-                color: line,
-                width: 1.0,
-                radius: 12.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-                offset: iced::Vector::new(0.0, 2.0),
-                blur_radius: 10.0,
-            },
-            ..container::Style::default()
-        })
+            .width(190)
+            .padding(6)
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(paper)),
+                border: Border {
+                    color: line,
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+                    offset: iced::Vector::new(0.0, 2.0),
+                    blur_radius: 10.0,
+                },
+                ..container::Style::default()
+            })
     };
-    let menu: Element<'a, Message> = Popover::new(Icon::ViewMore.colored(16.0, ink), surface(menu_page))
-        .appearance(PopoverAppearance::Flat)
-        .keep_open(true)
-        .scrim(false)
-        .align(PopoverAlign::End)
-        .into();
+    let menu: Element<'a, Message> =
+        Popover::new(Icon::ViewMore.colored(16.0, ink), surface(menu_page))
+            .appearance(PopoverAppearance::Flat)
+            .keep_open(true)
+            .scrim(false)
+            .align(PopoverAlign::End)
+            .into();
     // Closed by changing the shape of the view (see `Sticky::menu_flip`).
     let more: Element<'a, Message> = if s.menu_flip {
         container(menu).into()
@@ -223,18 +223,25 @@ fn sticky<'a>(app: &'a App, s: &'a Sticky) -> Element<'a, Message> {
         })
         .collect();
     let choices: Element<'a, Message> = if apps.is_empty() {
-        container(text("Link an app in Sticky Notes first.").size(13).color(faint))
-            .padding([6, 10])
-            .into()
+        container(
+            text("Link an app in Sticky Notes first.")
+                .size(13)
+                .color(faint),
+        )
+        .padding([6, 10])
+        .into()
     } else {
         column(apps).spacing(2).into()
     };
     let add_menu: Element<'a, Message> = Popover::new(
         Icon::ListAdd.colored(16.0, ink),
-        surface(column![
-            container(text("New in…").size(12).color(faint)).padding([4, 10]),
-            choices
-        ].into()),
+        surface(
+            column![
+                container(text("New in…").size(12).color(faint)).padding([4, 10]),
+                choices
+            ]
+            .into(),
+        ),
     )
     .appearance(PopoverAppearance::Flat)
     .keep_open(true)

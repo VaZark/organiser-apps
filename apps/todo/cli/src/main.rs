@@ -250,6 +250,17 @@ impl Extension for Todo {
                         .arg(Arg::new("off").long("off").action(ArgAction::SetTrue).help("keep the tasks in the database alone again (the files stay)")),
                 )
                 .subcommand(
+                    Command::new("import")
+                        .about("Import an existing folder: it is linked into the vault (not copied) and shows as an epic")
+                        .arg(Arg::new("dir").required(true)),
+                )
+                .subcommand(
+                    Command::new("unlink")
+                        .about("Stop importing a folder: only the link goes, the folder stays")
+                        .arg(Arg::new("name").required(true)),
+                )
+                .subcommand(Command::new("imports").about("List the imported folders"))
+                .subcommand(
                     Command::new("add")
                         .about("Move a Markdown file into the vault (a link to it if it cannot be moved)")
                         .arg(Arg::new("file").required(true))
@@ -390,7 +401,9 @@ impl Extension for Todo {
             "current" => {
                 Some(tasks(db, &filter(m, Scope::Current), today()).map(|t| tasks_out(&t, &st)))
             }
-            "archived" => Some(tasks(db, &filter(m, Scope::Archived), today()).map(|t| tasks_out(&t, &st))),
+            "archived" => {
+                Some(tasks(db, &filter(m, Scope::Archived), today()).map(|t| tasks_out(&t, &st)))
+            }
             "archive" => Some(set_archived(db, id, true).map(|t| tasks_out(&[t], &st))),
             "unarchive" => Some(set_archived(db, id, false).map(|t| tasks_out(&[t], &st))),
             "vault" => Some(vault_command(self, db, m)),
@@ -433,11 +446,15 @@ impl Extension for Todo {
                     }),
             ),
             "section-new" => Some(
-                create_section(db, id, m.get_one::<String>("title").map_or("", String::as_str))
-                    .map(|s| Output::Custom {
-                        human: format!("created section {} ({})", s.id, s.title),
-                        json: json!(s),
-                    }),
+                create_section(
+                    db,
+                    id,
+                    m.get_one::<String>("title").map_or("", String::as_str),
+                )
+                .map(|s| Output::Custom {
+                    human: format!("created section {} ({})", s.id, s.title),
+                    json: json!(s),
+                }),
             ),
             "section-rm" => {
                 Some(delete_section(db, id).map(|()| Output::Message("deleted section".into())))
@@ -532,7 +549,12 @@ fn configured_vault() -> Option<std::path::PathBuf> {
     match std::env::var_os("TODO_VAULT") {
         Some(v) if v.is_empty() => None,
         Some(v) => Some(std::path::PathBuf::from(v)),
-        None => organiser_core::settings::Settings::load().settings.todo.vault_dir,
+        None => {
+            organiser_core::settings::Settings::load()
+                .settings
+                .todo
+                .vault_dir
+        }
     }
 }
 
@@ -559,7 +581,9 @@ fn vault_command(app: &Todo, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
         if m.get_flag("off") {
             loaded.settings.todo.vault_dir = None;
             loaded.settings.save().map_err(Error::Invalid)?;
-            return Ok(Output::Message("the tasks are kept in the database alone".into()));
+            return Ok(Output::Message(
+                "the tasks are kept in the database alone".into(),
+            ));
         }
         let dir = if m.get_flag("default") {
             organiser_core::paths::documents_folder(&todo_schema::META)
@@ -572,30 +596,70 @@ fn vault_command(app: &Todo, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
         let db_path = app.state.borrow().db_path.clone();
         let vault = Vault::open(&dir, db_path.as_deref())?;
         // Choosing a folder loads it: what the app held before does not carry over into it.
-        if app.state.borrow().vault.as_ref().is_none_or(|c| c.dir() != vault.dir()) {
+        if app
+            .state
+            .borrow()
+            .vault
+            .as_ref()
+            .is_none_or(|c| c.dir() != vault.dir())
+        {
             Vault::forget(db)?;
         }
         let rep = vault.sync(db)?; // a load: nothing is written to the folder
         loaded.settings.todo.vault_dir = Some(vault.dir().to_path_buf());
         loaded.settings.save().map_err(Error::Invalid)?;
-        return Ok(report_out(&format!("tasks are kept in {}", vault.dir().display()), &rep));
+        return Ok(report_out(
+            &format!("tasks are kept in {}", vault.dir().display()),
+            &rep,
+        ));
     }
     let st = app.state.borrow();
     let Some(vault) = &st.vault else {
-        return Err(Error::Invalid("there is no vault: choose a directory with `todo vault set <dir>`".into()));
+        return Err(Error::Invalid(
+            "there is no vault: choose a directory with `todo vault set <dir>`".into(),
+        ));
     };
     match name {
         "status" => {
             let files = vault.known(db)?.len();
             let all = db
-                .list(&organiser_engine::Query { kind: Some(todo_schema::TASK.into()), ..Default::default() })?
+                .list(&organiser_engine::Query {
+                    kind: Some(todo_schema::TASK.into()),
+                    ..Default::default()
+                })?
                 .len();
-            Ok(Output::Message(format!("{}: {files} of {all} tasks have a file", vault.dir().display())))
+            Ok(Output::Message(format!(
+                "{}: {files} of {all} tasks have a file",
+                vault.dir().display()
+            )))
         }
         "sync" => {
             let mut rep = vault.sync(db)?;
             rep.add(vault.flush(db, &st.known)?);
             Ok(report_out("done", &rep))
+        }
+        "import" => {
+            let dir = m.get_one::<String>("dir").map_or("", String::as_str);
+            let (name, rep) = vault.import_folder(db, std::path::Path::new(dir))?;
+            Ok(report_out(&format!("imported {dir} as {name}"), &rep))
+        }
+        "unlink" => {
+            let name = m.get_one::<String>("name").map_or("", String::as_str);
+            vault.remove_import(db, name)?;
+            Ok(Output::Message(format!(
+                "{name} is no longer imported (the folder was not touched)"
+            )))
+        }
+        "imports" => {
+            let list = vault.imports();
+            Ok(Output::Message(if list.is_empty() {
+                "no folders are imported".into()
+            } else {
+                list.iter()
+                    .map(|(n, t)| format!("{n} -> {}", t.display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }))
         }
         _ => {
             let epic = match m.get_one::<String>("epic") {
@@ -608,7 +672,11 @@ fn vault_command(app: &Todo, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
             let file = m.get_one::<String>("file").map_or("", String::as_str);
             let (at, linked) = vault.add_file(db, std::path::Path::new(file), epic)?;
             vault.sync(db)?;
-            Ok(Output::Message(format!("{} {}", if linked { "linked as" } else { "moved to" }, at.display())))
+            Ok(Output::Message(format!(
+                "{} {}",
+                if linked { "linked as" } else { "moved to" },
+                at.display()
+            )))
         }
     }
 }

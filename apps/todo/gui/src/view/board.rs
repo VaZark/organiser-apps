@@ -144,7 +144,11 @@ impl App {
             && let Some(id) = t.epic
             && let Some(name) = self.epic_titles.get(&id)
         {
-            place = place.push(icons::folder_chip(name, self.epic_color(id), self.epic_icon(id)));
+            place = place.push(icons::folder_chip(
+                name,
+                self.epic_color(id),
+                self.epic_icon(id),
+            ));
             any = true;
         }
         if let Some(chip) = self.section_chip(t) {
@@ -166,7 +170,6 @@ impl App {
                 "Sticky on the desktop",
                 TooltipPosition::Bottom,
             )
-            .into()
         })
     }
 
@@ -206,9 +209,11 @@ impl App {
             .get(&epic)
             .and_then(|v| v.iter().find(|s| Some(s.section.id) == t.section))?;
         let chip = Chip::new(ellipsize(&sec.section.title, 24)).size(ChipSize::Small);
-        Some(match sec.section.color.as_deref().and_then(color_from_hex) {
-            Some(c) => chip.color(c).into(),
-            None => chip.role(Role::Neutral).into(),
-        })
+        Some(
+            match sec.section.color.as_deref().and_then(color_from_hex) {
+                Some(c) => chip.color(c).into(),
+                None => chip.role(Role::Neutral).into(),
+            },
+        )
     }
 }

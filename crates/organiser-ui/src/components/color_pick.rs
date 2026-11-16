@@ -14,7 +14,11 @@ pub const SWATCHES: [&str; 8] = [
 ];
 
 /// What an unset colour looks like.
-pub const UNSET: Color = Color::from_rgb(0x9a as f32 / 255.0, 0xa0 as f32 / 255.0, 0xa6 as f32 / 255.0);
+pub const UNSET: Color = Color::from_rgb(
+    0x9a as f32 / 255.0,
+    0xa0 as f32 / 255.0,
+    0xa6 as f32 / 255.0,
+);
 
 /// The picker's value for a colour.
 pub fn hsva(c: Color) -> Hsva {

@@ -6,7 +6,16 @@ target/
 .cargo/config.toml
 .cargo/config.toml.off
 
+# Agents
+/docs/agent
+/AGENTS_TODO_AND_STATUS.md
+/AGENTS_TODO_FORMAT.md
+.agents/
+.claude/
+
+
 # Local seed data and scripts.
+TODO/
 seed/
 local-scripts/
 

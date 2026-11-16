@@ -2,4 +2,8 @@
 # Entry point inside the Flatpak: use the host's data directory (the database the command-line
 # `notes` shares with the GUI) instead of the sandbox's own.
 export XDG_DATA_HOME="$HOME/.local/share"
+# Likewise the host's config directory: the toolkit (iad) and the organiser settings are read
+# from $XDG_CONFIG_HOME, and the --filesystem=xdg-config/... grants mount the host files at
+# ~/.config, not at the sandbox's own config directory.
+export XDG_CONFIG_HOME="$HOME/.config"
 exec notes-gui "$@"

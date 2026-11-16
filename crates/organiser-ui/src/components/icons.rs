@@ -30,7 +30,9 @@ pub fn named(name: Option<&str>) -> IconSource {
 pub fn tinted<'a>(icon: IconSource, size: f32, color: Option<Color>) -> IconView<'a> {
     let view = icon.view(size);
     match color {
-        Some(color) => view.style(move |_: &crate::iad::Theme, _| svg::Style { color: Some(color) }),
+        Some(color) => {
+            view.style(move |_: &crate::iad::Theme, _| svg::Style { color: Some(color) })
+        }
         None => view,
     }
 }

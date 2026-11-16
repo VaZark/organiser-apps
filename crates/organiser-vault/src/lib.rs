@@ -8,8 +8,8 @@
 pub mod front_matter;
 mod shared;
 pub use shared::{
-    FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, forget, known_of, mark_unstamped,
-    remove_deleted, settle_claims, without_id,
+    FoundFile, Matcher, adopt_uid, conflict_path, ensure_uid, field, forget, known_of,
+    mark_unstamped, remove_deleted, settle_claims, without_id,
 };
 
 use std::collections::HashSet;
@@ -46,7 +46,14 @@ pub struct Report {
 
 impl Report {
     pub fn changed(&self) -> bool {
-        self.created + self.updated + self.moved + self.trashed + self.written + self.removed + self.conflicts > 0
+        self.created
+            + self.updated
+            + self.moved
+            + self.trashed
+            + self.written
+            + self.removed
+            + self.conflicts
+            > 0
     }
 
     pub fn add(&mut self, o: Report) {
@@ -84,7 +91,6 @@ impl Report {
     }
 }
 
-
 impl Report {
     /// As [`summary`](Self::summary), with `gone` for the items whose file went (`"sent to the
     /// trash"`, `"archived"`).
@@ -121,7 +127,11 @@ pub fn sanitise(title: &str) -> String {
     let cleaned = cleaned.trim().trim_start_matches('.').trim();
     let cut: String = cleaned.chars().take(100).collect();
     let cut = cut.trim().to_string();
-    if cut.is_empty() { "Untitled".into() } else { cut }
+    if cut.is_empty() {
+        "Untitled".into()
+    } else {
+        cut
+    }
 }
 
 /// `base`, or `base-2`, `base-3`, … the first one not in `taken` (compared without case).
@@ -156,6 +166,68 @@ pub fn link(_: &Path, _: &Path) -> std::io::Result<()> {
     Err(std::io::Error::other("links are not supported here"))
 }
 
+/// The folders imported into `root`: the links in it that point at directories, as (name, target),
+/// by name. A link is the whole of an import: nothing of the folder is copied.
+pub fn linked_folders(root: &Path) -> Vec<(String, PathBuf)> {
+    let mut v: Vec<(String, PathBuf)> = read_dir(root)
+        .into_iter()
+        .filter(|e| is_symlink(&e.path()) && e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let target = fs::canonicalize(e.path()).ok()?;
+            (!name.starts_with('.')).then_some((name, target))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// Import `target` into `root` as a link named after it, and return that name. The folder must
+/// exist, must not be `root`, inside it or hold it, and must not be imported already.
+pub fn link_folder(root: &Path, target: &Path) -> Result<String> {
+    let target = fs::canonicalize(target).map_err(|e| io(e, target))?;
+    if !target.is_dir() {
+        return Err(Error::Invalid(format!(
+            "{} is not a folder",
+            target.display()
+        )));
+    }
+    let root = fs::canonicalize(root).map_err(|e| io(e, root))?;
+    if target.starts_with(&root) || root.starts_with(&target) {
+        return Err(Error::Invalid(format!(
+            "{} is the tasks folder, or inside it or around it",
+            target.display()
+        )));
+    }
+    if linked_folders(&root).iter().any(|(_, t)| *t == target) {
+        return Err(Error::Invalid(format!(
+            "{} is imported already",
+            target.display()
+        )));
+    }
+    let mut taken: HashSet<String> = read_dir(&root)
+        .iter()
+        .map(|e| e.file_name().to_string_lossy().to_lowercase())
+        .collect();
+    let base = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map_or_else(|| "Imported".to_string(), sanitise);
+    let name = unique(&base, &mut taken);
+    link(&target, &root.join(&name)).map_err(|e| io(e, &root.join(&name)))?;
+    Ok(name)
+}
+
+/// Remove an import: only the link goes, never the folder it points at. Anything that is not a
+/// link to a folder is refused.
+pub fn unlink_folder(root: &Path, name: &str) -> Result<()> {
+    let at = root.join(name);
+    if name.contains(['/', '\\']) || !is_symlink(&at) || !at.is_dir() {
+        return Err(Error::Invalid(format!("{name} is not an imported folder")));
+    }
+    fs::remove_file(&at).map_err(|e| io(e, &at))
+}
+
 pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -163,11 +235,15 @@ pub fn now() -> i64 {
 }
 
 pub fn rel_of(dir: &Path, stem: &str) -> String {
-    dir.join(format!("{stem}.md")).to_string_lossy().replace('\\', "/")
+    dir.join(format!("{stem}.md"))
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 pub fn read_dir(p: &Path) -> Vec<fs::DirEntry> {
-    fs::read_dir(p).map(|r| r.flatten().collect()).unwrap_or_default()
+    fs::read_dir(p)
+        .map(|r| r.flatten().collect())
+        .unwrap_or_default()
 }
 
 /// Write `text` to `path` without leaving it half written. A link is written through, to the file
@@ -181,7 +257,10 @@ pub fn write_atomic(path: &Path, text: &str) -> Result<()> {
     if let Some(p) = target.parent() {
         fs::create_dir_all(p).map_err(|e| io(e, p))?;
     }
-    let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("note");
+    let name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("note");
     let tmp = target.with_file_name(format!(".{name}.tmp"));
     fs::write(&tmp, text).map_err(|e| io(e, &tmp))?;
     if fs::rename(&tmp, &target).is_err() {
@@ -266,7 +345,10 @@ pub fn write_toml(path: &Path, pairs: &[(&str, String)]) -> Result<()> {
         if *v == "true" || *v == "false" {
             text.push_str(&format!("{k} = {v}\n"));
         } else {
-            let esc = v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+            let esc = v
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n");
             text.push_str(&format!("{k} = \"{esc}\"\n"));
         }
     }
@@ -322,7 +404,10 @@ pub fn uuid7() -> String {
 pub fn is_uuid(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     parts.len() == 5
-        && [8, 4, 4, 4, 12].iter().zip(&parts).all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))
+        && [8, 4, 4, 4, 12]
+            .iter()
+            .zip(&parts)
+            .all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]
@@ -336,5 +421,59 @@ mod uuid_tests {
         assert_eq!(a.as_bytes()[14], b'7');
         assert!(matches!(a.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
         assert!(!is_uuid("12"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn temp(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("vault-link-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_folder_is_linked_not_copied_and_unlinked_without_touching_it() {
+        let base = temp("a");
+        let (root, other) = (base.join("Tasks"), base.join("Work"));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("A.md"), "# A\n").unwrap();
+        let name = link_folder(&root, &other).unwrap();
+        assert_eq!(name, "Work");
+        assert!(is_symlink(&root.join("Work")));
+        assert_eq!(
+            linked_folders(&root),
+            [("Work".to_string(), fs::canonicalize(&other).unwrap())]
+        );
+        assert!(link_folder(&root, &other).is_err(), "imported already");
+        unlink_folder(&root, "Work").unwrap();
+        assert!(!root.join("Work").exists() && other.join("A.md").exists());
+        assert!(unlink_folder(&root, "Missing").is_err());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn nested_and_enclosing_folders_and_clashing_names_are_handled() {
+        let base = temp("b");
+        let root = base.join("Tasks");
+        let inside = root.join("Sub");
+        let a = base.join("x").join("Work");
+        let b = base.join("y").join("Work");
+        for d in [&inside, &a, &b] {
+            fs::create_dir_all(d).unwrap();
+        }
+        assert!(link_folder(&root, &root).is_err());
+        assert!(link_folder(&root, &inside).is_err());
+        assert!(link_folder(&inside, &root).is_err());
+        assert!(link_folder(&root, &base.join("nope")).is_err());
+        assert_eq!(link_folder(&root, &a).unwrap(), "Work");
+        assert_eq!(link_folder(&root, &b).unwrap(), "Work-2");
+        // A real folder is never removed as an import.
+        assert!(unlink_folder(&root, "Sub").is_err() && inside.exists());
+        let _ = fs::remove_dir_all(base);
     }
 }

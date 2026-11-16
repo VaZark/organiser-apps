@@ -3,8 +3,8 @@
 //! the details as they read (clipped), how far its subtasks are, its tags, where it belongs and
 //! its due date. Pressing a card opens its details. A note takes its epic's colour.
 
-use iced::widget::column;
 use iced::Length;
+use iced::widget::column;
 use organiser_ui::Element;
 use organiser_ui::components::card::card;
 use organiser_ui::components::chip::pill;
@@ -23,7 +23,11 @@ const CARD_BODY: f32 = 170.0;
 /// A rough height for packing: a title line, the details' lines, and a row each for what follows.
 fn weight(t: &Task, docs: bool) -> usize {
     2 + if docs {
-        t.notes.lines().filter(|l| !l.trim().is_empty()).count().min(6)
+        t.notes
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+            .min(6)
     } else {
         0
     } + usize::from(!t.tags.is_empty())
@@ -34,7 +38,9 @@ impl App {
     /// `room` is the width the page has.
     pub(super) fn notes_page<'a>(&'a self, room: f32) -> Element<'a, Message> {
         let mut page = column![].spacing(16).width(Length::Fill);
-        if let Some(epic) = self.epic_filter.filter(|_| self.scope == todo_schema::views::Scope::All)
+        if let Some(epic) = self
+            .epic_filter
+            .filter(|_| self.scope == todo_schema::views::Scope::All)
         {
             page = page.push(self.epic_header(epic));
         }
@@ -108,9 +114,13 @@ impl App {
         if let Some(doc) = self.docs.get(&t.id) {
             // The details as they read, clipped: a card is a preview, not the whole task.
             body = body.push(
-                container(RichText::new(&self.theme(), doc).compact(true).max_blocks(6))
-                    .max_height(CARD_BODY)
-                    .clip(true),
+                container(
+                    RichText::new(&self.theme(), doc)
+                        .compact(true)
+                        .max_blocks(6),
+                )
+                .max_height(CARD_BODY)
+                .clip(true),
             );
         }
         if let Some((done, total)) = self.sub_progress.get(&t.id) {

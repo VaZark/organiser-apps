@@ -50,7 +50,10 @@ Output is in `build-dir/<App>`, logs in `build-dir/<App>.log`.
 - **Data.** The launcher points the app at your real data directory (`~/.local/share/todo`, `notes`, `recipes`), so the Flatpak GUI and a command-line `todo` or `notes` installed on the
   host use the same database.
 - **Permissions.** Wayland, the GPU, that one data directory, and read-only access to
-  `~/.config/iced-adaptive-design` (the toolkit's desktop-wide settings). Nothing else.
+  `~/.config/iced-adaptive-design` (the toolkit's desktop-wide settings) and `~/.local/share/iad`
+  (the selected theme: `themes/default.conf`, a symlink the theme editor sets), plus the app's own
+  optional `~/.config/<app-id>/theme.conf` override. The launchers point
+  `XDG_CONFIG_HOME` and `XDG_DATA_HOME` at the host so the toolkit finds both.
 - **SQLite** is built in: the apps need its full-text search and JSON support.
 - Only the GUI is in the Flatpak. Install the command line with `cargo install --path apps/todo/cli`
   (or `notes`), or with the script below.

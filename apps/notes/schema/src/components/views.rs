@@ -140,7 +140,11 @@ pub fn notes(db: &Db, f: &Filter) -> Result<Vec<Note>> {
         Scope::Folder(id) if f.recursive => {
             q.parent = ParentFilter::Any;
             let mut set: std::collections::HashSet<i64> = std::iter::once(id).collect();
-            set.extend(crate::lifecycle::descendants(db, id)?.into_iter().map(|d| d.id));
+            set.extend(
+                crate::lifecycle::descendants(db, id)?
+                    .into_iter()
+                    .map(|d| d.id),
+            );
             Some(set)
         }
         _ => None,
@@ -149,7 +153,11 @@ pub fn notes(db: &Db, f: &Filter) -> Result<Vec<Note>> {
         .list(&q)?
         .into_iter()
         .filter(|i| i.kind == NOTE)
-        .filter(|i| within.as_ref().is_none_or(|w| i.parent_id.is_some_and(|p| w.contains(&p))))
+        .filter(|i| {
+            within
+                .as_ref()
+                .is_none_or(|w| i.parent_id.is_some_and(|p| w.contains(&p)))
+        })
         .map(|mut item| {
             if !item.parent_id.is_some_and(|p| rated.contains(&p)) {
                 item.fields.remove("rating");
@@ -179,7 +187,8 @@ pub fn folders(db: &Db) -> Result<Vec<FolderSummary>> {
     })?;
     // Live notes, once, by folder.
     let live = notes(db, &Filter::default())?;
-    let mut direct: std::collections::HashMap<i64, (usize, usize)> = std::collections::HashMap::new();
+    let mut direct: std::collections::HashMap<i64, (usize, usize)> =
+        std::collections::HashMap::new();
     for n in &live {
         if let Some(f) = n.folder_id {
             let e = direct.entry(f).or_default();
@@ -229,7 +238,10 @@ pub fn folders(db: &Db) -> Result<Vec<FolderSummary>> {
 
 /// The folders directly in `parent` (or at the top), in order.
 pub fn children_of(db: &Db, parent: Option<i64>) -> Result<Vec<FolderSummary>> {
-    Ok(folders(db)?.into_iter().filter(|s| s.folder.parent == parent).collect())
+    Ok(folders(db)?
+        .into_iter()
+        .filter(|s| s.folder.parent == parent)
+        .collect())
 }
 
 /// Everything in the trash, most recently trashed first.

@@ -28,7 +28,11 @@ impl App {
         // Trash; the sections scroll beneath.
         let mut items = vec![
             place(format!("All  ({total})"), Icon::Note, Scope::Notes),
-            place(format!("Favorites  ({favorites})"), Icon::Heart, Scope::Favorites),
+            place(
+                format!("Favorites  ({favorites})"),
+                Icon::Heart,
+                Scope::Favorites,
+            ),
         ];
         if let Some(home) = self.folders.iter().find(|s| s.folder.is_default) {
             let id = home.folder.id;
@@ -41,7 +45,9 @@ impl App {
                 .icon_color(self.folder_color(&home.folder))
                 .selected(self.scope == Scope::Folder(id))
                 // Notes can be dropped on it, to take them out of their section.
-                .drop_target("Take out of its section", move |p| Message::DropFolder(id, p)),
+                .drop_target("Take out of its section", move |p| {
+                    Message::DropFolder(id, p)
+                }),
             );
         }
         items.push(place("Archive".into(), Icon::Archive, Scope::Archive));
@@ -75,8 +81,12 @@ impl App {
     /// the sidebar always shows the viewed section's siblings; none at the top. Choosing a section
     /// inside the viewed one (from its page) moves the level down, and the page slides.
     pub(super) fn sidebar_level(&self) -> Option<i64> {
-        let Scope::Folder(id) = self.scope else { return None };
-        self.folder_summary(id).filter(|s| !s.folder.is_default).and_then(|s| s.folder.parent)
+        let Scope::Folder(id) = self.scope else {
+            return None;
+        };
+        self.folder_summary(id)
+            .filter(|s| !s.folder.is_default)
+            .and_then(|s| s.folder.parent)
     }
 
     /// One page of the sidebar: a back arrow with the name of the section whose page it is (none at
@@ -86,10 +96,15 @@ impl App {
         if let Some(s) = level.and_then(|id| self.folder_summary(id)) {
             // Up to the section this one is in (or all the notes).
             page.push(
-                SidebarItem::new(ellipsize(&s.folder.title, 26), Message::Back).icon(Icon::GoPrevious),
+                SidebarItem::new(ellipsize(&s.folder.title, 26), Message::Back)
+                    .icon(Icon::GoPrevious),
             );
         }
-        for s in self.children_of(level).into_iter().filter(|s| !s.folder.is_default) {
+        for s in self
+            .children_of(level)
+            .into_iter()
+            .filter(|s| !s.folder.is_default)
+        {
             let f = &s.folder;
             let id = f.id;
             let mut item = SidebarItem::new(

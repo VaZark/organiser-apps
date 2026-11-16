@@ -22,13 +22,17 @@ cp .cargo/config.toml.local-check .cargo/config.toml   # ignored by git
 When your change there is pushed, bump the `rev` in the root `Cargo.toml` (`[workspace.dependencies]`)
 and delete your local `.cargo/config.toml` to check that it builds against the pinned commit.
 
+## Working with an agent
+
+`AGENTS.md` is the entry point: conventions, invariants and the skills in `.agents/skills`. Work is tracked one task per file in `TODO/<epic>/` (Todo app vault format; point Todo at it with `todo vault set TODO`), and `AGENTS_TODO_AND_STATUS.md` holds the active batch, validation and handoff.
+
 ## The checks
 
 Run these before you send a change. They are all fast.
 
 ```sh
 cargo test --workspace                      # every test, including the layer rules
-cargo clippy --workspace --all-targets      # should print no warnings
+cargo clippy --workspace --all-targets -- -D warnings   # should print no warnings
 cargo fmt --all                             # formatting
 ```
 

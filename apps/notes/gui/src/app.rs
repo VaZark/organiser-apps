@@ -21,8 +21,8 @@ use organiser_ui::iad::primitives::rich_text as rt;
 use organiser_ui::iad::primitives::tag_groups::{GroupEvent, TagGroups};
 use organiser_ui::iad::{self, Scheme};
 use organiser_ui::primitives::scheme::Mode;
-use organiser_ui::shell;
 use organiser_ui::primitives::search::Search;
+use organiser_ui::shell;
 use organiser_ui::widgets::preferences::{Changed, PrefMsg, Preferences};
 use organiser_ui::widgets::sticky_link::StickyLink;
 use organiser_ui::widgets::tag_manager::{TagManager, TagMsg};
@@ -406,7 +406,10 @@ impl App {
             Ok("favorites") => app.scope = Scope::Favorites,
             _ => {}
         }
-        if let Some(id) = std::env::var("NOTES_GUI_FOLDER").ok().and_then(|v| v.parse().ok()) {
+        if let Some(id) = std::env::var("NOTES_GUI_FOLDER")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
             app.scope = Scope::Folder(id);
             if std::env::var_os("NOTES_GUI_FOLDER_SETTINGS").is_some() {
                 app.folder_settings = Some(id);
@@ -519,7 +522,9 @@ impl App {
             // A search looks in the archive too, so an old note is still found.
             include_archived: self.search.query().is_some(),
             // A section's page, not grouped: its notes and those of every section in it.
-            recursive: matches!(self.scope, Scope::Folder(_)) && !self.group_by_section && self.show_all_notes,
+            recursive: matches!(self.scope, Scope::Folder(_))
+                && !self.group_by_section
+                && self.show_all_notes,
             sort: self.sort,
         }
     }
@@ -591,7 +596,11 @@ impl App {
             self.toast = Some(format!(
                 "Imported {done} file{} as {}",
                 if done == 1 { "" } else { "s" },
-                if how == Import::Copy { "copies" } else { "links" }
+                if how == Import::Copy {
+                    "copies"
+                } else {
+                    "links"
+                }
             ));
         }
     }
@@ -617,7 +626,10 @@ impl App {
 
     /// Change the folder, after the person has said what becomes of a new note not yet saved.
     fn request_vault(&mut self, dir: std::path::PathBuf) {
-        let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
+        let same = self
+            .vault
+            .as_ref()
+            .is_some_and(|v| std::fs::canonicalize(&dir).ok().as_deref() == Some(v.dir()));
         if !same && self.details.as_ref().is_some_and(Details::is_new) {
             self.pending_vault = Some(dir);
         } else {
@@ -646,7 +658,8 @@ impl App {
         // Choosing a folder loads it: whatever the app held before goes, so nothing is carried
         // over and written into the new one.
         let same = self.vault.as_ref().is_some_and(|v| {
-            dir.as_ref().is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
+            dir.as_ref()
+                .is_some_and(|d| std::fs::canonicalize(d).ok().as_deref() == Some(v.dir()))
         });
         if dir.is_some() && !same {
             if let Err(e) = Vault::forget(&mut self.db) {
@@ -741,12 +754,18 @@ impl App {
 
     /// The default folder, "Unassigned".
     pub fn default_folder_id(&self) -> Option<i64> {
-        self.folders.iter().find(|s| s.folder.is_default).map(|s| s.folder.id)
+        self.folders
+            .iter()
+            .find(|s| s.folder.is_default)
+            .map(|s| s.folder.id)
     }
 
     /// The folders directly in `parent` (or at the top), in order, the default one last.
     pub fn children_of(&self, parent: Option<i64>) -> Vec<&FolderSummary> {
-        self.folders.iter().filter(|s| s.folder.parent == parent).collect()
+        self.folders
+            .iter()
+            .filter(|s| s.folder.parent == parent)
+            .collect()
     }
 
     /// The top section a section is in (itself, if it is at the top).
@@ -764,7 +783,9 @@ impl App {
         let mut path = Vec::new();
         let mut at = Some(id);
         while let Some(i) = at {
-            let Some(s) = self.folder_summary(i) else { break };
+            let Some(s) = self.folder_summary(i) else {
+                break;
+            };
             at = s.folder.parent;
             path.push(s);
             if path.len() > 256 {
@@ -813,7 +834,9 @@ impl App {
         .chain(
             self.folder_choices
                 .iter()
-                .filter(|c| c.id.is_some_and(|i| i != id && !below.contains(&i) && Some(i) != home))
+                .filter(|c| {
+                    c.id.is_some_and(|i| i != id && !below.contains(&i) && Some(i) != home)
+                })
                 .cloned(),
         )
         .collect()
@@ -822,11 +845,18 @@ impl App {
     /// In sections mode on a folder's page: the notes of each folder in it, by the same filters.
     fn load_sub_notes(&mut self) {
         self.sub_notes.clear();
-        let Scope::Folder(id) = self.scope else { return };
+        let Scope::Folder(id) = self.scope else {
+            return;
+        };
         if !self.group_by_section {
             return;
         }
-        for s in self.children_of(Some(id)).iter().map(|s| s.folder.id).collect::<Vec<_>>() {
+        for s in self
+            .children_of(Some(id))
+            .iter()
+            .map(|s| s.folder.id)
+            .collect::<Vec<_>>()
+        {
             let f = Filter {
                 scope: Scope::Folder(s),
                 recursive: self.show_all_notes,
@@ -859,7 +889,10 @@ impl App {
 
     /// The pinned notes, then the rest. Pinning only groups the live notes.
     pub fn pinned(&self) -> (Vec<&Note>, Vec<&Note>) {
-        if matches!(self.scope, Scope::Notes | Scope::Favorites | Scope::Folder(_)) {
+        if matches!(
+            self.scope,
+            Scope::Notes | Scope::Favorites | Scope::Folder(_)
+        ) {
             self.notes.iter().partition(|n| n.pinned)
         } else {
             (Vec::new(), self.notes.iter().collect())
@@ -875,7 +908,11 @@ impl App {
         {
             self.toast = Some(e.to_string());
         }
-        self.vault_known = self.vault.as_ref().and_then(|v| v.known(&self.db).ok()).unwrap_or_default();
+        self.vault_known = self
+            .vault
+            .as_ref()
+            .and_then(|v| v.known(&self.db).ok())
+            .unwrap_or_default();
         let note = match self.db.get(id) {
             Ok(i) => Note::from(&i),
             Err(e) => return self.fail(e),
@@ -988,10 +1025,15 @@ impl App {
     /// Delete a folder, keeping its notes (filed in none) or deleting them with it.
     fn delete_folder(&mut self, id: i64, with_notes: bool) {
         let result = if with_notes {
-            lifecycle::delete_folder_and_notes(&mut self.db, id)
-                .map(|n| format!("Deleted the section and {n} note{}", if n == 1 { "" } else { "s" }))
+            lifecycle::delete_folder_and_notes(&mut self.db, id).map(|n| {
+                format!(
+                    "Deleted the section and {n} note{}",
+                    if n == 1 { "" } else { "s" }
+                )
+            })
         } else {
-            lifecycle::delete_folder(&mut self.db, id).map(|()| "Deleted the section; its notes and sections stay".into())
+            lifecycle::delete_folder(&mut self.db, id)
+                .map(|()| "Deleted the section; its notes and sections stay".into())
         };
         match result {
             Ok(m) => self.toast = Some(m),
@@ -1099,7 +1141,9 @@ impl App {
                 self.sort = sort;
                 self.reload();
             }
-            Message::NewSubfolder(parent) => return self.update(Message::NewSubfolderIn(Some(parent))),
+            Message::NewSubfolder(parent) => {
+                return self.update(Message::NewSubfolderIn(Some(parent)));
+            }
             Message::NewSubfolderIn(parent) => {
                 match lifecycle::create_folder_in(&mut self.db, parent, "New section", false) {
                     Ok(f) => {
@@ -1139,47 +1183,62 @@ impl App {
                 if let Some(id) = self.folder_settings {
                     // An empty name waits for more typing; the old one stays until then.
                     if !t.trim().is_empty() {
-                        self.edit_folder(id, FolderEdit {
-                            title: Some(t.trim().to_string()),
-                            ..FolderEdit::default()
-                        });
+                        self.edit_folder(
+                            id,
+                            FolderEdit {
+                                title: Some(t.trim().to_string()),
+                                ..FolderEdit::default()
+                            },
+                        );
                     }
                     self.folder_name = Some(t);
                 }
             }
             Message::SetFolderNotes(t) => {
                 if let Some(id) = self.folder_settings {
-                    self.edit_folder(id, FolderEdit {
-                        notes: Some(t.clone()),
-                        ..FolderEdit::default()
-                    });
+                    self.edit_folder(
+                        id,
+                        FolderEdit {
+                            notes: Some(t.clone()),
+                            ..FolderEdit::default()
+                        },
+                    );
                     self.folder_notes = Some(t);
                 }
             }
             Message::SetFolderRated(on) => {
                 if let Some(id) = self.folder_settings {
-                    self.edit_folder(id, FolderEdit {
-                        rated: Some(on),
-                        ..FolderEdit::default()
-                    });
+                    self.edit_folder(
+                        id,
+                        FolderEdit {
+                            rated: Some(on),
+                            ..FolderEdit::default()
+                        },
+                    );
                 }
             }
             Message::SetFolderIcon(name) => {
                 if let Some(id) = self.folder_settings {
-                    self.edit_folder(id, FolderEdit {
-                        icon: Some(name.map(String::from)),
-                        ..FolderEdit::default()
-                    });
+                    self.edit_folder(
+                        id,
+                        FolderEdit {
+                            icon: Some(name.map(String::from)),
+                            ..FolderEdit::default()
+                        },
+                    );
                 }
             }
             Message::SetFolderColor(h) => {
                 if let Some(id) = self.folder_settings {
                     let [r, g, b] = h.to_rgb8();
                     self.folder_color_text = Some(Color::rgb(r, g, b).hex());
-                    self.edit_folder(id, FolderEdit {
-                        color: Some(Some(Color::rgb(r, g, b))),
-                        ..FolderEdit::default()
-                    });
+                    self.edit_folder(
+                        id,
+                        FolderEdit {
+                            color: Some(Some(Color::rgb(r, g, b))),
+                            ..FolderEdit::default()
+                        },
+                    );
                 }
             }
             Message::SetFolderColorText(text) => {
@@ -1190,17 +1249,24 @@ impl App {
                     });
                     self.folder_color_text = Some(text);
                     if let Some(c) = parsed {
-                        self.edit_folder(id, FolderEdit {
-                            color: Some(Some(c)),
-                            ..FolderEdit::default()
-                        });
+                        self.edit_folder(
+                            id,
+                            FolderEdit {
+                                color: Some(Some(c)),
+                                ..FolderEdit::default()
+                            },
+                        );
                     }
                 }
             }
             Message::FolderDeleteAsk => {
                 if let Some(id) = self.folder_settings {
                     // A folder with notes asks what becomes of them first.
-                    if self.folders.iter().any(|s| s.folder.id == id && s.notes > 0) {
+                    if self
+                        .folders
+                        .iter()
+                        .any(|s| s.folder.id == id && s.notes > 0)
+                    {
                         self.confirm_folder_delete = Some(id);
                     } else {
                         self.delete_folder(id, false);
@@ -1215,7 +1281,11 @@ impl App {
                 }
             }
             Message::Fave(id) => {
-                let now_fave = self.notes.iter().find(|n| n.id == id).is_some_and(|n| n.favorite);
+                let now_fave = self
+                    .notes
+                    .iter()
+                    .find(|n| n.id == id)
+                    .is_some_and(|n| n.favorite);
                 if let Err(e) = lifecycle::set_favorite(&mut self.db, id, !now_fave) {
                     self.fail(e);
                 }
@@ -1300,7 +1370,11 @@ impl App {
                             return lifecycle::move_folder_into(&mut self.db, moved, Some(t.id));
                         }
                         // Next to it: in the folder it is in, before it or before what follows it.
-                        let siblings: Vec<i64> = self.children_of(t.parent).iter().map(|s| s.folder.id).collect();
+                        let siblings: Vec<i64> = self
+                            .children_of(t.parent)
+                            .iter()
+                            .map(|s| s.folder.id)
+                            .collect();
                         if self.folder_summary(moved).map(|s| s.folder.parent) != Some(t.parent) {
                             lifecycle::move_folder_into(&mut self.db, moved, t.parent)?;
                         }
@@ -1323,7 +1397,10 @@ impl App {
             }
             // On a folder of a page: what is carried goes in it.
             Message::DropOnFolder(target) => {
-                return self.update(Message::DropFolder(target, organiser_ui::iad::primitives::drag::Place::Inside));
+                return self.update(Message::DropFolder(
+                    target,
+                    organiser_ui::iad::primitives::drag::Place::Inside,
+                ));
             }
             Message::DropInFolder(folder) => {
                 if let Some(id) = self.dragging.take() {
@@ -1390,7 +1467,8 @@ impl App {
             }
             Message::VaultOff => {
                 self.set_vault(None);
-                self.toast = Some("The notes are kept in the database alone; the files stay".into());
+                self.toast =
+                    Some("The notes are kept in the database alone; the files stay".into());
             }
             Message::OpenVault => {
                 if let Some(v) = &self.vault {
@@ -1547,10 +1625,11 @@ impl App {
                     return Task::none();
                 }
                 // A rating is kept only where the folder offers them.
-                let rated = d
-                    .note
-                    .folder_id
-                    .is_some_and(|id| self.folders.iter().any(|s| s.folder.id == id && s.folder.rated));
+                let rated = d.note.folder_id.is_some_and(|id| {
+                    self.folders
+                        .iter()
+                        .any(|s| s.folder.id == id && s.folder.rated)
+                });
                 let new = NewNote {
                     title: d.title.trim().to_string(),
                     body: d.body.text().trim_end().to_string(),

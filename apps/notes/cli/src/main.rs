@@ -4,7 +4,6 @@
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use notes_schema::color::Color;
 use notes_schema::folder::{Folder, FolderEdit, FolderSummary};
@@ -14,8 +13,8 @@ use notes_schema::lifecycle::{
     set_archived, set_favorite, set_pinned, trash,
 };
 use notes_schema::md_note::{from_markdown, to_markdown};
-use notes_schema::vault::Vault;
 use notes_schema::note::{Edit, Note};
+use notes_schema::vault::Vault;
 use notes_schema::views::{Filter, Scope, Sort, folders, notes};
 use organiser_cli_kit::{Extension, Output};
 use organiser_engine::{Db, Error, Result};
@@ -58,7 +57,11 @@ fn line(n: &Note) -> String {
         n.title
     );
     if let Some(r) = n.rating {
-        s.push_str(&format!("  {}{}", "★".repeat(r as usize), "☆".repeat(5usize.saturating_sub(r as usize))));
+        s.push_str(&format!(
+            "  {}{}",
+            "★".repeat(r as usize),
+            "☆".repeat(5usize.saturating_sub(r as usize))
+        ));
     }
     if let Some(f) = n.folder_id {
         s.push_str(&format!("  in:{f}"));
@@ -88,9 +91,9 @@ fn color_arg(m: &ArgMatches) -> Result<Option<Option<Color>>> {
     match m.try_get_one::<String>("color").ok().flatten() {
         None => Ok(None),
         Some(v) if v.eq_ignore_ascii_case("none") => Ok(Some(None)),
-        Some(v) => Color::parse(v)
-            .map(|c| Some(Some(c)))
-            .ok_or_else(|| Error::Invalid(format!("`{v}` is not a colour; expected #rrggbb or `none`"))),
+        Some(v) => Color::parse(v).map(|c| Some(Some(c))).ok_or_else(|| {
+            Error::Invalid(format!("`{v}` is not a colour; expected #rrggbb or `none`"))
+        }),
     }
 }
 
@@ -133,7 +136,11 @@ fn folders_out(v: &[FolderSummary]) -> Output {
     let mut lines = Vec::new();
     walk(v, None, 0, &mut lines);
     Output::Custom {
-        human: if lines.is_empty() { "(none)".into() } else { lines.join("\n") },
+        human: if lines.is_empty() {
+            "(none)".into()
+        } else {
+            lines.join("\n")
+        },
         json: json!({ "sections": v }),
     }
 }
@@ -154,8 +161,18 @@ fn filter(m: &ArgMatches) -> Filter {
     } else {
         Scope::Notes
     };
-    let recursive = m.try_get_one::<bool>("recursive").ok().flatten().copied().unwrap_or(false);
-    let sort = match m.try_get_one::<String>("sort").ok().flatten().map(String::as_str) {
+    let recursive = m
+        .try_get_one::<bool>("recursive")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false);
+    let sort = match m
+        .try_get_one::<String>("sort")
+        .ok()
+        .flatten()
+        .map(String::as_str)
+    {
         Some("created") => Sort::Created,
         Some("title") => Sort::Title,
         Some("rating") => Sort::Rating,
@@ -446,7 +463,12 @@ impl Extension for Notes {
             "section-new" => {
                 let title = m.get_one::<String>("title").map_or("", String::as_str);
                 color_arg(m).and_then(|c| {
-                    let f = create_folder_in(db, m.get_one::<i64>("parent").copied(), title, m.get_flag("rated"))?;
+                    let f = create_folder_in(
+                        db,
+                        m.get_one::<i64>("parent").copied(),
+                        title,
+                        m.get_flag("rated"),
+                    )?;
                     let icon = m.get_one::<String>("icon").cloned().map(Some);
                     let f = if c.is_some() || icon.is_some() {
                         edit_folder(
@@ -484,17 +506,18 @@ impl Extension for Notes {
                         icon: m
                             .get_one::<String>("icon")
                             .map(|i| (!i.eq_ignore_ascii_case("none")).then(|| i.clone())),
-                        ..FolderEdit::default()
                     },
                 )?;
                 Ok(folder_out(&f, "updated"))
             }),
-            "section-rm" => if m.get_flag("with-notes") {
-                delete_folder_and_notes(db, id)
-                    .map(|n| Output::Message(format!("deleted the section and {n} notes")))
-            } else {
-                delete_folder(db, id).map(|()| Output::Message("deleted the section".into()))
-            },
+            "section-rm" => {
+                if m.get_flag("with-notes") {
+                    delete_folder_and_notes(db, id)
+                        .map(|n| Output::Message(format!("deleted the section and {n} notes")))
+                } else {
+                    delete_folder(db, id).map(|()| Output::Message("deleted the section".into()))
+                }
+            }
             "section-mv" => {
                 // Into a folder or to the top first, then to its place among the others.
                 let into = if m.get_flag("top") {
@@ -511,7 +534,9 @@ impl Extension for Notes {
                         move_folder(db, id, before)?;
                     }
                     if into.is_none() && before.is_none() {
-                        return Err(Error::Invalid("say where: --parent, --top or --before".into()));
+                        return Err(Error::Invalid(
+                            "say where: --parent, --top or --before".into(),
+                        ));
                     }
                     Ok(Output::Message(format!("moved section {id}")))
                 })()
@@ -616,7 +641,11 @@ impl Extension for Notes {
 }
 
 fn main() -> ExitCode {
-    organiser_cli_kit::run(&notes_schema::META, &notes_schema::SCHEMA, &Notes::default())
+    organiser_cli_kit::run(
+        &notes_schema::META,
+        &notes_schema::SCHEMA,
+        &Notes::default(),
+    )
 }
 
 /// The vault directory the settings name; `NOTES_VAULT` overrides it (for trying one out), and
@@ -626,7 +655,12 @@ fn configured_vault() -> Option<std::path::PathBuf> {
     match std::env::var_os("NOTES_VAULT") {
         Some(v) if v.is_empty() => None,
         Some(v) => Some(std::path::PathBuf::from(v)),
-        None => organiser_core::settings::Settings::load().settings.notes.vault_dir,
+        None => {
+            organiser_core::settings::Settings::load()
+                .settings
+                .notes
+                .vault_dir
+        }
     }
 }
 
@@ -639,7 +673,9 @@ fn vault_command(app: &Notes, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
             if m.get_flag("off") {
                 loaded.settings.notes.vault_dir = None;
                 loaded.settings.save().map_err(Error::Invalid)?;
-                return Ok(Output::Message("the notes are kept in the database alone".into()));
+                return Ok(Output::Message(
+                    "the notes are kept in the database alone".into(),
+                ));
             }
             let dir = if m.get_flag("default") {
                 organiser_core::paths::documents_folder(&notes_schema::META)
@@ -652,13 +688,22 @@ fn vault_command(app: &Notes, db: &mut Db, sub: &ArgMatches) -> Result<Output> {
             let db_path = app.state.borrow().db_path.clone();
             let vault = Vault::open(&dir, db_path.as_deref())?;
             // Choosing a folder loads it: what the app held before does not carry over into it.
-            if app.state.borrow().vault.as_ref().is_none_or(|c| c.dir() != vault.dir()) {
+            if app
+                .state
+                .borrow()
+                .vault
+                .as_ref()
+                .is_none_or(|c| c.dir() != vault.dir())
+            {
                 Vault::forget(db)?;
             }
             let rep = vault.sync(db)?; // a load: nothing is written to the folder
             loaded.settings.notes.vault_dir = Some(vault.dir().to_path_buf());
             loaded.settings.save().map_err(Error::Invalid)?;
-            Ok(report_out(&format!("notes are kept in {}", vault.dir().display()), &rep))
+            Ok(report_out(
+                &format!("notes are kept in {}", vault.dir().display()),
+                &rep,
+            ))
         }
         _ => {
             let st = app.state.borrow();
@@ -718,7 +763,10 @@ fn folder_by_path(db: &Db, path: &str) -> Result<i64> {
             // A lone name: any folder of that name, wherever it is.
             .or_else(|| {
                 (parent.is_none() && !path.contains('/'))
-                    .then(|| all.iter().find(|s| s.folder.title.eq_ignore_ascii_case(name)))
+                    .then(|| {
+                        all.iter()
+                            .find(|s| s.folder.title.eq_ignore_ascii_case(name))
+                    })
                     .flatten()
             })
             .ok_or_else(|| Error::Invalid(format!("there is no section `{name}` in `{path}`")))?;

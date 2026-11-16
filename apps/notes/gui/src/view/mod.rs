@@ -57,18 +57,15 @@ impl App {
 
             // The sidebar button: it opens the drawer of a narrow window, and hides or shows the
             // docked sidebar of a wide one.
-            let start: Option<Element<'_, Message>> = Some(
-                tooltip(
-                    icon_button(Icon::Sidebar).on_press(if narrow {
-                        Message::Drawer(true)
-                    } else {
-                        Message::ToggleSidebar
-                    }),
-                    "Sidebar",
-                    TooltipPosition::Bottom,
-                )
-                .into(),
-            );
+            let start: Option<Element<'_, Message>> = Some(tooltip(
+                icon_button(Icon::Sidebar).on_press(if narrow {
+                    Message::Drawer(true)
+                } else {
+                    Message::ToggleSidebar
+                }),
+                "Sidebar",
+                TooltipPosition::Bottom,
+            ));
             let room = if collapsed {
                 width
             } else {
@@ -82,7 +79,9 @@ impl App {
             // A folder's settings are a drawer at the side of the notes.
             let page = details_drawer(
                 page,
-                self.folder_settings.is_some().then(|| self.folder_settings_pane()),
+                self.folder_settings
+                    .is_some()
+                    .then(|| self.folder_settings_pane()),
                 Message::CloseFolderSettings,
             );
             let content = toolbar_view(page).top_bar(head);
@@ -101,18 +100,39 @@ impl App {
             } else {
                 None
             };
-            let page = responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false);
+            let page =
+                responsive_dialog::present(window, modal, width < TWO_PANES, size, radius, false);
             // The question about a folder's notes is a small alert over everything.
             if self.import_choose {
-                return present_dialog(page, self.import_choose_dialog(), Some(Message::ImportCancel), radius);
+                return present_dialog(
+                    page,
+                    self.import_choose_dialog(),
+                    Some(Message::ImportCancel),
+                    radius,
+                );
             }
             if !self.pending_import.is_empty() {
-                return present_dialog(page, self.import_dialog(), Some(Message::ImportCancel), radius);
+                return present_dialog(
+                    page,
+                    self.import_dialog(),
+                    Some(Message::ImportCancel),
+                    radius,
+                );
             }
             if self.pending_vault.is_some() {
-                return present_dialog(page, self.draft_dialog(), Some(Message::VaultDraftCancel), radius);
+                return present_dialog(
+                    page,
+                    self.draft_dialog(),
+                    Some(Message::VaultDraftCancel),
+                    radius,
+                );
             }
-            present_dialog(page, self.folder_delete_dialog(), Some(Message::FolderDeleteCancel), radius)
+            present_dialog(
+                page,
+                self.folder_delete_dialog(),
+                Some(Message::FolderDeleteCancel),
+                radius,
+            )
         })
         .into();
         let framed = self.chrome().frame(body, Message::Window);
@@ -170,7 +190,11 @@ impl App {
             self.details.is_some() || in_section,
             "New note (Ctrl+N)",
             Message::New,
-            if self.details.is_some() { Message::CloseDetails } else { Message::Back },
+            if self.details.is_some() {
+                Message::CloseDetails
+            } else {
+                Message::Back
+            },
         ));
         let start_buttons = usize::from(start_present) + 1;
         if self.search.is_open() {
@@ -192,20 +216,20 @@ impl App {
             Message::ListView(!self.list_view),
         )];
         let sort = Menu::new("Sort by").section(
-            Sort::ALL
-                .map(|s| MenuItem::select(s.label(), self.sort == s, Message::SetSort(s))),
+            Sort::ALL.map(|s| MenuItem::select(s.label(), self.sort == s, Message::SetSort(s))),
         );
         let mut menu = Menu::new("Menu")
             .section(shown)
             .section([MenuItem::submenu("Sort by", sort)]);
         // Files: bring Markdown files into the vault.
         if self.vault.is_some() {
-            menu = menu.section([
-                MenuItem::action("Import…", Message::AddFiles).icon(Icon::FileAdd),
-            ]);
+            menu =
+                menu.section([MenuItem::action("Import…", Message::AddFiles).icon(Icon::FileAdd)]);
         }
         menu = menu.section([MenuItem::action("Preferences", Message::OpenPrefs).accel("Ctrl+,")]);
-        menu_button(Icon::OpenMenu, menu).tooltip("Main menu").into()
+        menu_button(Icon::OpenMenu, menu)
+            .tooltip("Main menu")
+            .into()
     }
 
     /// The title of what the window shows.

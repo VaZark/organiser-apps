@@ -27,6 +27,8 @@ pub enum Page {
     Tags,
     /// A page the app adds of its own kind (Todo's statuses), after Tags.
     Extra,
+    /// Where the app's items are kept as files: the folder and the folders imported into it.
+    Folders,
     /// The app's own settings.
     App,
 }
@@ -175,7 +177,8 @@ impl Preferences {
     }
 
     /// The sheet. `wide` is whether the window has room for the page list beside the page.
-    /// `extra` is an optional page of the app's own kind, after Tags (a title and its content).
+    /// `extras` are pages of the app's own kind, after Tags and in this order: [`Page::Extra`] or
+    /// [`Page::Folders`], with a title, an icon and its content.
     /// `app_title` and `app_page` are the app's settings page. `tags` is the tag manager's view, shown
     /// on top of the Tags page; `tags_editing` is whether it is showing a tag's editor, when the
     /// palette below is out of the way.
@@ -185,22 +188,23 @@ impl Preferences {
         wide: bool,
         app_title: &'a str,
         app_page: Element<'a, M>,
-        extra: Option<(&'a str, Element<'a, M>)>,
+        mut extras: Vec<(Page, &'a str, Icon, Element<'a, M>)>,
         tags: Element<'a, M>,
         tags_editing: bool,
         wrap: impl Fn(PrefMsg) -> M + Clone + 'a,
         on_close: M,
     ) -> Element<'a, M> {
-        let (extra_title, extra_page) = match extra {
-            Some((t, e)) => (Some(t), Some(e)),
-            None => (None, None),
-        };
+        let extra_pages: Vec<(Page, &'a str, Icon)> =
+            extras.iter().map(|(p, t, i, _)| (*p, *t, *i)).collect();
         let page = match self.page {
             Page::Appearance => self.appearance(wrap.clone()),
             Page::Tags => self.tags(wrap.clone(), tags, tags_editing),
-            // An app with no extra page never shows it: fall back to its own.
-            Page::Extra => extra_page.unwrap_or(app_page),
             Page::App => app_page,
+            // An app with no such page never shows it: fall back to its own.
+            other => match extras.iter().position(|(p, ..)| *p == other) {
+                Some(i) => extras.swap_remove(i).3,
+                None => app_page,
+            },
         };
         let page: Element<'a, M> = match &self.problem {
             Some(p) => column![tag(p.clone(), Role::Warning), page]
@@ -212,9 +216,7 @@ impl Preferences {
             (Page::Appearance, "Appearance", Icon::Moon),
             (Page::Tags, "Tags", Icon::Tags),
         ];
-        if let Some(t) = extra_title {
-            pages.push((Page::Extra, t, Icon::Palette));
-        }
+        pages.extend(extra_pages);
         pages.push((Page::App, app_title, Icon::Settings));
         // A row of the page list: the page's icon and name, the whole row a target. Flush with the
         // sheet's edge, so the list lines up with the title above it.

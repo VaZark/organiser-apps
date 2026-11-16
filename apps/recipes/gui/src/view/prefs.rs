@@ -18,7 +18,7 @@ impl App {
             wide,
             "Recipes",
             page.into(),
-            None,
+            Vec::new(),
             self.tag_manager.view().map(Message::Tags),
             self.tag_manager.in_editor(),
             Message::Pref,
