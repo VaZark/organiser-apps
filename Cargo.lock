@@ -455,6 +455,9 @@ name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "bitstream-io"
@@ -1551,7 +1554,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iad-icons"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=a6928583d2e4bb3138c3b3542ab73a9de6d63681#a6928583d2e4bb3138c3b3542ab73a9de6d63681"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=521a233b08084d2ba412970c786ed7a46f92cbba#521a233b08084d2ba412970c786ed7a46f92cbba"
 
 [[package]]
 name = "iana-time-zone"
@@ -1597,13 +1600,14 @@ dependencies = [
 [[package]]
 name = "iced-adaptive-design"
 version = "0.1.0"
-source = "git+https://github.com/VaZark/iced-libadwaita?rev=a6928583d2e4bb3138c3b3542ab73a9de6d63681#a6928583d2e4bb3138c3b3542ab73a9de6d63681"
+source = "git+https://github.com/VaZark/iced-libadwaita?rev=521a233b08084d2ba412970c786ed7a46f92cbba#521a233b08084d2ba412970c786ed7a46f92cbba"
 dependencies = [
  "iad-icons",
  "iced",
  "image",
  "regex",
  "resvg",
+ "ron",
  "roxmltree",
  "svgtypes",
  "tokio",
@@ -2524,7 +2528,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notes-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "notes-schema",
@@ -2536,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "notes-gui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "iced",
  "notes-schema",
@@ -2549,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "notes-schema"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "organiser-core",
  "organiser-engine",
@@ -3034,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-cli-kit"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "organiser-core",
@@ -3044,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde",
  "toml",
@@ -3052,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-engine"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "rusqlite",
  "serde",
@@ -3063,7 +3067,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-markdown"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "pulldown-cmark",
  "serde",
@@ -3071,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-sticky"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "notes-schema",
  "organiser-core",
@@ -3085,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-ui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "iced",
  "iced-adaptive-design",
@@ -3098,7 +3102,7 @@ dependencies = [
 
 [[package]]
 name = "organiser-vault"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "organiser-engine",
  "serde_json",
@@ -3540,7 +3544,7 @@ dependencies = [
 
 [[package]]
 name = "recipes-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "clap",
@@ -3552,7 +3556,7 @@ dependencies = [
 
 [[package]]
 name = "recipes-gui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "iced",
@@ -3567,7 +3571,7 @@ dependencies = [
 
 [[package]]
 name = "recipes-schema"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "organiser-core",
@@ -3686,6 +3690,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "ron"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97b3fe97c18ff24299ea56f802c5693eb34266fb0bc8317f4e101debc8a3ceaf"
+dependencies = [
+ "bitflags 2.13.2",
+ "serde",
+ "serde_derive",
+ "typeid",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -4124,7 +4141,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "sticky-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "organiser-sticky",
  "sticky-engine",
@@ -4132,7 +4149,7 @@ dependencies = [
 
 [[package]]
 name = "sticky-engine"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "notes-schema",
  "organiser-core",
@@ -4144,7 +4161,7 @@ dependencies = [
 
 [[package]]
 name = "sticky-gui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "iced",
  "organiser-core",
@@ -4364,7 +4381,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "todo-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "clap",
@@ -4377,7 +4394,7 @@ dependencies = [
 
 [[package]]
 name = "todo-gui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "iced",
@@ -4393,7 +4410,7 @@ dependencies = [
 
 [[package]]
 name = "todo-schema"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "chrono",
  "organiser-core",
@@ -4531,6 +4548,12 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
+
+[[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "uds_windows"

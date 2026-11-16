@@ -7,14 +7,14 @@ use std::process::Command;
 fn startup_installs_the_same_theme_for_layout_and_drawing() {
     let root = std::env::temp_dir().join(format!("organiser-theme-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let overlay = root.join("overlay.conf");
-    std::fs::write(&overlay, "[metrics]\nradius-window=21\n").unwrap();
+    let overlay = root.join("overlay.ron");
+    std::fs::write(&overlay, r#"{ "metrics": { "radius-window": 21 } }"#).unwrap();
 
     let installed = root.join("installed");
     std::fs::create_dir_all(installed.join("iad/themes")).unwrap();
     std::fs::write(
-        installed.join("iad/themes/default.conf"),
-        "[metrics]\nradius-window=23\n",
+        installed.join("iad/themes/default.ron"),
+        r#"{ "metrics": { "radius-window": 23 } }"#,
     )
     .unwrap();
 

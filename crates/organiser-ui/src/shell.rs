@@ -4,7 +4,17 @@ use organiser_core::AppMeta;
 
 use crate::iad;
 
-const DEFAULT_BASE_THEME: &str = include_str!("../themes/libadwaita.conf");
+const DEFAULT_BASE_THEME: &str = include_str!("../themes/libadwaita.ron");
+
+/// The scheme used until the desktop reports one. The settings portal's `color-scheme` is
+/// "prefer-dark" or nothing (`default`, "no preference"), so with nothing reported the apps are
+/// light.
+pub const DEFAULT_THEME_MODE_PREFERENCE: iad::Scheme = iad::Scheme::Light;
+
+/// [`DEFAULT_THEME_MODE_PREFERENCE`] as the apps' `desktop_dark` flag, before the desktop reports.
+pub const fn default_desktop_dark() -> bool {
+    matches!(DEFAULT_THEME_MODE_PREFERENCE, iad::Scheme::Dark)
+}
 
 /// Load desktop settings and the bundled base with any selected theme overlay.
 /// Call once, first thing in `main`. `IAD_THEME=none` skips the overlay,
@@ -114,7 +124,7 @@ mod tests {
     #[test]
     fn sparse_overlay_keeps_base_geometry_and_rejects_invalid_values() {
         let config = resolve_theme(
-            "[metrics]\nradius-window=21\nspace-m=invalid\n[colors]\nwindow-bg=#123456\n",
+            r##"{ "metrics": { "radius-window": 21, "space-m": "invalid" }, "colors": { "window-bg": "#123456" } }"##,
         );
         let theme = iad::Theme::light().with_theme_config(&config);
         assert_eq!(theme.metrics.radius_window, 21.0);

@@ -484,7 +484,7 @@ impl App {
             folds: Folds::default(),
             details: None,
             toast: None,
-            desktop_dark: false,
+            desktop_dark: organiser_ui::shell::default_desktop_dark(),
             mode,
         };
         // Development switches, for screenshots of states that need a click to reach.

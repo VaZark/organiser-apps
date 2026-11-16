@@ -446,7 +446,7 @@ impl App {
             prefs,
             tag_query: String::new(),
             toast: None,
-            desktop_dark: false,
+            desktop_dark: organiser_ui::shell::default_desktop_dark(),
             mode,
             today,
             meals: Vec::new(),

@@ -16,12 +16,12 @@ finish-args:
   # The list of linked apps, shared by every app.
   - --filesystem=xdg-config/organiser
   # "Start on login" goes through the Background portal, which needs no permission.
-  # The toolkit's desktop-wide settings (`desktop.conf`: scheme, accent, density, ...), read-only.
+  # The toolkit's desktop-wide settings (`desktop.ron`: scheme, accent, density, ...), read-only.
   # The theme itself is read from xdg-data/iad below.
   - --filesystem=xdg-config/iced-adaptive-design:ro
-  # The selected theme (`default.conf`, a symlink the theme editor sets) and the themes it points to.
+  # The selected theme (`default.ron`, a symlink the theme editor sets) and the themes it points to.
   - --filesystem=xdg-data/iad:ro
-  # This app's own optional theme override (`theme.conf`), read-only.
+  # This app's own optional theme override (`theme.ron`), read-only.
   - --filesystem=xdg-config/io.github.vazark.Sticky:ro
 modules:
   - name: sticky

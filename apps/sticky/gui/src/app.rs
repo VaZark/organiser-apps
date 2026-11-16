@@ -253,7 +253,7 @@ impl App {
             mode: Mode::from(loaded.settings.appearance.theme),
             settings: loaded.settings,
             toast: loaded.problem,
-            desktop_dark: false,
+            desktop_dark: organiser_ui::shell::default_desktop_dark(),
         };
         if background && !owner {
             // Another Sticky is running and will pick up what changed.

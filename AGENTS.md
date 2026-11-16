@@ -20,7 +20,7 @@
 ## Architecture invariants
 
 - Layering: primitives → components → apps. Shared logic lives in `crates/` (`organiser-vault`, `organiser-ui`, ...), not copied between apps.
-- Every GUI themes through `organiser_ui::shell` (iad Theme on the bundled `libadwaita.conf` base). Do not add per-app themes; colours that are user data (tags, epics, sticky palette) are the only hard-coded colours.
+- Every GUI themes through `organiser_ui::shell` (iad Theme on the bundled `libadwaita.ron` base). Do not add per-app themes; colours that are user data (tags, epics, sticky palette) are the only hard-coded colours.
 - A vault never loses user files: deletes are soft (`.archive/`), conflicts keep both versions, imported (symlinked) folders are never removed or written outside their task files.
 - iad is pinned by `rev` in the root `Cargo.toml`; `.cargo/config.toml` is a local-only patch and `Cargo.lock` must not be committed with it active.
 

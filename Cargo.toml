@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/organiser-core", "crates/organiser-markdown", "crates/organiser-vault", "crates/organiser-engine", "crates/organiser-cli-kit", "apps/todo/schema", "crates/organiser-ui", "apps/todo/cli", "apps/todo/gui", "apps/recipes/schema", "apps/recipes/cli", "apps/recipes/gui", "apps/notes/schema", "apps/notes/cli", "apps/notes/gui", "crates/organiser-sticky", "apps/sticky/engine", "apps/sticky/cli", "apps/sticky/gui"]
 
 [workspace.package]
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 license = "MIT"
 
@@ -19,7 +19,7 @@ organiser-cli-kit = { path = "crates/organiser-cli-kit" }
 organiser-ui = { path = "crates/organiser-ui" }
 organiser-sticky = { path = "crates/organiser-sticky" }
 sticky-engine = { path = "apps/sticky/engine" }
-iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "a6928583d2e4bb3138c3b3542ab73a9de6d63681" }
+iced-adaptive-design = { git = "https://github.com/VaZark/iced-libadwaita", rev = "521a233b08084d2ba412970c786ed7a46f92cbba" }
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "wayland", "advanced", "svg", "image", "tokio", "canvas"] }
 rusqlite = "0.37"
 serde = { version = "1", features = ["derive"] }

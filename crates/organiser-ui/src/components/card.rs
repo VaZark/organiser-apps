@@ -93,8 +93,17 @@ mod tests {
         let config = crate::iad::theme_config::ThemeConfig::builder("card-test")
             .files(false)
             .app_text(
-                "[colors]\ncard-bg=#ffffff\ncard-fg=#000006\n\
-                 [dark:colors]\ncard-bg=rgba(255, 255, 255, 0.08)\ncard-fg=#ffffff\n",
+                r##"{
+    "colors": {
+        "card-bg": "#ffffff",
+        "card-fg": "#000006",
+    },
+    "dark:colors": {
+        "card-bg": "rgba(255, 255, 255, 0.08)",
+        "card-fg": "#ffffff",
+    },
+}
+"##,
             )
             .build();
         [

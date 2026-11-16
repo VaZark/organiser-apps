@@ -396,7 +396,7 @@ impl App {
             vault: None,
             vault_known: Default::default(),
             toast: None,
-            desktop_dark: false,
+            desktop_dark: organiser_ui::shell::default_desktop_dark(),
             mode,
         };
         // Development switches, for screenshots of states that need a click to reach.
