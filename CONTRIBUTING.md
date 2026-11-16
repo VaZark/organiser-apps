@@ -76,7 +76,7 @@ nothing in normal use):
 | `TODO_GUI_SEARCH=<text>`          | start with the search open (empty text is fine)           |
 | `TODO_GUI_FILTER=1`               | open the filter                                           |
 | `TODO_GUI_NEW=1`                  | open the edit page on a new task                          |
-| `TODO_GUI_PREFS=appearance\|tags\|statuses\|app` | open Preferences on that page                         |
+| `TODO_GUI_PREFS=tags\|statuses\|app` | open Preferences on that page                         |
 | `TODO_GUI_PREVIEW=1`              | with a task selected, show its details drawn as Markdown  |
 | `TODO_GUI_EPIC=<id>`, `TODO_GUI_TAG=a,b` | start with those filters on                        |
 | `TODO_GUI_LIST=1`                 | start in the list (the board is the default view)         |
@@ -88,7 +88,7 @@ nothing in normal use):
 
 Recipes has the same switches under `RECIPES_GUI_*`, plus `RECIPES_GUI_EDIT=1` (open the selected recipe in edit mode), `RECIPES_GUI_CALENDAR=1`, `RECIPES_GUI_FRIDGE=1`, `RECIPES_GUI_SHOP=<id,id>` (the shopping list open on these recipes) and `RECIPES_GUI_TODAY=YYYY-MM-DD` (pretend it is that day).
 
-Notes: `NOTES_GUI_SIZE=WxH`, `NOTES_GUI_FILTER=1`, `NOTES_GUI_PREFS=appearance|tags|app`, `NOTES_GUI_TAG_EDIT=<tag>` (a tag's editor), `NOTES_GUI_PALETTE_EDIT=1` (the palette editor), `NOTES_GUI_NEW=1` (the edit page on a new note), `NOTES_GUI_SELECT=<id>`, `NOTES_GUI_PREVIEW=1` (the selected note drawn as Markdown),
+Notes: `NOTES_GUI_SIZE=WxH`, `NOTES_GUI_FILTER=1`, `NOTES_GUI_PREFS=tags|app`, `NOTES_GUI_TAG_EDIT=<tag>` (a tag's editor), `NOTES_GUI_PALETTE_EDIT=1` (the palette editor), `NOTES_GUI_NEW=1` (the edit page on a new note), `NOTES_GUI_SELECT=<id>`, `NOTES_GUI_PREVIEW=1` (the selected note drawn as Markdown),
 `NOTES_GUI_SCOPE=archive|trash`, `NOTES_GUI_TAG=a,b`, `NOTES_GUI_SEARCH=<text>` and `NOTES_GUI_THEME=light|dark`.
 
 ## Packaging

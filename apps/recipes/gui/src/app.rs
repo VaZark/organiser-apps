@@ -423,7 +423,7 @@ impl App {
             std::process::exit(1);
         });
         let prefs = Preferences::load();
-        let mode = Mode::from(prefs.settings.appearance.theme);
+        let mode = Mode::default();
         let prefs_compact = prefs.settings.recipes.compact;
         let today = Local::now().date_naive();
         let mut app = Self {
@@ -551,7 +551,7 @@ impl App {
             app.prefs.page = match page.as_str() {
                 "tags" => organiser_ui::widgets::preferences::Page::Tags,
                 "app" => organiser_ui::widgets::preferences::Page::App,
-                _ => organiser_ui::widgets::preferences::Page::Appearance,
+                _ => organiser_ui::widgets::preferences::Page::Tags,
             };
         }
         match std::env::var("RECIPES_GUI_THEME").as_deref() {
@@ -599,7 +599,7 @@ impl App {
     }
 
     pub fn theme(&self) -> iad::Theme {
-        organiser_ui::shell::theme(self.mode.is_dark(self.desktop_dark))
+        organiser_ui::shell::theme(organiser_ui::shell::is_dark(self.mode, self.desktop_dark))
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -837,7 +837,6 @@ impl App {
             Message::OpenPrefs => self.prefs.open_first_page(),
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
-                Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
                 Ok(Changed::Palette | Changed::Nothing) => {}
                 Err(e) => self.fail(e),
             },

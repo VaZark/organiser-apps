@@ -539,6 +539,7 @@ fn statuses_out(st: &Statuses) -> Output {
 }
 
 fn main() -> ExitCode {
+    organiser_core::settings::use_app(&todo_schema::META);
     organiser_cli_kit::run(&todo_schema::META, &todo_schema::SCHEMA, &Todo::default())
 }
 

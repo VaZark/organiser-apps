@@ -21,6 +21,7 @@ pub const META: AppMeta = AppMeta {
 };
 
 fn main() -> iced::Result {
+    organiser_core::settings::use_app(&META);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--print-desktop-entry") {
         // `%u`: the URI the desktop hands over when something opens `organiser-sticky:`; that

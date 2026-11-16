@@ -424,7 +424,7 @@ impl App {
             std::process::exit(1);
         }
         let prefs = Preferences::load();
-        let mode = Mode::from(prefs.settings.appearance.theme);
+        let mode = Mode::default();
         let view_by_default = View::from(prefs.settings.todo.start_view);
         let show_subtasks_by_default = prefs.settings.todo.show_subtasks;
         let prefs_group_by_epic = prefs.settings.todo.group_by_epic;
@@ -554,7 +554,7 @@ impl App {
                 "statuses" => organiser_ui::widgets::preferences::Page::Extra,
                 "folders" => organiser_ui::widgets::preferences::Page::Folders,
                 "app" => organiser_ui::widgets::preferences::Page::App,
-                _ => organiser_ui::widgets::preferences::Page::Appearance,
+                _ => organiser_ui::widgets::preferences::Page::Tags,
             };
         }
         match std::env::var("TODO_GUI_THEME").as_deref() {
@@ -602,7 +602,7 @@ impl App {
     }
 
     pub fn theme(&self) -> iad::Theme {
-        organiser_ui::shell::theme(self.mode.is_dark(self.desktop_dark))
+        organiser_ui::shell::theme(organiser_ui::shell::is_dark(self.mode, self.desktop_dark))
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1613,7 +1613,6 @@ impl App {
             }
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
-                Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
                 Ok(Changed::Palette | Changed::Nothing) => {}
                 Err(e) => self.fail(e),
             },

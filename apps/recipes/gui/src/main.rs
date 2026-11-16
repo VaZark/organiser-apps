@@ -9,6 +9,7 @@ use app::App;
 use organiser_ui::shell;
 
 fn main() -> iced::Result {
+    organiser_core::settings::use_app(&recipes_schema::META);
     if std::env::args().nth(1).as_deref() == Some("--print-desktop-entry") {
         print!(
             "{}",

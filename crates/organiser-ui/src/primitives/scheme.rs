@@ -1,4 +1,5 @@
-//! Light or dark: follow the desktop, or the user's override.
+//! Light or dark: follow the desktop, or a forced scheme (a developer override such as
+//! `TODO_GUI_THEME`; the user's choice lives in iad's `desktop.ron`, see `shell::is_dark`).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -6,17 +7,6 @@ pub enum Mode {
     Follow,
     Light,
     Dark,
-}
-
-impl From<organiser_core::settings::ThemeChoice> for Mode {
-    fn from(t: organiser_core::settings::ThemeChoice) -> Self {
-        use organiser_core::settings::ThemeChoice as T;
-        match t {
-            T::Follow => Mode::Follow,
-            T::Light => Mode::Light,
-            T::Dark => Mode::Dark,
-        }
-    }
 }
 
 impl Mode {
@@ -33,14 +23,6 @@ impl Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_settings_theme_maps_to_the_matching_mode() {
-        use organiser_core::settings::ThemeChoice as T;
-        assert_eq!(Mode::from(T::Follow), Mode::Follow);
-        assert_eq!(Mode::from(T::Light), Mode::Light);
-        assert_eq!(Mode::from(T::Dark), Mode::Dark);
-    }
 
     #[test]
     fn override_beats_desktop() {

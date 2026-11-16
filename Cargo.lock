@@ -3050,8 +3050,8 @@ dependencies = [
 name = "organiser-core"
 version = "0.0.3"
 dependencies = [
+ "ron",
  "serde",
- "toml",
 ]
 
 [[package]]

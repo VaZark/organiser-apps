@@ -348,7 +348,7 @@ impl App {
         let group_by_folder = prefs.settings.notes.group_by_folder;
         let group_by_section = prefs.settings.notes.group_by_section;
         let show_all_notes = prefs.settings.notes.show_all_notes;
-        let mode = Mode::from(prefs.settings.appearance.theme);
+        let mode = Mode::default();
         // Housekeeping: notes past their time in the trash go for good.
         if let Err(e) = lifecycle::purge_expired(&mut db, now(), prefs.settings.notes.trash_days) {
             eprintln!("warning: cannot empty the old trash: {e}");
@@ -456,7 +456,7 @@ impl App {
             app.prefs.page = match page.as_str() {
                 "tags" => organiser_ui::widgets::preferences::Page::Tags,
                 "app" => organiser_ui::widgets::preferences::Page::App,
-                _ => organiser_ui::widgets::preferences::Page::Appearance,
+                _ => organiser_ui::widgets::preferences::Page::Tags,
             };
         }
         if std::env::var_os("NOTES_GUI_PALETTE_EDIT").is_some() {
@@ -495,7 +495,7 @@ impl App {
     }
 
     pub fn theme(&self) -> iad::Theme {
-        organiser_ui::shell::theme(self.mode.is_dark(self.desktop_dark))
+        organiser_ui::shell::theme(organiser_ui::shell::is_dark(self.mode, self.desktop_dark))
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1105,7 +1105,6 @@ impl App {
             }
             Message::ClosePrefs => self.prefs.open = false,
             Message::Pref(m) => match self.prefs.update(m) {
-                Ok(Changed::Theme(t)) => self.mode = Mode::from(t),
                 Ok(Changed::Palette | Changed::Nothing) => {}
                 Err(e) => self.fail(e),
             },

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
-use organiser_core::settings::{Settings, ThemeChoice};
+use organiser_core::settings::Settings;
 
 use crate::Element;
 use crate::components::dot::{color_from_hex, dot};
@@ -23,7 +23,6 @@ use crate::widgets::filter_sheet::filter_sheet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
-    Appearance,
     Tags,
     /// A page the app adds of its own kind (Todo's statuses), after Tags.
     Extra,
@@ -41,7 +40,6 @@ pub enum PrefMsg {
     Open(Page),
     /// Back from a page to the list of pages (narrow).
     Back,
-    Theme(ThemeChoice),
     PaletteColor(usize, Hsva),
     PaletteText(usize, String),
     PaletteAdd,
@@ -54,7 +52,6 @@ pub enum PrefMsg {
 /// What a message changed that the app has to act on now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Changed {
-    Theme(ThemeChoice),
     Palette,
     Nothing,
 }
@@ -84,7 +81,7 @@ impl Preferences {
         let loaded = Settings::load();
         Self {
             open: false,
-            page: Page::Appearance,
+            page: Page::Tags,
             settings: loaded.settings,
             problem: loaded.problem,
             palette_editing: false,
@@ -126,10 +123,6 @@ impl Preferences {
             PrefMsg::Back => {
                 self.page_open = false;
                 return Ok(Changed::Nothing);
-            }
-            PrefMsg::Theme(t) => {
-                self.settings.appearance.theme = t;
-                changed = Changed::Theme(t);
             }
             PrefMsg::PaletteColor(i, h) => {
                 if let Some(c) = self.settings.tags.palette.get_mut(i) {
@@ -197,7 +190,6 @@ impl Preferences {
         let extra_pages: Vec<(Page, &'a str, Icon)> =
             extras.iter().map(|(p, t, i, _)| (*p, *t, *i)).collect();
         let page = match self.page {
-            Page::Appearance => self.appearance(wrap.clone()),
             Page::Tags => self.tags(wrap.clone(), tags, tags_editing),
             Page::App => app_page,
             // An app with no such page never shows it: fall back to its own.
@@ -212,10 +204,7 @@ impl Preferences {
                 .into(),
             None => page,
         };
-        let mut pages = vec![
-            (Page::Appearance, "Appearance", Icon::Moon),
-            (Page::Tags, "Tags", Icon::Tags),
-        ];
+        let mut pages = vec![(Page::Tags, "Tags", Icon::Tags)];
         pages.extend(extra_pages);
         pages.push((Page::App, app_title, Icon::Settings));
         // A row of the page list: the page's icon and name, the whole row a target. Flush with the
@@ -271,18 +260,6 @@ impl Preferences {
             }
         };
         filter_sheet("Preferences", None, body, on_close, None, None)
-    }
-
-    fn appearance<'a, M: Clone + 'a>(&'a self, wrap: impl Fn(PrefMsg) -> M + 'a) -> Element<'a, M> {
-        EntryRow::select(
-            "Theme",
-            &ThemeChoice::ALL,
-            Some(self.settings.appearance.theme),
-            move |t| wrap(PrefMsg::Theme(t)),
-        )
-        .description("Follow the desktop, or always use light or dark. Applies to every app.")
-        .flat(true)
-        .into()
     }
 
     fn tags<'a, M: Clone + 'a>(
@@ -389,7 +366,7 @@ mod tests {
     fn prefs() -> Preferences {
         Preferences {
             open: true,
-            page: Page::Appearance,
+            page: Page::Tags,
             settings: Settings::default(),
             problem: None,
             palette_editing: false,
@@ -471,20 +448,6 @@ mod tests {
             (p.page, p.page_open),
             (Page::Tags, false),
             "a wide window keeps its list"
-        );
-    }
-
-    #[test]
-    fn the_theme_choice_is_kept_and_reported() {
-        let _env = scratch("theme");
-        let mut p = prefs();
-        let changed = p.update(PrefMsg::Theme(ThemeChoice::Dark)).unwrap();
-        assert_eq!(changed, Changed::Theme(ThemeChoice::Dark));
-        assert_eq!(p.settings.appearance.theme, ThemeChoice::Dark);
-        assert_eq!(
-            Settings::load().settings.appearance.theme,
-            ThemeChoice::Dark,
-            "and saved"
         );
     }
 

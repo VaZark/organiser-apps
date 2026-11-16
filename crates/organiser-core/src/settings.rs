@@ -1,7 +1,9 @@
-//! The settings every organiser app shares, in one file: `$XDG_CONFIG_HOME/organiser/settings.toml`
-//! (else `~/.config/organiser/settings.toml`). Global choices (the theme, the colours new tags
-//! take) and each app's own defaults sit side by side, so editing them in one app changes them
-//! in all.
+//! The settings an organiser app keeps, in RON: `$XDG_CONFIG_HOME/<app-id>/config.ron` (else
+//! `~/.config/<app-id>/config.ron`), next to the app's optional `theme.ron`. Each app has its own
+//! file, holding the tag colours and its own section only; nothing is shared between apps.
+//! Call [`use_app`] first thing in `main`, so the file is the app's.
+//!
+//! Light or dark is not here: it is iad's `desktop.ron` `color-scheme` (`system` follows the portal).
 //!
 //! Reading is forgiving: a missing file, a missing key or a value that makes no sense falls back
 //! to the default for that one thing, and unknown keys are kept out of the way. A file that
@@ -9,32 +11,18 @@
 //! until the person changes a setting.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The app whose file [`Settings::path`] names: (reverse-DNS id, slug).
+static APP: OnceLock<(&'static str, &'static str)> = OnceLock::new();
+
+/// Name the running app, so its settings are read from and written to its own file. Call once,
+/// first thing in `main`; the first call wins.
+pub fn use_app(meta: &crate::AppMeta) {
+    let _ = APP.set((meta.id, meta.slug));
+}
 
 use serde::{Deserialize, Serialize};
-
-/// Light or dark, or whatever the desktop is doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ThemeChoice {
-    #[default]
-    Follow,
-    Light,
-    Dark,
-}
-
-impl ThemeChoice {
-    pub const ALL: [ThemeChoice; 3] = [Self::Follow, Self::Light, Self::Dark];
-}
-
-impl std::fmt::Display for ThemeChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Follow => "Follow the desktop",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-        })
-    }
-}
 
 /// What Todo opens on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -76,12 +64,6 @@ pub const DEFAULT_STICKY_PALETTE: [&str; 5] =
 
 /// How long a note stays in the trash, unless changed.
 pub const DEFAULT_TRASH_DAYS: u32 = 30;
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Appearance {
-    pub theme: ThemeChoice,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -195,7 +177,6 @@ pub struct RecipesSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub appearance: Appearance,
     pub tags: TagSettings,
     pub todo: TodoSettings,
     pub notes: NotesSettings,
@@ -218,14 +199,15 @@ fn is_hex(s: &str) -> bool {
 }
 
 impl Settings {
-    /// Where the shared file lives.
+    /// Where the app's file lives (`organiser/` before [`use_app`] is called, as in tests).
     pub fn path() -> PathBuf {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config")))
             .unwrap_or_else(|| PathBuf::from(".config"));
-        base.join("organiser").join("settings.toml")
+        base.join(APP.get().map_or("organiser", |a| a.0))
+            .join("config.ron")
     }
 
     /// Values that make no sense put right: colours that are not `#rrggbb` are dropped (and the
@@ -279,7 +261,7 @@ impl Settings {
                 };
             }
         };
-        match toml::from_str::<Settings>(&text) {
+        match ron::from_str::<Settings>(&text) {
             Ok(s) => Loaded {
                 settings: s.normalized(),
                 problem: None,
@@ -295,16 +277,55 @@ impl Settings {
         self.save_to(&Self::path())
     }
 
+    /// The file's text: the tag colours and the running app's own section (every section, before
+    /// [`use_app`] is called).
+    fn to_ron(&self) -> Result<String, String> {
+        self.render(APP.get().map(|a| a.1))
+    }
+
+    /// [`Self::to_ron`] for the app with this slug (`None`: every section).
+    fn render(&self, app: Option<&str>) -> Result<String, String> {
+        #[derive(Serialize)]
+        struct Stored<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tags: Option<&'a TagSettings>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            todo: Option<&'a TodoSettings>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            notes: Option<&'a NotesSettings>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            recipes: Option<&'a RecipesSettings>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            sticky: Option<&'a StickySettings>,
+        }
+        let s = self.clone().normalized();
+        let mine = |slug: &str| app.is_none_or(|a| a == slug);
+        let stored = Stored {
+            tags: app.is_none_or(|a| a != "sticky").then_some(&s.tags),
+            todo: mine("todo").then_some(&s.todo),
+            notes: mine("notes").then_some(&s.notes),
+            recipes: mine("recipes").then_some(&s.recipes),
+            sticky: mine("sticky").then_some(&s.sticky),
+        };
+        ron::ser::to_string_pretty(
+            &stored,
+            ron::ser::PrettyConfig::default()
+                // The sections are `Option`s only to leave the other apps' out; do not write
+                // them as `Some(...)`. (The file says so itself, so it reads back anywhere.)
+                .extensions(ron::extensions::Extensions::IMPLICIT_SOME),
+        )
+        .map_err(|e| format!("cannot write settings: {e}"))
+    }
+
     /// Write the file, whole or not at all: a half-written settings file must never be what the
     /// next start finds.
     pub fn save_to(&self, path: &Path) -> Result<(), String> {
-        let text = toml::to_string_pretty(&self.clone().normalized())
-            .map_err(|e| format!("cannot write settings: {e}"))?;
+        let text = self.to_ron()?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)
                 .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         }
-        let tmp = path.with_extension("toml.tmp");
+        let tmp = path.with_extension("ron.tmp");
         std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
     }
@@ -323,7 +344,7 @@ mod tests {
 
     #[test]
     fn no_file_means_the_defaults_and_no_problem() {
-        let l = Settings::load_from(&dir("none").join("settings.toml"));
+        let l = Settings::load_from(&dir("none").join("config.ron"));
         assert_eq!(l.settings, Settings::default());
         assert_eq!(l.problem, None);
         assert_eq!(l.settings.notes.trash_days, 30);
@@ -332,43 +353,40 @@ mod tests {
 
     #[test]
     fn settings_survive_a_save_and_load() {
-        let path = dir("round").join("deep").join("settings.toml");
+        let path = dir("round").join("deep").join("config.ron");
         let mut s = Settings::default();
-        s.appearance.theme = ThemeChoice::Dark;
         s.todo.start_view = StartView::List;
         s.todo.show_closed = true;
         s.notes.trash_days = 7;
         s.tags.palette = vec!["#112233".into(), "#aabbcc".into()];
         s.save_to(&path).unwrap();
         assert!(
-            !path.with_extension("toml.tmp").exists(),
+            !path.with_extension("ron.tmp").exists(),
             "no half-written file is left"
         );
-        assert_eq!(Settings::load_from(&path).settings, s);
+        let l = Settings::load_from(&path);
+        assert_eq!(l.problem, None);
+        assert_eq!(l.settings, s);
     }
 
     #[test]
     fn a_partial_file_keeps_the_defaults_for_what_it_leaves_out() {
-        let path = dir("partial").join("settings.toml");
+        let path = dir("partial").join("config.ron");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            "[appearance]\ntheme = \"light\"\n\n[unknown]\nkey = 1\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "(notes: (trash_days: 7), unknown: (key: 1))").unwrap();
         let l = Settings::load_from(&path);
         assert_eq!(l.problem, None);
-        assert_eq!(l.settings.appearance.theme, ThemeChoice::Light);
-        assert_eq!(l.settings.notes.trash_days, 30);
+        assert_eq!(l.settings.notes.trash_days, 7);
+        assert_eq!(l.settings.todo, TodoSettings::default());
     }
 
     #[test]
     fn nonsense_values_are_put_right() {
-        let path = dir("nonsense").join("settings.toml");
+        let path = dir("nonsense").join("config.ron");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "[tags]\npalette = [\"red\", \"#ABCDEF\", \"#12\"]\n[notes]\ntrash_days = 0\n",
+            "(tags: (palette: [\"red\", \"#ABCDEF\", \"#12\"]), notes: (trash_days: 0))",
         )
         .unwrap();
         let s = Settings::load_from(&path).settings;
@@ -378,7 +396,7 @@ mod tests {
             "only real colours stay, lowercased"
         );
         assert_eq!(s.notes.trash_days, 1, "at least a day");
-        std::fs::write(&path, "[tags]\npalette = [\"nope\"]\n").unwrap();
+        std::fs::write(&path, "(tags: (palette: [\"nope\"]))").unwrap();
         assert_eq!(
             Settings::load_from(&path).settings.tags.palette.len(),
             10,
@@ -388,9 +406,9 @@ mod tests {
 
     #[test]
     fn an_unreadable_file_gives_the_defaults_and_says_why_and_is_not_replaced() {
-        let path = dir("bad").join("settings.toml");
+        let path = dir("bad").join("config.ron");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "this is = = not toml [").unwrap();
+        std::fs::write(&path, "this is = = not ron [").unwrap();
         let l = Settings::load_from(&path);
         assert_eq!(l.settings, Settings::default());
         assert!(
@@ -400,8 +418,17 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "this is = = not toml ["
+            "this is = = not ron ["
         );
+    }
+
+    #[test]
+    fn an_app_file_holds_the_tags_and_that_apps_section_only() {
+        let text = Settings::default().to_ron().unwrap();
+        assert!(text.contains("tags") && text.contains("todo") && text.contains("sticky"));
+        let one = Settings::default().render(Some("notes")).unwrap();
+        assert!(one.contains("notes") && one.contains("tags"));
+        assert!(!one.contains("todo") && !one.contains("sticky"));
     }
 
     #[test]

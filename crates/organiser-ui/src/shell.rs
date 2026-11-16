@@ -73,7 +73,18 @@ pub fn wants_new(meta: &AppMeta) -> bool {
         .any(|a| a == "--new" || a.starts_with(&prefix))
 }
 
-/// The bundled base and selected theme overlay, with desktop settings and the user's scheme.
+/// Whether to draw dark. A forced `mode` wins; otherwise iad's desktop settings decide: a
+/// `color_scheme` fixed in `desktop.ron` is used, and `system` (the default) follows what the
+/// settings portal reports (`desktop_dark`).
+pub fn is_dark(mode: crate::primitives::scheme::Mode, desktop_dark: bool) -> bool {
+    use crate::primitives::scheme::Mode;
+    match (mode, &iad::config::current().color_scheme) {
+        (Mode::Follow, iad::config::Pick::Fixed(s)) => matches!(s, iad::Scheme::Dark),
+        _ => mode.is_dark(desktop_dark),
+    }
+}
+
+/// The bundled base and selected theme overlay, with desktop settings and the given scheme.
 pub fn theme(dark: bool) -> iad::Theme {
     let mut desktop = (*iad::config::current()).clone();
     desktop.color_scheme = iad::config::Pick::Fixed(if dark {
@@ -134,5 +145,15 @@ mod tests {
             [0x12, 0x34, 0x56, 0xff]
         );
         assert!(!config.warnings().is_empty());
+    }
+
+    #[test]
+    fn forced_mode_beats_desktop_and_system_follows_it() {
+        use crate::primitives::scheme::Mode;
+        // No desktop.ron is installed in tests, so the scheme is `system`.
+        assert!(is_dark(Mode::Follow, true));
+        assert!(!is_dark(Mode::Follow, false));
+        assert!(is_dark(Mode::Dark, false));
+        assert!(!is_dark(Mode::Light, true));
     }
 }

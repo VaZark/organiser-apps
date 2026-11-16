@@ -641,6 +641,7 @@ impl Extension for Notes {
 }
 
 fn main() -> ExitCode {
+    organiser_core::settings::use_app(&notes_schema::META);
     organiser_cli_kit::run(
         &notes_schema::META,
         &notes_schema::SCHEMA,

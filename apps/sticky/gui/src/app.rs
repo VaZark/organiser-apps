@@ -250,7 +250,7 @@ impl App {
             autostart: autostart::is_enabled(),
             default_text: loaded.settings.sticky.default_color.clone(),
             palette_texts: HashMap::new(),
-            mode: Mode::from(loaded.settings.appearance.theme),
+            mode: Mode::default(),
             settings: loaded.settings,
             toast: loaded.problem,
             desktop_dark: organiser_ui::shell::default_desktop_dark(),
@@ -308,7 +308,7 @@ impl App {
         if self.stickies.iter().any(|s| s.win == Some(id)) {
             return shell::theme(false);
         }
-        shell::theme(self.mode.is_dark(self.desktop_dark))
+        shell::theme(shell::is_dark(self.mode, self.desktop_dark))
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

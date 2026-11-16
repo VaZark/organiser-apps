@@ -17,8 +17,9 @@ finish-args:
   - --filesystem=xdg-config/iced-adaptive-design:ro
   # The selected theme (`default.ron`, a symlink the theme editor sets) and the themes it points to.
   - --filesystem=xdg-data/iad:ro
-  # This app's own optional theme override (`theme.ron`), read-only.
-  - --filesystem=xdg-config/io.github.vazark.Todo:ro
+  # This app's own config directory: its settings (`config.ron`, written by Preferences) and
+  # its optional theme override (`theme.ron`).
+  - --filesystem=xdg-config/io.github.vazark.Todo
   # The list of apps linked to Sticky Notes, shared by every app. Finding and starting Sticky
   # Notes needs nothing more: it goes through the desktop portals (OpenURI).
   - --filesystem=xdg-config/organiser
