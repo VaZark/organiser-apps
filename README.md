@@ -35,6 +35,17 @@ cargo run -p todo-cli -- --db /tmp/try.db tree
 cargo run -p todo-gui -- --db /tmp/try.db
 ```
 
+### Themes
+
+All four GUIs embed [`libadwaita.conf`](crates/organiser-ui/themes/libadwaita.conf) through
+`organiser-ui`, using iad's `Config::load_with_base_theme(DEFAULT_BASE_THEME)`, so they have a
+consistent base appearance without an installed desktop theme. iad owns discovery and base-theme
+fallback; the apps do not implement their own `IAD_THEME` handling.
+The theme selected by `IAD_THEME` or the installed XDG `iad/themes/default.conf` overlays that
+base; missing or invalid tokens retain the bundled values. `IAD_THEME=none` skips the overlay
+but is ignored for the bundled base: the apps start normally with their base theme, without
+an error or warning. Desktop settings and each app's light/dark preference still apply.
+
 ### Todo
 
 A task has a title, details, a status (to do, in progress, done, won't do), a priority (lowest to

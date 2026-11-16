@@ -4,9 +4,15 @@ use organiser_core::AppMeta;
 
 use crate::iad;
 
-/// Load the desktop-wide toolkit config. Call once, first thing in `main`.
+const DEFAULT_BASE_THEME: &str = include_str!("../themes/libadwaita.conf");
+
+/// Load desktop settings and the bundled base with any selected theme overlay.
+/// Call once, first thing in `main`. `IAD_THEME=none` skips the overlay,
+/// but never disables the bundled base theme.
 pub fn init() {
-    iad::config::install(iad::config::Config::load());
+    iad::config::install(iad::config::Config::load_with_base_theme(
+        DEFAULT_BASE_THEME,
+    ));
 }
 
 /// Window settings with client-side decorations and the app id GNOME needs to match the
@@ -41,7 +47,11 @@ pub fn scheme(meta: &AppMeta) -> String {
 /// entry declares the app's URI scheme (see [`scheme`]).
 pub fn linked_desktop_entry(meta: &AppMeta, bin: &str) -> String {
     let entry = desktop_entry(meta, &format!("{bin} %u"));
-    format!("{}\nMimeType=x-scheme-handler/{};\n", entry.trim_end(), scheme(meta))
+    format!(
+        "{}\nMimeType=x-scheme-handler/{};\n",
+        entry.trim_end(),
+        scheme(meta)
+    )
 }
 
 /// Whether the command line asks for the create page: `--new`, or the URI the desktop portal passes
@@ -53,8 +63,7 @@ pub fn wants_new(meta: &AppMeta) -> bool {
         .any(|a| a == "--new" || a.starts_with(&prefix))
 }
 
-/// The toolkit theme for the desktop scheme and the user's override. The app supplies no look of
-/// its own: it inherits the installed theme file and the desktop config.
+/// The bundled base and selected theme overlay, with desktop settings and the user's scheme.
 pub fn theme(dark: bool) -> iad::Theme {
     let mut desktop = (*iad::config::current()).clone();
     desktop.color_scheme = iad::config::Pick::Fixed(if dark {
@@ -63,6 +72,46 @@ pub fn theme(dark: bool) -> iad::Theme {
         iad::Scheme::Light
     });
     iad::Theme::from_config(&desktop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve_theme(overlay: &str) -> iad::theme_config::ThemeConfig {
+        iad::theme_config::ThemeConfig::builder("organiser-ui-test")
+            .files(false)
+            .base_theme(DEFAULT_BASE_THEME)
+            .toolkit_text(overlay)
+            .build()
+    }
+
+    #[test]
+    fn bundled_theme_is_valid_and_styles_both_schemes() {
+        let config = resolve_theme("");
+        assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+        assert!(config.unknown().is_empty(), "{:?}", config.unknown());
+        for theme in [iad::Theme::light(), iad::Theme::dark()] {
+            let theme = theme.with_theme_config(&config);
+            assert_eq!(theme.metrics.radius_window, 15.0);
+            assert_eq!(theme.metrics.space_m, 12.0);
+        }
+    }
+
+    #[test]
+    fn sparse_overlay_keeps_base_geometry_and_rejects_invalid_values() {
+        let config = resolve_theme(
+            "[metrics]\nradius-window=21\nspace-m=invalid\n[colors]\nwindow-bg=#123456\n",
+        );
+        let theme = iad::Theme::light().with_theme_config(&config);
+        assert_eq!(theme.metrics.radius_window, 21.0);
+        assert_eq!(theme.metrics.space_m, 12.0);
+        assert_eq!(
+            theme.palette.window_bg_color.into_rgba8(),
+            [0x12, 0x34, 0x56, 0xff]
+        );
+        assert!(!config.warnings().is_empty());
+    }
 }
 
 /// Open a link from a note in the desktop's default handler. Only web and mail links are opened
