@@ -93,6 +93,7 @@ pub enum Message {
     /// notes (false).
     ShowAllNotes(bool),
     PrefShowAllNotes(bool),
+    PrefDetailsDrawer(bool),
     SetSort(Sort),
     // Sections.
     OpenFolderSettings(i64),
@@ -160,6 +161,8 @@ pub enum Message {
     // The details of the selected note.
     Select(i64),
     CloseDetails,
+    /// The closed details have finished leaving: drop them.
+    DetailsGone,
     DTitle(String),
     DBody(text_editor::Action),
     /// Show the note drawn (true) or its Markdown source (false).
@@ -291,6 +294,8 @@ pub struct App {
     pub folder_notes: Option<String>,
     pub folder_color_text: Option<String>,
     pub details: Option<Details>,
+    /// The details that were just closed, kept while their page animates out.
+    pub leaving: Option<Details>,
     /// The directory the notes live in as files, when they do.
     pub db_path: std::path::PathBuf,
     pub vault: Option<Vault>,
@@ -392,6 +397,7 @@ impl App {
             folder_notes: None,
             folder_color_text: None,
             details: None,
+            leaving: None,
             db_path: path.clone(),
             vault: None,
             vault_known: Default::default(),
@@ -1118,6 +1124,12 @@ impl App {
                 self.show_all_notes = on;
                 self.reload();
             }
+            Message::PrefDetailsDrawer(on) => {
+                self.prefs.settings.notes.details_in_drawer = on;
+                if let Err(e) = self.prefs.save() {
+                    self.fail(e);
+                }
+            }
             Message::PrefShowAllNotes(on) => {
                 self.prefs.settings.notes.show_all_notes = on;
                 if let Err(e) = self.prefs.save() {
@@ -1669,7 +1681,8 @@ impl App {
                 Err(e) => self.fail(e),
             },
             Message::Select(id) => self.open(id),
-            Message::CloseDetails => self.details = None,
+            Message::CloseDetails => self.leaving = self.details.take(),
+            Message::DetailsGone => self.leaving = None,
             Message::DTitle(s) => {
                 if self.with_details(|d| d.title = s) {
                     self.commit();

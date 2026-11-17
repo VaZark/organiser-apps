@@ -25,7 +25,7 @@ use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::shortcut::Shortcuts;
 use organiser_ui::iad::windows::{Chrome, State};
-use organiser_ui::widgets::details_dock::{details_dock, details_drawer};
+use organiser_ui::widgets::details_dock::{details_dock_leaving, details_drawer_leaving};
 use organiser_ui::widgets::responsive_dialog;
 use todo_schema::sort::SortKey;
 use todo_schema::views::Scope;
@@ -225,6 +225,11 @@ impl App {
                 self.show_subtasks,
                 Message::ShowSubtasks(!self.show_subtasks),
             ),
+            MenuItem::switch(
+                "Details in drawer",
+                self.prefs.settings.todo.details_in_drawer,
+                Message::PrefDetailsDrawer(!self.prefs.settings.todo.details_in_drawer),
+            ),
         ];
         if self.shows_list() {
             let current = self.scope == Scope::Current;
@@ -260,11 +265,19 @@ impl App {
         base: impl Into<Element<'a, Message>>,
         width: f32,
     ) -> Element<'a, Message> {
-        let pane = self.details.is_some().then(|| self.details_pane());
+        // Open, or closed a moment ago and still on its way out.
+        let open = self.details.is_some();
+        let pane = (open || self.leaving.is_some()).then(|| self.details_pane());
         if self.in_drawer(width) {
-            details_drawer(base, pane, Message::CloseDetails)
+            details_drawer_leaving(
+                base,
+                pane,
+                open,
+                Message::CloseDetails,
+                Message::DetailsGone,
+            )
         } else {
-            details_dock(base, pane)
+            details_dock_leaving(base, pane, open, Message::DetailsGone)
         }
     }
 

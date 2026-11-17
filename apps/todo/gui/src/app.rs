@@ -164,6 +164,8 @@ pub enum Message {
     // The details of the selected task or epic.
     Select(i64),
     CloseDetails,
+    /// The closed details have finished leaving: drop them.
+    DetailsGone,
     DTitle(String),
     DNotes(text_editor::Action),
     /// Show the details drawn (true) or their Markdown source (false).
@@ -425,6 +427,8 @@ pub struct App {
     pub tag_names: Vec<String>,
     pub folds: Folds,
     pub details: Option<Details>,
+    /// The details that were just closed, kept while their page animates out.
+    pub leaving: Option<Details>,
     pub toast: Option<String>,
     pub desktop_dark: bool,
     pub mode: Mode,
@@ -512,6 +516,7 @@ impl App {
             tag_names: Vec::new(),
             folds: Folds::default(),
             details: None,
+            leaving: None,
             toast: None,
             desktop_dark: organiser_ui::shell::default_desktop_dark(),
             mode,
@@ -1913,7 +1918,8 @@ impl App {
             }
             Message::Fold(id) => self.folds.toggle(id),
             Message::Select(id) => self.open(id),
-            Message::CloseDetails => self.details = None,
+            Message::CloseDetails => self.leaving = self.details.take(),
+            Message::DetailsGone => self.leaving = None,
             Message::DTitle(s) => {
                 if self.with_details(|d| d.title = s) {
                     self.commit();

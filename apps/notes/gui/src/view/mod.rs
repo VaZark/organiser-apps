@@ -17,7 +17,9 @@ use organiser_ui::components::toggle::IconToggle;
 use organiser_ui::iad::prelude::*;
 use organiser_ui::iad::shortcut::Shortcuts;
 use organiser_ui::iad::windows::{Chrome, State};
-use organiser_ui::widgets::details_dock::{details_dock, details_drawer};
+use organiser_ui::widgets::details_dock::{
+    details_dock_leaving, details_drawer, details_drawer_leaving,
+};
 use organiser_ui::widgets::responsive_dialog;
 
 use crate::app::{App, Message};
@@ -72,10 +74,20 @@ impl App {
                 width - (width * 0.25).clamp(180.0, 280.0)
             };
             let head = self.header((collapsed, true), start, room, width);
-            let page = details_dock(
-                self.grid_page(width),
-                self.details.is_some().then(|| self.details_pane()),
-            );
+            // Open, or closed a moment ago and still on its way out.
+            let open = self.details.is_some();
+            let pane = (open || self.leaving.is_some()).then(|| self.details_pane());
+            let page = if self.in_drawer(width) {
+                details_drawer_leaving(
+                    self.grid_page(width),
+                    pane,
+                    open,
+                    Message::CloseDetails,
+                    Message::DetailsGone,
+                )
+            } else {
+                details_dock_leaving(self.grid_page(width), pane, open, Message::DetailsGone)
+            };
             // A folder's settings are a drawer at the side of the notes.
             let page = details_drawer(
                 page,
@@ -187,7 +199,8 @@ impl App {
         // heading, and Ctrl+N).
         let in_section = matches!(self.scope, Scope::Folder(_)) && self.details.is_none();
         head = head.pack_start(new_or_back(
-            self.details.is_some() || in_section,
+            // The drawer leaves the header alone: the notes are still there, so no back button.
+            (self.details.is_some() && !self.in_drawer(window)) || in_section,
             "New note (Ctrl+N)",
             Message::New,
             if self.details.is_some() {
@@ -208,13 +221,26 @@ impl App {
             .pack_end(search::button(Message::ToggleSearch))
     }
 
+    /// Whether the details are a drawer: the setting is on and the window is wide enough.
+    fn in_drawer(&self, width: f32) -> bool {
+        self.prefs.settings.notes.details_in_drawer && width >= TWO_PANES
+    }
+
     /// The main menu: how the notes are shown and ordered, and Preferences.
     fn actions_menu(&self) -> Element<'_, Message> {
-        let shown = vec![MenuItem::switch(
-            "List view",
-            self.list_view,
-            Message::ListView(!self.list_view),
-        )];
+        let drawer = self.prefs.settings.notes.details_in_drawer;
+        let shown = vec![
+            MenuItem::switch(
+                "List view",
+                self.list_view,
+                Message::ListView(!self.list_view),
+            ),
+            MenuItem::switch(
+                "Details in drawer",
+                drawer,
+                Message::PrefDetailsDrawer(!drawer),
+            ),
+        ];
         let sort = Menu::new("Sort by").section(
             Sort::ALL.map(|s| MenuItem::select(s.label(), self.sort == s, Message::SetSort(s))),
         );

@@ -106,11 +106,19 @@ impl App {
         )
         .description("On a section's page, list every note in it and in the sections below it. Off, the sections in it are cards on top and only its own notes are listed.")
         .flat(true);
+        let drawer = EntryRow::switch(
+            "Open details in drawer",
+            self.prefs.settings.notes.details_in_drawer,
+            Message::PrefDetailsDrawer,
+        )
+        .description("Show a note's details beside the notes. On narrow windows, or when off, they open as a full page.")
+        .flat(true);
         let page = iced::widget::column![
             list_view,
             group,
             group_sections,
             show_all,
+            drawer,
             trash,
             self.vault_row(),
             self.sticky.row(Message::PrefStickyLink)

@@ -123,6 +123,9 @@ pub struct NotesSettings {
     pub trash_days: u32,
     /// Show the notes as a list instead of cards.
     pub list_view: bool,
+    /// Open a note's details in a side drawer on wide windows. Off, or on a narrow window, the
+    /// details are a full page that fades in.
+    pub details_in_drawer: bool,
     /// In the views of every note (All, Favorites, Archive, Trash), group them by section.
     pub group_by_folder: bool,
     /// On a section's page, list the notes of the sections in it under their names; off, list
@@ -141,6 +144,7 @@ impl Default for NotesSettings {
         Self {
             trash_days: DEFAULT_TRASH_DAYS,
             list_view: false,
+            details_in_drawer: false,
             group_by_folder: true,
             group_by_section: true,
             show_all_notes: false,

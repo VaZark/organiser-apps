@@ -33,7 +33,8 @@ fn date_input<'a>(text: &'a str, on: fn(String) -> Message) -> Element<'a, Messa
 
 impl App {
     pub(super) fn details_pane(&self) -> Element<'_, Message> {
-        let Some(d) = &self.details else {
+        // The open details, or the ones leaving.
+        let Some(d) = self.details.as_ref().or(self.leaving.as_ref()) else {
             return space().into();
         };
         let (kind, status_id) = match &d.subject {

@@ -23,7 +23,8 @@ fn field<'a>(label: &'a str, control: impl Into<Element<'a, Message>>) -> Elemen
 
 impl App {
     pub(super) fn details_pane(&self) -> Element<'_, Message> {
-        let Some(d) = &self.details else {
+        // The open details, or the ones leaving.
+        let Some(d) = self.details.as_ref().or(self.leaving.as_ref()) else {
             return space().into();
         };
         let n = &d.note;
