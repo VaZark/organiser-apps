@@ -47,6 +47,9 @@ pub struct Task {
     pub archived: bool,
     /// Shown as a desktop sticky by the Sticky app.
     pub sticky: bool,
+    /// The task's own colour, `#rrggbb` (the one its sticky takes); it wins over its epic's on a
+    /// card.
+    pub color: Option<String>,
     /// Kept ahead of the others, in every view.
     pub pinned: bool,
     pub created: i64,
@@ -90,6 +93,7 @@ impl From<&Item> for Task {
                 .get("sticky")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            color: Some(text(i, "sticky_color")).filter(|c| !c.is_empty()),
             created: i.created,
             updated: i.updated,
         }

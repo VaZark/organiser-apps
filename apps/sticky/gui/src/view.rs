@@ -3,7 +3,6 @@
 use iced::widget::{button, column, container, mouse_area, row, text_editor, text_input};
 use iced::{Alignment, Background, Border, Color, Length, window};
 use organiser_ui::Element;
-use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{chip, color_of};
 use organiser_ui::components::dot::{color_from_hex, dot};
 use organiser_ui::components::empty::empty;
@@ -582,13 +581,13 @@ fn sticky_card<'a>(theme: &Theme, default: &str, s: &'a Sticky) -> Element<'a, M
         // The text as it reads, in a box of limited height: a card is a preview. When there is
         // more than fits, an ellipsis says so.
         col = col.push(
-            container(
+            Spoiler::new(
                 RichText::new(theme, &s.doc)
                     .compact(true)
                     .max_blocks(CARD_BLOCKS),
             )
             .max_height(CARD_BODY)
-            .clip(true),
+            .preview(true),
         );
         let lines = s
             .body
@@ -645,12 +644,10 @@ fn sticky_card<'a>(theme: &Theme, default: &str, s: &'a Sticky) -> Element<'a, M
             .align_y(Alignment::Center)
             .height(FOOT),
     );
-    card(
-        col,
-        Some(color::paper(s.color.as_deref(), default)),
-        false,
-        Message::Show(s.key.clone()),
-    )
+    NoteCard::new(col)
+        .tint(Some(color::paper(s.color.as_deref(), default)))
+        .on_press(Message::Show(s.key.clone()))
+        .into()
 }
 
 /// The tallest the drawn text of a card gets, and how much counts as more than fits.

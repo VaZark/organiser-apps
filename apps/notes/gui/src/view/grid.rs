@@ -10,7 +10,6 @@ use notes_schema::folder::FolderSummary;
 use notes_schema::note::Note;
 use notes_schema::views::Scope;
 use organiser_ui::Element;
-use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{chip, hashtag, more};
 use organiser_ui::components::dot::dot;
 use organiser_ui::components::empty::empty;
@@ -709,11 +708,12 @@ impl App {
             body = body.push(text(stars(r)).size(14));
         }
         if let Some(doc) = self.docs.get(&n.id) {
-            // The note as it reads, clipped: a card is a preview, not the whole note.
+            // The note as it reads, clipped: a card is a preview, not the whole note. The
+            // spoiler's preview clips in a layer, so inline-code chips are cut with the text.
             body = body.push(
-                container(RichText::new(theme, doc).compact(true).max_blocks(6))
+                Spoiler::new(RichText::new(theme, doc).compact(true).max_blocks(6))
                     .max_height(CARD_BODY)
-                    .clip(true),
+                    .preview(true),
             );
         }
         let tags = collapse(&n.tags, 3);
@@ -729,7 +729,11 @@ impl App {
         }
         self.draggable(
             n,
-            card(body, self.note_tint(n), selected, Message::Select(n.id)),
+            NoteCard::new(body)
+                .tint(self.note_tint(n))
+                .selected(selected)
+                .on_press(Message::Select(n.id))
+                .into(),
         )
     }
 }

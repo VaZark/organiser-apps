@@ -132,7 +132,7 @@ impl App {
         let closed = self.statuses.is_closed(t.status);
         let selected = self.details.as_ref().is_some_and(|d| d.id() == id);
         let mut line = row![
-            check_button("", closed).on_toggle(move |_| Message::Toggle(id)),
+            self.status_toggle(t),
             text(t.title.clone()).size(13).width(Length::Fill),
         ]
         .spacing(8)

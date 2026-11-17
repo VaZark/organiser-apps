@@ -158,6 +158,7 @@ mod tests {
             position: 0,
             archived: false,
             sticky: false,
+            color: None,
             pinned: false,
             created: 1_759_305_600,
             updated: 0,

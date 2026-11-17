@@ -43,7 +43,7 @@ impl App {
         };
         let section = matches!(d.subject, Subject::Section(_));
 
-        // The colour of an epic or section sits at the right end of the title row.
+        // The colour of an epic, section or task sits at the right end of the title row.
         let title: Element<'_, Message> = match self.color_of(d) {
             Some(color) => row![
                 entry("Title", d.title.as_str())
@@ -202,7 +202,8 @@ impl App {
         let hex = match &d.subject {
             Subject::Epic(e) => e.color.as_deref(),
             Subject::Section(s) => s.color.as_deref(),
-            Subject::Task(_) => return None,
+            // A task's own colour is its card's: it wins over its epic's.
+            Subject::Task(t) => t.color.as_deref(),
         };
         Some(hex.unwrap_or("#9aa0a6"))
     }
@@ -240,8 +241,7 @@ impl App {
             let id = s.id;
             col = col.push(
                 row![
-                    check_button("", self.statuses.is_closed(s.status))
-                        .on_toggle(move |_| Message::Toggle(id)),
+                    self.status_toggle(s),
                     flat_button(text(s.title.clone()))
                         .on_press(Message::Select(id))
                         .width(Length::Fill),

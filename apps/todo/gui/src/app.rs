@@ -53,6 +53,10 @@ pub enum Message {
     ShowSubtasks(bool),
     /// In the views of every task, group them by epic after the pinned ones.
     GroupByEpic(bool),
+    /// In the tasks view, group them by status after the pinned ones.
+    GroupByStatus(bool),
+    /// Draw the tasks view as a list or as notes.
+    SetDisplay(Display),
     /// On an epic's page, group its tasks by section.
     GroupBySection(bool),
     /// Open or close the board's sidebar when the window is too narrow to show it.
@@ -210,36 +214,55 @@ pub enum Message {
 /// How the tasks are shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
-    /// Every task a note, in a grid of cards.
-    Notes,
+    /// Every task, as a list or as notes (see [`Display`]).
+    Tasks,
     /// A kanban board, a column per status.
     Board,
-    /// The nested list.
-    List,
     /// The Eisenhower matrix: four boxes, each a compact list.
     Quadrants,
 }
 
 impl View {
-    pub const ALL: [View; 4] = [View::Notes, View::Board, View::List, View::Quadrants];
+    pub const ALL: [View; 3] = [View::Tasks, View::Board, View::Quadrants];
 
     pub fn label(self) -> &'static str {
         match self {
-            View::Notes => "Notes",
+            View::Tasks => "Tasks",
             View::Board => "Kanban board",
-            View::List => "List",
             View::Quadrants => "Quadrants",
         }
     }
 }
 
-impl From<StartView> for View {
-    fn from(v: StartView) -> Self {
+/// How the tasks view draws its tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Display {
+    /// The nested list.
+    #[default]
+    List,
+    /// Every task a note, in a grid of cards.
+    Notes,
+}
+
+impl Display {
+    pub const ALL: [Display; 2] = [Display::List, Display::Notes];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Display::List => "List",
+            Display::Notes => "Notes",
+        }
+    }
+}
+
+impl View {
+    /// The view, and how it is drawn, a start view setting means.
+    pub fn from_start(v: StartView) -> (View, Display) {
         match v {
-            StartView::Notes => View::Notes,
-            StartView::Board => View::Board,
-            StartView::List => View::List,
-            StartView::Quadrants => View::Quadrants,
+            StartView::Notes => (View::Tasks, Display::Notes),
+            StartView::List => (View::Tasks, Display::List),
+            StartView::Board => (View::Board, Display::List),
+            StartView::Quadrants => (View::Quadrants, Display::List),
         }
     }
 }
@@ -340,10 +363,14 @@ pub struct App {
     pub flat: bool,
     /// The kanban board instead of the list.
     pub view: View,
+    /// How the tasks view draws them: a list or notes.
+    pub display: Display,
     /// Subtasks listed as entries of their own.
     pub show_subtasks: bool,
     /// Group the tasks by epic in the views of every task.
     pub group_by_epic: bool,
+    /// Group the tasks by status in the tasks view (not together with epics).
+    pub group_by_status: bool,
     /// Group an epic's tasks by section, on its page.
     pub group_by_section: bool,
     /// What the tasks are ordered by (pinned ones are always first).
@@ -425,7 +452,7 @@ impl App {
         }
         let prefs = Preferences::load();
         let mode = Mode::default();
-        let view_by_default = View::from(prefs.settings.todo.start_view);
+        let (view_by_default, display_by_default) = View::from_start(prefs.settings.todo.start_view);
         let show_subtasks_by_default = prefs.settings.todo.show_subtasks;
         let prefs_group_by_epic = prefs.settings.todo.group_by_epic;
         let prefs_group_by_section = prefs.settings.todo.group_by_section;
@@ -450,6 +477,8 @@ impl App {
             show_closed: show_closed_by_default,
             flat: false,
             view: view_by_default,
+            display: display_by_default,
+            group_by_status: false,
             show_subtasks: show_subtasks_by_default,
             group_by_epic: prefs_group_by_epic,
             group_by_section: prefs_group_by_section,
@@ -496,7 +525,8 @@ impl App {
         app.flat = std::env::var_os("TODO_GUI_FLAT").is_some();
         app.menu_open = std::env::var_os("TODO_GUI_MENU_OPEN").is_some();
         if std::env::var_os("TODO_GUI_LIST").is_some() {
-            app.view = View::List;
+            app.view = View::Tasks;
+            app.display = Display::List;
         }
         app.confirm_epic_delete = std::env::var("TODO_GUI_DELETE_EPIC")
             .ok()
@@ -512,9 +542,9 @@ impl App {
             _ => {}
         }
         match std::env::var("TODO_GUI_VIEW").as_deref() {
-            Ok("notes") => app.view = View::Notes,
+            Ok("notes") => (app.view, app.display) = (View::Tasks, Display::Notes),
             Ok("board") => app.view = View::Board,
-            Ok("list") => app.view = View::List,
+            Ok("list") => (app.view, app.display) = (View::Tasks, Display::List),
             Ok("quadrants") => app.view = View::Quadrants,
             _ => {}
         }
@@ -785,7 +815,7 @@ impl App {
             Err(e) => self.toast = Some(e.to_string()),
         }
         // The notes and the board both read every task, closed ones included.
-        if self.view != View::List {
+        if !self.shows_list() {
             self.reload_board();
         }
         self.task_titles = self.titles_of(&self.forest);
@@ -851,7 +881,7 @@ impl App {
                     .filter(|t| self.show_subtasks || t.parent_id.is_none())
                     .collect();
                 // The notes as they read, drawn once, for the cards that show them.
-                self.docs = if self.view == View::Notes {
+                self.docs = if self.shows_notes() {
                     tasks
                         .iter()
                         .filter(|t| !t.notes.is_empty())
@@ -915,6 +945,26 @@ impl App {
         self.flat || self.scope == Scope::Current
     }
 
+    /// The tasks view, drawn as the nested list.
+    pub fn shows_list(&self) -> bool {
+        self.view == View::Tasks && self.display == Display::List
+    }
+
+    /// The tasks view, drawn as notes.
+    pub fn shows_notes(&self) -> bool {
+        self.view == View::Tasks && self.display == Display::Notes
+    }
+
+    /// Whether the tasks view is in groups, one per status.
+    pub fn grouped_by_status(&self) -> bool {
+        self.group_by_status && self.view == View::Tasks
+    }
+
+    /// The status a task is grouped under: its own, or the first open one when it has none.
+    pub fn group_status(&self, t: &TodoTask) -> Option<i64> {
+        self.statuses.resolve(t.status).map(|s| s.id)
+    }
+
     /// Whether the views of every task are in groups, one per epic: the option is on, the page is
     /// All (not Current, not one epic's) and there are epics.
     pub fn grouped_by_epic(&self) -> bool {
@@ -934,6 +984,14 @@ impl App {
     }
 
     /// The colour of an epic, if it has been given one.
+    /// The colour of a task's card: its epic's, then its own over that (in increasing priority).
+    pub fn card_color(&self, t: &TodoTask) -> Option<iced::Color> {
+        t.color
+            .as_deref()
+            .and_then(organiser_ui::components::dot::color_from_hex)
+            .or_else(|| t.epic.and_then(|e| self.epic_color(e)))
+    }
+
     pub fn epic_color(&self, id: i64) -> Option<iced::Color> {
         self.epics
             .iter()
@@ -1144,6 +1202,7 @@ impl App {
     fn set_color(&mut self, hex: String) {
         let Some(d) = &self.details else { return };
         let id = d.id();
+        let edit_hex = hex.clone();
         let edit = Edit {
             color: Some(Some(hex)),
             ..Edit::default()
@@ -1151,7 +1210,10 @@ impl App {
         let result = match d.subject {
             Subject::Epic(_) => lifecycle::edit_epic(&mut self.db, id, &edit).map(|_| ()),
             Subject::Section(_) => lifecycle::edit_section(&mut self.db, id, &edit).map(|_| ()),
-            Subject::Task(_) => return,
+            // A task's colour is its own, over its epic's: the one its sticky takes.
+            Subject::Task(_) => {
+                organiser_sticky::flag::set_color(&mut self.db, id, Some(&edit_hex)).map(|_| ())
+            }
         };
         if let Err(e) = result {
             self.fail(e);
@@ -1164,6 +1226,7 @@ impl App {
         // While a task is only a draft the pickers change the draft, and there is nothing yet to
         // add subtasks to or delete.
         if self.details.as_ref().is_some_and(Details::is_new) {
+            let d_id = self.details.as_ref().map_or(0, Details::id);
             if let Some(Details {
                 subject: Subject::Task(t),
                 ..
@@ -1191,6 +1254,20 @@ impl App {
                     }
                     Message::DPin(on) => {
                         t.pinned = *on;
+                        return Task::none();
+                    }
+                    Message::DColor(h) => {
+                        let [r, g, b] = h.to_rgb8();
+                        t.color = Some(format!("#{r:02x}{g:02x}{b:02x}"));
+                        return Task::none();
+                    }
+                    Message::DColorText(text) => {
+                        if let Some(h) = Hsva::parse(text) {
+                            let [r, g, b] = h.to_rgb8();
+                            t.color = Some(format!("#{r:02x}{g:02x}{b:02x}"));
+                        }
+                        let id = d_id;
+                        self.status_text.insert(id, text.clone());
                         return Task::none();
                     }
                     _ => {}
@@ -1223,8 +1300,23 @@ impl App {
                 self.drawer_open = false;
                 self.reload();
             }
-            Message::GroupByEpic(on) => self.group_by_epic = on,
-            Message::GroupBySection(on) => self.group_by_section = on,
+            Message::GroupByEpic(on) => {
+                self.group_by_epic = on;
+                self.group_by_status &= !on;
+            }
+            Message::GroupByStatus(on) => {
+                self.group_by_status = on;
+                self.group_by_epic &= !on;
+                self.group_by_section &= !on;
+            }
+            Message::SetDisplay(display) => {
+                self.display = display;
+                self.reload();
+            }
+            Message::GroupBySection(on) => {
+                self.group_by_section = on;
+                self.group_by_status &= !on;
+            }
             Message::PrefGroupBySection(on) => {
                 self.prefs.settings.todo.group_by_section = on;
                 if let Err(e) = self.prefs.save() {
@@ -1722,6 +1814,7 @@ impl App {
                         position: 0,
                         archived: false,
                         sticky: false,
+                        color: None,
                         pinned: false,
                         created: 0,
                         updated: 0,
@@ -1780,6 +1873,11 @@ impl App {
                 };
                 match lifecycle::create(&mut self.db, &new) {
                     Ok(created) => {
+                        if let Some(c) = &t.color
+                            && let Err(e) = organiser_sticky::flag::set_color(&mut self.db, created.id, Some(c))
+                        {
+                            self.fail(e);
+                        }
                         self.reload();
                         self.open(created.id);
                     }

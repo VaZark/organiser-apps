@@ -14,13 +14,18 @@ pub enum BoardView {
 }
 
 impl BoardView {
-    /// The columns, left to right.
+    /// The columns, left to right: the statuses in reverse index order (the Tasks page lists them
+    /// as they are), finished work after open work whatever order they were made in.
     pub fn columns(self, statuses: &Statuses) -> Vec<&Status> {
-        match self {
-            BoardView::Open => statuses.open().collect(),
-            // Finished work after open work, whatever order they were made in.
-            BoardView::All => statuses.open().chain(statuses.closed()).collect(),
+        let mut open: Vec<&Status> = statuses.open().collect();
+        open.reverse();
+        if self == BoardView::Open {
+            return open;
         }
+        let mut closed: Vec<&Status> = statuses.closed().collect();
+        closed.reverse();
+        open.extend(closed);
+        open
     }
 
     /// The column next to `status` in this view: `step` is -1 for left, 1 for right. `None` at an
@@ -79,34 +84,37 @@ mod tests {
 
     #[test]
     fn the_board_hides_finished_statuses_until_asked_to_show_everything() {
-        assert_eq!(ids(BoardView::Open.columns(&set())), [1, 2]);
-        assert_eq!(ids(BoardView::All.columns(&set())), [1, 2, 3, 4]);
+        // Reverse index order.
+        assert_eq!(ids(BoardView::Open.columns(&set())), [2, 1]);
+        assert_eq!(ids(BoardView::All.columns(&set())), [2, 1, 4, 3]);
     }
 
     #[test]
     fn everything_lists_open_columns_before_finished_ones_whatever_the_order() {
         // A finished status made before an open one still comes after it.
         let s = Statuses::new(vec![st(1, false), st(2, true), st(3, false)]);
-        assert_eq!(ids(BoardView::All.columns(&s)), [1, 3, 2]);
+        assert_eq!(ids(BoardView::All.columns(&s)), [3, 1, 2]);
     }
 
     #[test]
     fn neighbors_stop_at_the_edges() {
         let s = set();
         let open = BoardView::Open;
-        assert_eq!(open.neighbor(&s, 1, 1), Some(2));
-        assert_eq!(open.neighbor(&s, 2, -1), Some(1));
-        assert_eq!(open.neighbor(&s, 1, -1), None);
+        // Columns, left to right: 2, 1.
+        assert_eq!(open.neighbor(&s, 2, 1), Some(1));
+        assert_eq!(open.neighbor(&s, 1, -1), Some(2));
+        assert_eq!(open.neighbor(&s, 2, -1), None);
         assert_eq!(
-            open.neighbor(&s, 2, 1),
+            open.neighbor(&s, 1, 1),
             None,
             "the edge of the open columns"
         );
         assert_eq!(open.neighbor(&s, 3, 1), None, "not a column in this view");
         let all = BoardView::All;
-        assert_eq!(all.neighbor(&s, 2, 1), Some(3), "into the finished columns");
-        assert_eq!(all.neighbor(&s, 3, 1), Some(4));
-        assert_eq!(all.neighbor(&s, 4, 1), None);
+        // Columns, left to right: 2, 1, 4, 3.
+        assert_eq!(all.neighbor(&s, 1, 1), Some(4), "into the finished columns");
+        assert_eq!(all.neighbor(&s, 4, 1), Some(3));
+        assert_eq!(all.neighbor(&s, 3, 1), None);
     }
 
     #[test]
@@ -126,7 +134,7 @@ mod tests {
         });
         let tasks = [t.clone()];
         let cols = columns(&tasks, BoardView::Open, &s);
-        assert_eq!(cols[0].1.len(), 1);
+        assert_eq!(cols.iter().find(|c| c.0.id == 1).map(|c| c.1.len()), Some(1));
         t.status = Some(4);
         let tasks = [t];
         assert!(

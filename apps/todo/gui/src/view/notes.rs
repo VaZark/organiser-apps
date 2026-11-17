@@ -6,7 +6,6 @@
 use iced::Length;
 use iced::widget::column;
 use organiser_ui::Element;
-use organiser_ui::components::card::card;
 use organiser_ui::components::chip::pill;
 use organiser_ui::components::empty::empty;
 use organiser_ui::iad::prelude::*;
@@ -81,7 +80,13 @@ impl App {
             if any_pinned {
                 page = page.push(caption("Pinned")).push(grid(pinned));
             }
-            if self.grouped_by_epic() {
+            if self.grouped_by_status() {
+                let order: Vec<i64> = self.statuses.all().iter().map(|s| s.id).collect();
+                for (status, tasks) in group_by(others, |t| self.group_status(t), &order) {
+                    page = page.push(self.status_group_header(status, tasks.len()));
+                    page = page.push(grid(tasks));
+                }
+            } else if self.grouped_by_epic() {
                 // Then a group for each epic, and the tasks in none last, "Unassigned".
                 let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
                 for (epic, tasks) in group_by(others, |t| t.epic, &order) {
@@ -103,24 +108,23 @@ impl App {
     fn note<'a>(&'a self, t: &'a Task) -> Element<'a, Message> {
         let selected = self.details.as_ref().is_some_and(|d| d.id() == t.id);
         let closed = self.statuses.is_closed(t.status);
-        let id = t.id;
-        // The note takes its epic's colour, as a Keep note takes its colour.
-        let tint = t.epic.and_then(|e| self.epic_color(e));
+        // The note takes its own colour, else its epic's, as a Keep note takes its colour.
+        let tint = self.card_color(t);
 
-        let check: Element<'_, Message> = check_button("", closed)
-            .on_toggle(move |_| Message::Toggle(id))
-            .into();
-        let mut body = column![self.titled(Some(check), t)].spacing(6);
+        // No check circle: the card's colour and the status dot say what it is.
+        let mut body = column![self.titled(None, t)].spacing(6);
         if let Some(doc) = self.docs.get(&t.id) {
             // The details as they read, clipped: a card is a preview, not the whole task.
+            // A fixed-height preview: clipped in a layer of its own, so the chips of inline code
+            // are cut with the text, and with no Show more control.
             body = body.push(
-                container(
+                Spoiler::new(
                     RichText::new(&self.theme(), doc)
                         .compact(true)
                         .max_blocks(6),
                 )
                 .max_height(CARD_BODY)
-                .clip(true),
+                .preview(true),
             );
         }
         if let Some((done, total)) = self.sub_progress.get(&t.id) {
@@ -142,6 +146,10 @@ impl App {
             };
             body = body.push(pill(&label(d, self.today), role));
         }
-        card(body, tint, selected, Message::Select(t.id))
+        NoteCard::new(body)
+            .tint(tint)
+            .selected(selected)
+            .on_press(Message::Select(t.id))
+            .into()
     }
 }

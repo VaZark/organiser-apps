@@ -25,7 +25,7 @@ use todo_schema::priority::Priority;
 use todo_schema::task::Task;
 use todo_schema::views::Scope;
 
-use crate::app::{App, Message};
+use crate::app::{App, Display, Message, View};
 
 const INDENT: f32 = 24.0;
 /// The most width the epic, date and tags take before they wrap.
@@ -105,11 +105,19 @@ impl App {
             menu_button(
                 Icon::ViewMore,
                 Menu::new("Epic")
-                    .section([MenuItem::switch(
-                        "Group by section",
-                        self.group_by_section,
-                        Message::GroupBySection(!self.group_by_section),
-                    )])
+                    .section(self.display_items())
+                    .section([
+                        MenuItem::switch(
+                            "Group by section",
+                            self.group_by_section,
+                            Message::GroupBySection(!self.group_by_section),
+                        ),
+                        MenuItem::switch(
+                            "Group by status",
+                            self.group_by_status,
+                            Message::GroupByStatus(!self.group_by_status),
+                        ),
+                    ])
                     .section([MenuItem::action("Add section", Message::NewSection(id))]),
             )
             .tooltip("More"),
@@ -323,28 +331,61 @@ impl App {
     /// The `⋯` at the top right of the pages of every task: how they are grouped. `None` on an
     /// epic's page (which has its own) and on Current tasks.
     pub(super) fn all_page_menu(&self) -> Option<Element<'_, Message>> {
-        if !matches!(self.scope, Scope::All | Scope::Archived)
-            || self.epic_filter.is_some()
-            || self.epics.is_empty()
-        {
+        if !matches!(self.scope, Scope::All | Scope::Archived) || self.epic_filter.is_some() {
             return None;
+        }
+        let mut groups = Vec::new();
+        if !self.epics.is_empty() {
+            groups.push(MenuItem::switch(
+                "Group by epic",
+                self.group_by_epic,
+                Message::GroupByEpic(!self.group_by_epic),
+            ));
+        }
+        // The tasks view groups by status too; the board's columns already are statuses.
+        if self.view == View::Tasks {
+            groups.push(MenuItem::switch(
+                "Group by status",
+                self.group_by_status,
+                Message::GroupByStatus(!self.group_by_status),
+            ));
+        }
+        if groups.is_empty() {
+            return None;
+        }
+        let mut menu = Menu::new("Page");
+        if self.view == View::Tasks {
+            menu = menu.section(self.display_items());
         }
         Some(
             row![
                 space().width(Length::Fill),
-                menu_button(
-                    Icon::ViewMore,
-                    Menu::new("Page").section([MenuItem::switch(
-                        "Group by epic",
-                        self.group_by_epic,
-                        Message::GroupByEpic(!self.group_by_epic),
-                    )]),
-                )
-                .tooltip("More"),
+                menu_button(Icon::ViewMore, menu.section(groups)).tooltip("More"),
             ]
             .align_y(iced::Alignment::Center)
             .into(),
         )
+    }
+
+    /// The choice of how the tasks view draws its tasks, as menu items: one ticked.
+    pub(super) fn display_items(&self) -> Vec<MenuItem<Message>> {
+        Display::ALL
+            .map(|d| MenuItem::select(d.label(), self.display == d, Message::SetDisplay(d)))
+            .into()
+    }
+
+    /// The heading of a group of tasks: a status's colour dot and name, with how many tasks.
+    pub(super) fn status_group_header(&self, status: Option<i64>, count: usize) -> Element<'_, Message> {
+        match status.and_then(|id| self.statuses.get(id)) {
+            Some(s) => group_header(
+                None,
+                &s.name,
+                None,
+                Some(count),
+                None::<(Message, &'static str)>,
+            ),
+            None => group_header(None, UNASSIGNED, None, Some(count), None),
+        }
     }
 
     /// The heading of a group of tasks: the epic's icon in its colour and its name, with how many
@@ -382,23 +423,25 @@ impl App {
         // The rest, each row with the epic of the top-level task it belongs to, and whether it is
         // that top-level task.
         let mut pinned: Vec<Element<'a, Message>> = Vec::new();
-        let mut rest: Vec<(Option<i64>, bool, Element<'a, Message>)> = Vec::new();
-        let (mut in_pinned, mut epic) = (false, None);
+        let mut rest: Vec<(Option<i64>, Option<i64>, bool, Element<'a, Message>)> = Vec::new();
+        let (mut in_pinned, mut epic, mut status) = (false, None, None);
         for r in rows {
             if r.depth == 0 {
                 in_pinned = r.value.pinned;
                 epic = r.value.epic;
+                status = self.group_status(r.value);
             }
             let row = self.dnd_row(r, stacked);
             if in_pinned {
                 pinned.push(row);
             } else {
-                rest.push((epic, r.depth == 0, row));
+                rest.push((epic, status, r.depth == 0, row));
             }
         }
         let grouped = self.grouped_by_epic();
-        if pinned.is_empty() && !grouped {
-            return self.open_ground(rest.into_iter().map(|r| r.2).collect());
+        let by_status = self.grouped_by_status();
+        if pinned.is_empty() && !grouped && !by_status {
+            return self.open_ground(rest.into_iter().map(|r| r.3).collect());
         }
         let mut col = column![].spacing(8).width(Length::Fill);
         if !pinned.is_empty() {
@@ -407,7 +450,7 @@ impl App {
         if grouped {
             let order: Vec<i64> = self.epics.iter().map(|s| s.epic.id).collect();
             for (epic, items) in group_by(rest, |r| r.0, &order) {
-                let tasks = items.iter().filter(|r| r.1).count();
+                let tasks = items.iter().filter(|r| r.2).count();
                 // The heading and its tasks are one place to drop: a task dropped there joins
                 // the epic, on its own.
                 let label = match epic.and_then(|id| self.epic_titles.get(&id)) {
@@ -416,7 +459,7 @@ impl App {
                 };
                 let group = column![
                     self.epic_group_header(epic, Some(tasks)),
-                    boxed_list(items.into_iter().map(|r| r.2).collect::<Vec<_>>()),
+                    boxed_list(items.into_iter().map(|r| r.3).collect::<Vec<_>>()),
                 ]
                 .spacing(8);
                 col = col.push(
@@ -424,10 +467,22 @@ impl App {
                         .hint(DropHint::new(label)),
                 );
             }
+        } else if by_status {
+            let order: Vec<i64> = self.statuses.all().iter().map(|s| s.id).collect();
+            for (status, items) in group_by(rest, |r| r.1, &order) {
+                let tasks = items.iter().filter(|r| r.2).count();
+                col = col.push(
+                    column![
+                        self.status_group_header(status, tasks),
+                        boxed_list(items.into_iter().map(|r| r.3).collect::<Vec<_>>()),
+                    ]
+                    .spacing(8),
+                );
+            }
         } else if !rest.is_empty() {
             col = col
                 .push(caption("Others"))
-                .push(self.open_ground(rest.into_iter().map(|r| r.2).collect()));
+                .push(self.open_ground(rest.into_iter().map(|r| r.3).collect()));
         }
         col.into()
     }
@@ -457,7 +512,7 @@ impl App {
         } else {
             space().width(Length::Fixed(32.0)).into()
         };
-        let check = check_button("", closed).on_toggle(move |_| Message::Toggle(t.id));
+        let check = self.status_toggle(t);
 
         // The title, and under it what is not obvious from the checkbox: in progress, won't do,
         // a high priority.

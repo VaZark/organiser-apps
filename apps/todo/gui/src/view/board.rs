@@ -6,7 +6,6 @@
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
 use organiser_ui::Element;
-use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{hashtag, more};
 use organiser_ui::components::dot::{color_from_hex, dot};
 use organiser_ui::components::icons;
@@ -86,12 +85,8 @@ impl App {
 
     fn card<'a>(&'a self, t: &'a Task) -> Element<'a, Message> {
         let selected = self.details.as_ref().is_some_and(|d| d.id() == t.id);
-        // The card takes its status's colour, as a Keep note takes its colour.
-        let tint = self
-            .statuses
-            .resolve(t.status)
-            .and_then(|s| s.color.as_deref())
-            .and_then(color_from_hex);
+        // The card takes its own colour, else its epic's, as a Keep note takes its colour.
+        let tint = self.card_color(t);
 
         // No status dot: the column is the status.
         let mut body = column![text(t.title.clone()).size(15)].spacing(6);
@@ -109,7 +104,11 @@ impl App {
             body = body.push(place);
         }
 
-        let card = card(body, tint, selected, Message::Select(t.id));
+        let card: Element<'_, Message> = NoteCard::new(body)
+            .tint(tint)
+            .selected(selected)
+            .on_press(Message::Select(t.id))
+            .into();
         drag_source(card, Message::DragStart(t.id)).into()
     }
 
@@ -180,6 +179,23 @@ impl App {
             .and_then(|s| s.color.as_deref())
             .and_then(color_from_hex)
             .map(|c| dot(c, 9.0))
+    }
+
+    /// The status as a dot the size of a checkbox, in the status's colour (grey when it has
+    /// none): pressing it finishes the task or reopens it. It stands where a checkbox would.
+    pub(super) fn status_toggle<'a>(&'a self, t: &'a Task) -> Element<'a, Message> {
+        let color = self
+            .statuses
+            .resolve(t.status)
+            .and_then(|s| s.color.as_deref())
+            .and_then(color_from_hex)
+            .unwrap_or(iced::Color::from_rgb8(0x9a, 0xa0, 0xa6));
+        let id = t.id;
+        iced::widget::button(container(dot(color, 14.0)).center(20.0))
+            .padding(0)
+            .style(|_, _| iced::widget::button::Style::default())
+            .on_press(Message::Toggle(id))
+            .into()
     }
 
     /// A card's title with the status dot at its right edge. The title wraps within the room the

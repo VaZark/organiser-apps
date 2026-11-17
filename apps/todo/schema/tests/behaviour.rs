@@ -474,18 +474,19 @@ fn the_board_groups_tasks_by_status_into_the_views_columns() {
     assert_eq!(
         names(&columns(&tasks, BoardView::Open, &st)),
         [
-            (OPEN, vec!["todo".to_string()]),
-            (DOING, vec!["doing".into()]),
+            (DOING, vec!["doing".to_string()]),
+            (OPEN, vec!["todo".into()]),
         ]
     );
-    // With it, every status is a column, finished ones after the open ones.
+    // With it, every status is a column, finished ones after the open ones. The columns run in
+    // reverse index order.
     assert_eq!(
         names(&columns(&tasks, BoardView::All, &st)),
         [
-            (OPEN, vec!["todo".to_string()]),
-            (DOING, vec!["doing".into()]),
-            (DONE, vec!["done".into()]),
+            (DOING, vec!["doing".to_string()]),
+            (OPEN, vec!["todo".into()]),
             (WONT, vec!["wont".into()]),
+            (DONE, vec!["done".into()]),
         ]
     );
     let _ = a;

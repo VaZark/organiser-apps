@@ -1,7 +1,6 @@
 //! Small themed pieces with no information of their own.
 
 pub mod action;
-pub mod card;
 pub mod chip;
 pub mod color_pick;
 pub mod dot;

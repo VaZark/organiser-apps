@@ -4,7 +4,6 @@
 use iced::widget::{column, row};
 use iced::{Alignment, Length};
 use organiser_ui::Element;
-use organiser_ui::components::card::card;
 use organiser_ui::components::chip::{color_of, hashtag, more};
 use organiser_ui::components::empty::empty;
 use organiser_ui::components::heart::heart;
@@ -224,6 +223,10 @@ impl App {
             body = body.push(chips.wrap());
         }
 
-        card(body, tint, selected, Message::Open(e.id))
+        NoteCard::new(body)
+            .tint(tint)
+            .selected(selected)
+            .on_press(Message::Open(e.id))
+            .into()
     }
 }

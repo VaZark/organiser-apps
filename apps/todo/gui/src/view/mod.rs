@@ -30,7 +30,7 @@ use organiser_ui::widgets::responsive_dialog;
 use todo_schema::sort::SortKey;
 use todo_schema::views::Scope;
 
-use crate::app::{App, Message, View};
+use crate::app::{App, Display, Message, View};
 
 /// Below this window width the filter is a full-screen sheet rather than a dialog.
 const TWO_PANES: f32 = 900.0;
@@ -226,7 +226,7 @@ impl App {
                 Message::ShowSubtasks(!self.show_subtasks),
             ),
         ];
-        if self.view == View::List {
+        if self.shows_list() {
             let current = self.scope == Scope::Current;
             let flat = MenuItem::switch("Flat list", self.is_flat(), Message::Flat(!self.flat));
             shows.push(if current { flat.disabled() } else { flat });
@@ -305,12 +305,12 @@ impl App {
         let head = self.header((collapsed, true), start, room, width);
         // The details cover the content rather than share its row, so it has the whole width.
         let page: Element<'_, Message> = match self.view {
-            View::Notes => self.notes_page(room),
-            View::Board => self.board_page(width),
-            View::Quadrants => self.quadrants_page(room),
-            View::List => page(self.list_page(width < STACK_BELOW))
+            View::Tasks if self.display == Display::Notes => self.notes_page(room),
+            View::Tasks => page(self.list_page(width < STACK_BELOW))
                 .maximum_size(1000.0)
                 .into(),
+            View::Board => self.board_page(width),
+            View::Quadrants => self.quadrants_page(room),
         };
         let content = toolbar_view(self.over_details(page, width)).top_bar(head);
         NavigationSplitView::new(side, content)
@@ -335,9 +335,9 @@ impl App {
         match (self.scope, self.view) {
             (Scope::Current, _) => "In progress".into(),
             (Scope::Archived, _) => "Archived".into(),
-            (Scope::All, View::Notes) => "Notes".into(),
+            (Scope::All, View::Tasks) if self.display == Display::Notes => "Notes".into(),
+            (Scope::All, View::Tasks) => "All tasks".into(),
             (Scope::All, View::Board) => "Board".into(),
-            (Scope::All, View::List) => "All tasks".into(),
             (Scope::All, View::Quadrants) => "Quadrants".into(),
         }
     }
