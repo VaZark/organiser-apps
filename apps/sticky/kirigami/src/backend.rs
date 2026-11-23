@@ -39,6 +39,11 @@ pub mod qobject {
         /// Look at the watched files' times; re-read what changed. Called on a timer.
         #[qinvokable]
         fn poll(self: Pin<&mut Backend>);
+        /// What the person asked of the tray icon since last asked: `manager`, `stickies`, `quit`, or
+        /// empty. Called on a timer.
+        #[qinvokable]
+        #[cxx_name = "takeTray"]
+        fn take_tray(self: Pin<&mut Backend>) -> QString;
         /// Whether the main window opens at start.
         #[qinvokable]
         #[cxx_name = "opensManager"]
@@ -190,6 +195,16 @@ impl qobject::Backend {
         if changed {
             self.publish(true);
         }
+    }
+
+    pub fn take_tray(mut self: Pin<&mut Self>) -> QString {
+        let event = self
+            .as_mut()
+            .rust_mut()
+            .core
+            .as_mut()
+            .map_or("", Core::take_tray);
+        QString::from(event)
     }
 
     pub fn opens_manager(&self) -> bool {

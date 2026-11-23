@@ -11,6 +11,9 @@ organiser-engine.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 toml = "0.8"
+# The tray icon (StatusNotifierItem) over D-Bus, on a thread of its own: no Qt widgets, which the
+# apps do not have (a tray made with Qt Labs aborts the start of a program built on QGuiApplication).
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 
 [dev-dependencies]
 notes-schema.workspace = true

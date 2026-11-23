@@ -16,7 +16,7 @@ finish-args:
   - --filesystem=xdg-data/todo
   # The list of linked apps, shared by every app.
   - --filesystem=xdg-config/organiser
-  # The tray icon (StatusNotifierItem), through which the main window is brought back.
+  # The tray icon (StatusNotifierItem): the host's tray is found by this name.
   - --talk-name=org.kde.StatusNotifierWatcher
   # "Start on login" and staying in the background go through the Background portal, which needs
   # no permission.

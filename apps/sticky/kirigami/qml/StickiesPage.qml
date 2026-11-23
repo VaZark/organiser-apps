@@ -55,6 +55,10 @@ Kirigami.ScrollablePage {
             QQC2.ToolButton {
                 text: i18n("New Note in…")
                 icon.name: "list-add"
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                 enabled: page.links.some(l => l.enabled)
                 onClicked: applicationWindow().showSheet(i18n("New Note in…"), page.links.filter(l => l.enabled).map(l => ({ text: l.title, icon: { name: "list-add" }, trigger: () => page.backend.newIn(l.appId) })))
             }
@@ -62,12 +66,20 @@ Kirigami.ScrollablePage {
             QQC2.ToolButton {
                 text: i18n("Show All on Desktop")
                 icon.name: "window-pin"
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                 enabled: page.shown.some(s => !s.desktop)
                 onClicked: page.shown.forEach(s => { if (!s.desktop) page.backend.setDesktop(s.key, true) })
             }
             QQC2.ToolButton {
                 text: i18n("Hide All from Desktop")
                 icon.name: "window-unpin"
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                 enabled: page.shown.some(s => s.desktop)
                 onClicked: page.shown.forEach(s => { if (s.desktop) page.backend.setDesktop(s.key, false) })
             }

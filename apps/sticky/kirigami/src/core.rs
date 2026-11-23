@@ -9,6 +9,7 @@ use std::fs::File;
 
 use organiser_core::AppMeta;
 use organiser_core::settings::{DEFAULT_STICKY_PALETTE, Settings};
+use organiser_sticky::tray::{Tray, TrayEvent};
 use organiser_sticky::{autostart, discover};
 use serde_json::{Value, json};
 use sticky_engine::{Changes, Engine, Key, StickyItem, Watcher};
@@ -81,6 +82,9 @@ pub struct Core {
     /// What the person should be told after the last action.
     pub notice: Option<String>,
     _lock: Option<File>,
+    /// The tray icon, while there is one (only the first Sticky has it, and only where the desktop
+    /// has a tray).
+    tray: Option<Tray>,
 }
 
 /// The single-instance lock, held for the life of the process.
@@ -106,6 +110,13 @@ impl Core {
         }
         let mut core = Self::with(background, lock.is_some());
         core._lock = lock;
+        // The tray icon is the way back when every window is closed, so only the first Sticky has it.
+        if core.owner {
+            match Tray::spawn() {
+                Ok(t) => core.tray = Some(t),
+                Err(e) => eprintln!("{e}"),
+            }
+        }
         core
     }
 
@@ -121,6 +132,7 @@ impl Core {
             background,
             notice: loaded.problem,
             _lock: None,
+            tray: None,
         };
         core.refresh();
         core
@@ -201,8 +213,20 @@ impl Core {
 
     /// Whether the process has nothing left to show and should end: a background start that is
     /// not the first Sticky, or no sticky window and no main window.
+    ///
+    /// With a tray icon the process stays when its windows are closed: the icon is how to get them
+    /// back, and its Quit ends the program.
     pub fn should_exit(&self, manager_open: bool) -> bool {
-        (self.background && !self.owner) || (self.desktop_keys().is_empty() && !manager_open)
+        (self.background && !self.owner)
+            || (self.tray.is_none() && self.desktop_keys().is_empty() && !manager_open)
+    }
+
+    /// What the person last asked of the tray icon (`manager`, `stickies` or `quit`), or empty.
+    pub fn take_tray(&mut self) -> &'static str {
+        self.tray
+            .as_ref()
+            .and_then(Tray::next)
+            .map_or("", TrayEvent::name)
     }
 
     /// Whether the main window opens at start (not for `--background`).

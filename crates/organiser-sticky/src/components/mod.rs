@@ -4,3 +4,4 @@ pub mod autostart;
 pub mod discover;
 pub mod flag;
 pub mod store;
+pub mod tray;
