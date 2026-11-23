@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import org.organiser.notes
 
 /// A note as a card. `note` is one object of the page JSON; the card's colour is the note's own
 /// (user data), tinted so text stays readable in any colour scheme.
@@ -65,13 +66,10 @@ Kirigami.AbstractCard {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
             visible: card.note.tags.length > 0 || card.note.chip
-            Kirigami.Chip {
+            TagChip {
                 visible: card.note.chip
-                text: card.note.folderTitle ? card.note.folderTitle : ""
-                icon.name: card.note.folderIcon ? card.note.folderIcon : "folder"
-                checkable: false
-                closable: false
-                down: false
+                text: card.note.folderPath ? card.note.folderPath : ""
+                tint: card.note.folderColor ? card.note.folderColor : Kirigami.Theme.highlightColor
             }
             Repeater {
                 model: card.note.tags

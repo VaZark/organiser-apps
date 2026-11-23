@@ -400,6 +400,16 @@ impl Core {
         path
     }
 
+    /// Where a folder sits, as `top/sub/folder`. A deep path keeps its first and last folder and
+    /// hides what is between: `top/../folder`.
+    fn path_label(&self, id: i64) -> String {
+        let titles: Vec<&str> = self.path(id).iter().map(|s| s.folder.title.as_str()).collect();
+        match titles.as_slice() {
+            [first, _, _, .., last] => format!("{first}/../{last}"),
+            all => all.join("/"),
+        }
+    }
+
     /// The top folder a folder is in (itself, at the top).
     fn base_folder(&self, id: Option<i64>) -> Option<i64> {
         self.path(id?).first().map(|s| s.folder.id)
@@ -474,6 +484,7 @@ impl Core {
             "tags": tags,
             "folderId": n.folder_id,
             "folderTitle": folder.map(|f| f.title.clone()),
+            "folderPath": n.folder_id.map(|i| self.path_label(i)),
             "folderColor": folder.map(|f| self.folder_color(f)),
             "folderIcon": folder.map(|f| theme_icon(f.icon.as_deref())),
             "chip": chip && folder.is_some(),
@@ -1171,6 +1182,23 @@ mod tests {
             .iter()
             .map(|n| n["title"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn a_deep_folder_path_keeps_only_its_first_and_last_folder() {
+        let mut c = core();
+        let a = c.create_folder(None).unwrap();
+        let b = c.create_folder(Some(a)).unwrap();
+        let d = c.create_folder(Some(b)).unwrap();
+        let e = c.create_folder(Some(d)).unwrap();
+        for (id, name) in [(a, "A"), (b, "B"), (d, "D"), (e, "E")] {
+            c.set_folder_title(id, name).unwrap();
+        }
+        c.refresh().unwrap();
+        assert_eq!(c.path_label(a), "A");
+        assert_eq!(c.path_label(b), "A/B");
+        assert_eq!(c.path_label(d), "A/B/D");
+        assert_eq!(c.path_label(e), "A/../E");
     }
 
     #[test]

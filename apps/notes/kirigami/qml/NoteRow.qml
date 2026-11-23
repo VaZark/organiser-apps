@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import org.organiser.notes
 
 /// A note as a list row, with row actions.
 Kirigami.SwipeListItem {
@@ -44,13 +45,10 @@ Kirigami.SwipeListItem {
                 color: Kirigami.Theme.disabledTextColor
             }
         }
-        Kirigami.Chip {
+        TagChip {
             visible: row.note.chip
-            text: row.note.folderTitle ? row.note.folderTitle : ""
-            icon.name: row.note.folderIcon ? row.note.folderIcon : "folder"
-            checkable: false
-            closable: false
-            down: false
+            text: row.note.folderPath ? row.note.folderPath : ""
+            tint: row.note.folderColor ? row.note.folderColor : Kirigami.Theme.highlightColor
         }
         QQC2.Label {
             visible: row.note.rated && row.note.rating > 0
