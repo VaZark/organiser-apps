@@ -101,6 +101,9 @@ impl Core {
     /// Start: take the instance lock, read the settings and the stickies.
     pub fn open(background: bool) -> Self {
         let lock = take_lock();
+        if lock.is_some() {
+            autostart::request_background();
+        }
         let mut core = Self::with(background, lock.is_some());
         core._lock = lock;
         core

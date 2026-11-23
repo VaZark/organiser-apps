@@ -18,8 +18,42 @@ Kirigami.ScrollablePage {
          : backend.noEpic ? i18n("Unassigned") : i18n("Tasks")
 
 
+    /// Start typing a new task (`--new`, as Sticky's "New in Todo" opens the app).
+    function focusQuickAdd() { quick.forceActiveFocus() }
+
     // Quick add stays at the foot of the list: `Buy milk #home due:tomorrow`.
-    footer: QQC2.ToolBar {
+    footer: ColumnLayout {
+        spacing: 0
+        // The bulk actions, while any task is ticked.
+        QQC2.ToolBar {
+            Layout.fillWidth: true
+            visible: page.pickedIds.length > 0
+            contentItem: RowLayout {
+                QQC2.ToolButton { icon.name: "dialog-cancel"; text: i18n("Clear"); display: QQC2.AbstractButton.IconOnly; onClicked: page.picked = ({}); QQC2.ToolTip.text: text; QQC2.ToolTip.visible: hovered }
+                QQC2.Label { text: i18n("%1 selected", page.pickedIds.length); Layout.fillWidth: true; elide: Text.ElideRight }
+                QQC2.ToolButton { text: i18n("Select All"); icon.name: "edit-select-all"; onClicked: page.pickAll() }
+                QQC2.ToolButton {
+                    text: i18n("Actions")
+                    icon.name: "overflow-menu"
+                    onClicked: bulkMenu.popup(this, 0, -bulkMenu.implicitHeight)
+                    QQC2.Menu {
+                        id: bulkMenu
+                        QQC2.MenuItem { text: i18n("Finish"); icon.name: "checkmark"; onTriggered: page.bulkStatus(true) }
+                        QQC2.MenuItem { text: i18n("Reopen"); icon.name: "view-refresh"; onTriggered: page.bulkStatus(false) }
+                        QQC2.MenuItem { text: i18n("Pin"); icon.name: "pin"; onTriggered: page.bulk(id => page.backend.setPinned(id, true)) }
+                        QQC2.MenuItem {
+                            text: page.backend.scope === "archived" ? i18n("Restore") : i18n("Archive")
+                            icon.name: "archive-insert"
+                            onTriggered: page.bulk(id => page.backend.setArchived(id, page.backend.scope !== "archived"))
+                        }
+                        QQC2.MenuSeparator {}
+                        QQC2.MenuItem { text: i18n("Delete…"); icon.name: "edit-delete"; onTriggered: confirmDelete.open() }
+                    }
+                }
+            }
+        }
+        QQC2.ToolBar {
+        Layout.fillWidth: true
         visible: page.backend.scope !== "archived"
         contentItem: RowLayout {
             QQC2.TextField {
@@ -38,18 +72,65 @@ Kirigami.ScrollablePage {
                 onClicked: quick.accepted()
             }
         }
+        }
+    }
+
+    // ---- selection for bulk actions ----------------------------------------------------------
+    /// Ticked task ids (as keys); only those still in the list count, see `pickedIds`.
+    property var picked: ({})
+    readonly property var pickedIds: tasks.filter(t => !t.header && page.picked[t.id] === true).map(t => t.id)
+    function pick(id, on) {
+        const next = Object.assign({}, picked)
+        if (on) next[id] = true; else delete next[id]
+        picked = next
+    }
+    function pickAll() {
+        const next = {}
+        for (const t of tasks) if (!t.header) next[t.id] = true
+        picked = next
+    }
+    /// Run `f` on every ticked task, then clear the selection.
+    function bulk(f) {
+        const ids = pickedIds
+        picked = ({})
+        ids.forEach(f)
+    }
+    function bulkStatus(closed) {
+        const target = statuses.find(s => closed ? s.closed : !s.closed)
+        if (target) bulk(id => backend.setStatus(id, target.id))
+    }
+    // Leaving a scope or epic drops the selection.
+    Connections {
+        target: page.backend
+        function onScopeChanged() { page.picked = ({}) }
+        function onEpicChanged() { page.picked = ({}) }
+    }
+    Kirigami.PromptDialog {
+        id: confirmDelete
+        title: i18n("Delete tasks")
+        subtitle: i18n("Delete %1 selected tasks?", page.pickedIds.length)
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Delete")
+                icon.name: "edit-delete"
+                onTriggered: { page.bulk(id => page.backend.deleteTask(id)); confirmDelete.close() }
+            }
+        ]
     }
 
     actions: [
         Kirigami.Action {
             text: i18n("Configure Epic…")
             icon.name: "configure"
+            displayHint: Kirigami.DisplayHint.IconOnly
             visible: page.backend.epic >= 0
             onTriggered: page.openEpicSettings(page.backend.epic)
         },
         Kirigami.Action {
             text: i18n("Group By")
             icon.name: "view-group"
+            displayHint: Kirigami.DisplayHint.IconOnly
             Kirigami.Action { text: i18n("None"); checkable: true; checked: page.activeGroup === ""; onTriggered: page.setGroup("") }
             Kirigami.Action { text: i18n("Status"); checkable: true; checked: page.activeGroup === "status"; onTriggered: page.setGroup("status") }
             // Epics split the tasks of all epics; sections split the tasks of one epic.
@@ -59,6 +140,7 @@ Kirigami.ScrollablePage {
         Kirigami.Action {
             text: i18n("Sort")
             icon.name: "view-sort"
+            displayHint: Kirigami.DisplayHint.IconOnly
             Kirigami.Action { text: i18n("Manual"); onTriggered: { page.backend.sort = "manual"; page.backend.applyFilters() } }
             Kirigami.Action { text: i18n("Priority"); onTriggered: { page.backend.sort = "priority"; page.backend.applyFilters() } }
             Kirigami.Action { text: i18n("Newest"); onTriggered: { page.backend.sort = "created"; page.backend.applyFilters() } }
@@ -94,15 +176,6 @@ Kirigami.ScrollablePage {
         return out
     }
     function setGroup(g) { backend.groupBy = g; backend.applyFilters() }
-
-    Kirigami.PromptDialog {
-        id: confirmDelete
-        property int taskId: -1
-        title: i18n("Delete this task?")
-        subtitle: i18n("This cannot be undone. Archive it to keep it.")
-        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
-        onAccepted: page.backend.deleteTask(taskId)
-    }
 
     // One ListView is the page's flickable, so only the rows in view exist. Grouped lists carry
     // header rows (`header: true`) in the same model.
@@ -156,16 +229,9 @@ Kirigami.ScrollablePage {
                 id: taskComp
                 TaskDelegate {
                     task: row.modelData
+                    selected: page.picked[row.modelData.id] === true
                     onClicked: page.openTask(row.modelData.id)
-                    onPinToggled: (id, pinned) => page.backend.setPinned(id, pinned)
-                    onArchiveToggled: (id, archived) => page.backend.setArchived(id, archived)
-                    onRemoveRequested: id => { confirmDelete.taskId = id; confirmDelete.open() }
-                    onStatusToggled: (id, closed) => {
-                        const target = closed
-                            ? page.statuses.find(s => s.closed)
-                            : page.statuses.find(s => !s.closed)
-                        if (target) page.backend.setStatus(id, target.id)
-                    }
+                    onSelectionToggled: (id, on) => page.pick(id, on)
                 }
             }
         }

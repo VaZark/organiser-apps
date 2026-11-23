@@ -52,6 +52,9 @@ pub static SCHEMA: Schema = Schema {
                 // `sticky_color` is `#rrggbb`.
                 Field::new("sticky", FieldType::Bool).indexed(),
                 Field::new("sticky_color", FieldType::Text).internal(),
+                // The task's own colour, `#rrggbb` (see `organiser_core::color`): the same rules
+                // as a note's. Not the sticky's, which Sticky Notes keeps in `sticky_color`.
+                Field::new("color", FieldType::Text),
                 // The id of one of the person's statuses (see `statuses`).
                 Field::new("status", FieldType::Reference(STATUS)).indexed(),
                 Field::new("priority", FieldType::Enum(priority::NAMES))

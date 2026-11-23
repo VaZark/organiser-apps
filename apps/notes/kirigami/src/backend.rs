@@ -78,6 +78,17 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setPinned"]
         fn set_pinned(self: Pin<&mut Backend>, id: i64, on: bool);
+        /// Make a note a desktop sticky (or not).
+        #[qinvokable]
+        #[cxx_name = "setSticky"]
+        fn set_sticky(self: Pin<&mut Backend>, id: i64, on: bool);
+        /// Whether Sticky Notes shows this app's stickies, and the switch for it.
+        #[qinvokable]
+        #[cxx_name = "stickyLinked"]
+        fn sticky_linked(self: &Backend) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setStickyLinked"]
+        fn set_sticky_linked(self: Pin<&mut Backend>, on: bool);
         #[qinvokable]
         #[cxx_name = "setFavorite"]
         fn set_favorite(self: Pin<&mut Backend>, id: i64, on: bool);
@@ -218,6 +229,10 @@ fn path_of(s: &str) -> PathBuf {
 
 impl qobject::Backend {
     pub fn init(mut self: Pin<&mut Self>) {
+        // Tell Sticky Notes this app exists (switched off until the person links it).
+        if let Err(e) = organiser_sticky::store::publish(&notes_schema::STICKY) {
+            eprintln!("sticky registry: {e}");
+        }
         let args: Vec<String> = std::env::args().collect();
         let after = |flag: &str| {
             args.iter()
@@ -381,6 +396,20 @@ impl qobject::Backend {
 
     pub fn set_pinned(self: Pin<&mut Self>, id: i64, on: bool) {
         self.act(|c| c.set_pinned(id, on));
+    }
+
+    pub fn set_sticky(self: Pin<&mut Self>, id: i64, on: bool) {
+        self.act(|c| c.set_sticky(id, on));
+    }
+
+    pub fn sticky_linked(&self) -> bool {
+        organiser_sticky::store::is_linked(&notes_schema::STICKY)
+    }
+
+    pub fn set_sticky_linked(mut self: Pin<&mut Self>, on: bool) {
+        if let Err(e) = organiser_sticky::store::set_linked(&notes_schema::STICKY, on) {
+            self.as_mut().set_toast(QString::from(e));
+        }
     }
 
     pub fn set_favorite(self: Pin<&mut Self>, id: i64, on: bool) {

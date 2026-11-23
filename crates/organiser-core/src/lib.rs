@@ -1,5 +1,6 @@
 //! App-agnostic basics shared by every organiser app: who the app is and where its files live.
 
+pub mod color;
 pub mod paths;
 pub mod settings;
 pub mod sticky;

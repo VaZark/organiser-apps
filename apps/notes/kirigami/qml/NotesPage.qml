@@ -167,16 +167,23 @@ Kirigami.ScrollablePage {
         id: block
         property var items: []
         spacing: Kirigami.Units.smallSpacing
-        Kirigami.CardsLayout {
+        // Cards flow left to right and wrap: as many columns as fit, each sharing the width, so a
+        // wide window shows several notes side by side and a narrow pane shows one.
+        Flow {
+            id: flow
             visible: !page.listView
             Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+            readonly property real minCardWidth: Kirigami.Units.gridUnit * 18
+            readonly property int columns: Math.max(1, Math.floor((width + spacing) / (minCardWidth + spacing)))
+            readonly property real cardWidth: Math.max(0, (width - spacing * (columns - 1)) / columns)
             Repeater {
                 model: block.items
                 delegate: NoteCard {
                     required property var modelData
+                    width: flow.cardWidth
                     note: modelData
                     onOpened: page.openNote(modelData.id)
-                    onToggledFavorite: page.backend.setFavorite(modelData.id, !modelData.favorite)
                 }
             }
         }

@@ -100,6 +100,10 @@ Kirigami.ScrollablePage {
             id: line
             required property var modelData
             onClicked: page.open(modelData.id)
+            background: Rectangle {
+                color: line.modelData.color ? Qt.alpha(line.modelData.color, 0.28) : "transparent"
+                Rectangle { visible: !!line.modelData.color; width: Kirigami.Units.smallSpacing; height: parent.height; color: line.modelData.color ? line.modelData.color : "transparent" }
+            }
             contentItem: RowLayout {
                 spacing: Kirigami.Units.largeSpacing
                 Kirigami.Icon { source: line.modelData.favorite ? "starred-symbolic" : "non-starred-symbolic"; implicitWidth: Kirigami.Units.iconSizes.small; implicitHeight: implicitWidth }
@@ -127,6 +131,12 @@ Kirigami.ScrollablePage {
             showClickFeedback: true
             onClicked: page.open(modelData.id)
             banner.source: modelData.photo
+            background: Rectangle {
+                radius: Kirigami.Units.cornerRadius
+                color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.32) : Kirigami.Theme.backgroundColor
+                border.width: 1
+                border.color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
+            }
             contentItem: ColumnLayout {
                 spacing: Kirigami.Units.smallSpacing
                 QQC2.Label {

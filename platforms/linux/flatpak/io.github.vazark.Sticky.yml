@@ -16,7 +16,10 @@ finish-args:
   - --filesystem=xdg-data/todo
   # The list of linked apps, shared by every app.
   - --filesystem=xdg-config/organiser
-  # "Start on login" goes through the Background portal, which needs no permission.
+  # The tray icon (StatusNotifierItem), through which the main window is brought back.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # "Start on login" and staying in the background go through the Background portal, which needs
+  # no permission.
   # The Plasma colour scheme and style, read-only, so the app follows the desktop.
   - --filesystem=xdg-config/kdeglobals:ro
   # This app's own config directory: its settings (`config.ron`, written by Preferences).

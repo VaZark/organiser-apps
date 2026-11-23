@@ -7,6 +7,8 @@ import org.organiser.todo
 
 Kirigami.ApplicationWindow {
     id: root
+    /// Dates as the system locale writes them; what is stored stays ISO.
+    readonly property QtObject dates: LocaleDates {}
     title: "Todo"
     width: Kirigami.Units.gridUnit * 60
     height: Kirigami.Units.gridUnit * 38
@@ -69,7 +71,9 @@ Kirigami.ApplicationWindow {
         selectedTask = id
         while (pageStack.depth > 1) pageStack.pop()
         const comp = Qt.createComponent(Qt.resolvedUrl("TaskPage.qml"))
-        pageStack.push(comp.createObject(pageStack, { backend: todo, taskId: id }))
+        const page = comp.createObject(pageStack, { backend: todo, taskId: id })
+        page.openTask.connect(id => Qt.callLater(openTask, id))
+        pageStack.push(page)
     }
 
     // The app menu sits at the right end of every page's toolbar, as in other KDE apps.
@@ -77,6 +81,32 @@ Kirigami.ApplicationWindow {
         icon.name: "application-menu"
         text: i18n("Menu")
         displayHint: Kirigami.DisplayHint.IconOnly
+        // What the lists include (the Filter sheet has the rest).
+        Kirigami.Action {
+            text: i18n("Completed Tasks"); icon.name: "checkmark"
+            checkable: true
+            checked: todo.showClosed
+            onTriggered: { todo.showClosed = !todo.showClosed; todo.applyFilters() }
+        }
+        Kirigami.Action {
+            text: i18n("Subtasks"); icon.name: "view-list-tree"
+            checkable: true
+            checked: todo.showSubtasks
+            onTriggered: { todo.showSubtasks = !todo.showSubtasks; todo.applyFilters() }
+        }
+        Kirigami.Action {
+            text: i18n("Pinned Only"); icon.name: "pin"
+            checkable: true
+            checked: root.filterState.pinned === true
+            onTriggered: todo.toggleFilter("pinned", root.filterState.pinned === true ? "0" : "1")
+        }
+        Kirigami.Action {
+            text: i18n("Overdue Only"); icon.name: "appointment-missed"
+            checkable: true
+            checked: root.filterState.overdue === true
+            onTriggered: todo.toggleFilter("overdue", root.filterState.overdue === true ? "0" : "1")
+        }
+        Kirigami.Action { separator: true }
         Kirigami.Action {
             text: i18n("Configure Todo…"); icon.name: "configure"
             shortcut: StandardKey.Preferences
@@ -99,6 +129,7 @@ Kirigami.ApplicationWindow {
     readonly property Kirigami.Action viewMenu: Kirigami.Action {
         text: i18n("View")
         icon.name: "view-list-details"
+        displayHint: Kirigami.DisplayHint.IconOnly
         Kirigami.Action {
             text: i18n("Tasks"); icon.name: "view-list-details"
             checkable: true
@@ -134,7 +165,8 @@ Kirigami.ApplicationWindow {
     readonly property var filterState: JSON.parse(todo.filters)
     readonly property Kirigami.Action filterAct: Kirigami.Action {
         text: root.filterState.count > 0 ? i18n("Filter (%1)", root.filterState.count) : i18n("Filter")
-        icon.name: root.filterState.count > 0 ? "filter-active" : "view-filter"
+        icon.name: "view-filter"
+        displayHint: Kirigami.DisplayHint.IconOnly
         checkable: true
         checked: root.filterState.count > 0
         shortcut: StandardKey.Find
@@ -294,5 +326,11 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    Component.onCompleted: { show(todo.startView === "board" ? "board" : todo.startView === "quadrants" ? "matrix" : todo.startView === "notes" ? "notes" : "list") }
+    // `--new 1` (Sticky's "New in Todo"): ready to type a task.
+    function startNew() {
+        const page = pageStack.currentItem
+        if (page && page.focusQuickAdd) page.focusQuickAdd()
+    }
+
+    Component.onCompleted: { if (todo.arg("new") !== "") Qt.callLater(startNew); show(todo.startView === "board" ? "board" : todo.startView === "quadrants" ? "matrix" : todo.startView === "notes" ? "notes" : "list") }
 }

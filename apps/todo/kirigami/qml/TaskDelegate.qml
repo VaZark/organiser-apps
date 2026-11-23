@@ -4,43 +4,32 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.organiser.todo
 
-/// One task row: a status checkbox, the title, and what else is worth knowing at a glance. Row
-/// actions sit behind the "more" button (swipe on touch).
+/// One task row: a selection checkbox (for the bulk actions of the list), the title, and what else is worth knowing at a glance (pinned,
+/// sticky, overdue, tags). It has no buttons of its own: a click opens the task, whose page has
+/// Pin, Sticky Note, Archive and Delete.
 Kirigami.SwipeListItem {
     id: row
     required property var task
     property var statuses: []
-    signal statusToggled(int id, bool closed)
+    /// Ticked in the list's selection.
+    property bool selected: false
+    signal selectionToggled(int id, bool on)
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    signal pinToggled(int id, bool pinned)
-    signal archiveToggled(int id, bool archived)
-    signal removeRequested(int id)
-    actions: [
-        Kirigami.Action {
-            text: row.task.pinned ? i18n("Unpin") : i18n("Pin")
-            icon.name: "pin"
-            onTriggered: row.pinToggled(row.task.id, !row.task.pinned)
-        },
-        Kirigami.Action {
-            text: row.task.archived ? i18n("Restore") : i18n("Archive")
-            icon.name: "folder-archive"
-            onTriggered: row.archiveToggled(row.task.id, !row.task.archived)
-        },
-        Kirigami.Action {
-            text: i18n("Delete…")
-            icon.name: "edit-delete"
-            onTriggered: row.removeRequested(row.task.id)
-        }
-    ]
+    // The task's own colour tints its row (the same rule as a note's card).
+    background: Rectangle {
+        color: row.selected ? Qt.alpha(Kirigami.Theme.highlightColor, 0.25)
+             : row.task.color ? Qt.alpha(row.task.color, row.hovered ? 0.4 : 0.28) : (row.hovered ? Kirigami.Theme.hoverColor : "transparent")
+        Rectangle { visible: !!row.task.color; width: Kirigami.Units.smallSpacing; height: parent.height; color: row.task.color ? row.task.color : "transparent" }
+    }
     leftPadding: Kirigami.Units.largeSpacing + task.depth * Kirigami.Units.gridUnit * 1.5
     opacity: task.closed ? 0.6 : 1
 
     contentItem: RowLayout {
         spacing: Kirigami.Units.smallSpacing
         QQC2.CheckBox {
-            checked: row.task.closed
-            onToggled: row.statusToggled(row.task.id, checked)
+            checked: row.selected
+            onToggled: row.selectionToggled(row.task.id, checked)
         }
         StatusDot { tint: row.task.statusColor ? row.task.statusColor : Kirigami.Theme.disabledTextColor }
         ColumnLayout {
@@ -59,9 +48,10 @@ Kirigami.SwipeListItem {
                 elide: Text.ElideRight
                 font: Kirigami.Theme.smallFont
                 color: Kirigami.Theme.disabledTextColor
-                text: [row.task.epicTitle, row.task.due ? i18n("due %1", row.task.due) : ""].filter(s => s).join(" · ")
+                text: [row.task.epicTitle, row.task.due ? i18n("due %1", applicationWindow().dates.show(row.task.due)) : ""].filter(s => s).join(" · ")
             }
         }
+        Kirigami.Icon { visible: row.task.sticky === true; source: "view-pim-notes"; Layout.preferredWidth: Kirigami.Units.iconSizes.small; Layout.preferredHeight: width }
         Kirigami.Icon { visible: row.task.pinned; source: "pin"; Layout.preferredWidth: Kirigami.Units.iconSizes.small; Layout.preferredHeight: width }
         QQC2.Label {
             visible: row.task.overdue && !row.task.closed

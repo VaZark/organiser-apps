@@ -55,10 +55,12 @@ Kirigami.Dialog {
             textRole: "title"
             onActivated: servings.text = dialog.servingsOf(currentIndex)
         }
-        QQC2.TextField {
+        DateField {
             id: date
             Kirigami.FormData.label: i18n("Date:")
-            placeholderText: "2026-11-30"
+            clearable: false
+            // Held until Log is pressed, so a pick or a typed date is just the dialog's state.
+            onCommitted: iso => text = iso
         }
         QQC2.ComboBox {
             id: time

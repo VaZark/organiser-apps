@@ -44,7 +44,7 @@ Kirigami.ScrollablePage {
             QQC2.TextField { id: nameField; Kirigami.FormData.label: i18n("Name:"); Layout.fillWidth: true }
             QQC2.TextField { id: qtyField; Kirigami.FormData.label: i18n("Quantity:") }
             QQC2.TextField { id: unitField; Kirigami.FormData.label: i18n("Unit:") }
-            QQC2.TextField { id: expiresField; Kirigami.FormData.label: i18n("Expires:"); placeholderText: "2026-11-30" }
+            DateField { id: expiresField; Kirigami.FormData.label: i18n("Expires:"); Layout.fillWidth: true }
         }
     }
 
@@ -75,7 +75,7 @@ Kirigami.ScrollablePage {
                 QQC2.Label { text: row.modelData.qty + (row.modelData.unit !== "" ? " " + row.modelData.unit : ""); color: Kirigami.Theme.disabledTextColor }
                 QQC2.Label {
                     visible: row.modelData.expires !== ""
-                    text: row.modelData.expired ? i18n("Expired %1", row.modelData.expires) : i18n("Expires %1", row.modelData.expires)
+                    text: row.modelData.expired ? i18n("Expired %1", applicationWindow().dates.show(row.modelData.expires)) : i18n("Expires %1", applicationWindow().dates.show(row.modelData.expires))
                     color: row.modelData.expired ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
                 }
             }

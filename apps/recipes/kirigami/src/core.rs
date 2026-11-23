@@ -247,6 +247,7 @@ impl Core {
                     "title": r.title,
                     "notes": r.notes,
                     "favorite": r.favorite,
+                    "color": r.color.clone().unwrap_or_default(),
                     "rating": r.rating.unwrap_or(0),
                     "servings": qty_text(r.servings),
                     "tags": r.tags,
@@ -319,6 +320,7 @@ impl Core {
             "title": r.title,
             "notes": r.notes,
             "favorite": r.favorite,
+            "color": r.color.clone().unwrap_or_default(),
             "rating": r.rating.unwrap_or(0),
             "servings": qty_text(r.servings),
             "tags": r.tags,
@@ -465,6 +467,18 @@ impl Core {
             id,
             RecipeEdit {
                 rating: Some((stars > 0).then_some(stars)),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// `#rrggbb` (or `#rgb`), or empty for the default card.
+    pub fn set_color(&mut self, id: i64, color: &str) -> Result<()> {
+        let c = organiser_core::color::parse_input(color).map_err(Error::Invalid)?;
+        self.edit(
+            id,
+            RecipeEdit {
+                color: Some(c.map(|c| c.hex())),
                 ..Default::default()
             },
         )
@@ -921,6 +935,13 @@ mod tests {
         assert_eq!(v["ingredients"].as_array().unwrap().len(), 2);
         c.set_rating(id, 0).unwrap();
         assert_eq!(parse(c.recipe_json(id).unwrap())["rating"], 0);
+        assert_eq!(parse(c.recipe_json(id).unwrap())["color"], "");
+        c.set_color(id, "#F80").unwrap();
+        assert_eq!(parse(c.recipe_json(id).unwrap())["color"], "#ff8800");
+        assert!(c.set_color(id, "red").is_err());
+        assert_eq!(parse(c.recipe_json(id).unwrap())["color"], "#ff8800");
+        c.set_color(id, "").unwrap();
+        assert_eq!(parse(c.recipe_json(id).unwrap())["color"], "");
         c.delete_recipe(id).unwrap();
         assert!(c.recipe_json(id).is_err());
     }

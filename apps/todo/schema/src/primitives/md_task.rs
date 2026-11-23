@@ -3,6 +3,7 @@
 //! neither is in it.
 
 use chrono::NaiveDate;
+use organiser_core::color::Color;
 use organiser_vault::front_matter::{self, FrontMatter};
 
 use organiser_vault::is_uuid;
@@ -29,6 +30,8 @@ pub struct FileTask {
     pub notes: String,
     pub tags: Vec<String>,
     pub pinned: bool,
+    /// `#rrggbb`.
+    pub color: Option<String>,
     pub priority: Option<Priority>,
     pub start: Option<NaiveDate>,
     pub due: Option<NaiveDate>,
@@ -66,6 +69,10 @@ pub fn parse_file(text: &str, fallback: &str) -> FileTask {
         t.id = fm.get(&k("id")).filter(|i| is_uuid(i));
         t.tags = fm.list(&k("tags"));
         t.pinned = fm.get_bool(&k("pinned")).unwrap_or(false);
+        t.color = fm
+            .get(&k("color"))
+            .and_then(|c| Color::parse(&c))
+            .map(Color::hex);
         t.priority = fm
             .get(&k("priority"))
             .and_then(|p| Priority::parse(&p.to_lowercase()));
@@ -120,6 +127,10 @@ pub fn render_file(
         } else {
             fm.remove(&k(key));
         }
+    }
+    match task.color.as_deref().and_then(Color::parse) {
+        Some(c) => fm.set(&k("color"), &c.hex()),
+        None => fm.remove(&k("color")),
     }
     match section {
         Some(s) => fm.set(&k("section"), s),

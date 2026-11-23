@@ -24,10 +24,12 @@ Window {
     property bool editing: false
     readonly property Item sheetItem: sheet
 
-    width: Kirigami.Units.gridUnit * 17
-    height: Kirigami.Units.gridUnit * 18
-    minimumWidth: Kirigami.Units.gridUnit * 11
-    minimumHeight: Kirigami.Units.gridUnit * 9
+    // The window is a little larger than the note: the margin holds its shadow.
+    readonly property real shadowMargin: Kirigami.Units.gridUnit * 0.7
+    width: Kirigami.Units.gridUnit * 17 + shadowMargin * 2
+    height: Kirigami.Units.gridUnit * 18 + shadowMargin * 2
+    minimumWidth: Kirigami.Units.gridUnit * 11 + shadowMargin * 2
+    minimumHeight: Kirigami.Units.gridUnit * 9 + shadowMargin * 2
     visible: true
     title: note.title ? note.title : i18n("Sticky")
     flags: Qt.Window | Qt.FramelessWindowHint
@@ -43,13 +45,32 @@ Window {
         onActivated: win.hide()
     }
 
-    Rectangle {
+    Kirigami.ShadowedRectangle {
         id: sheet
         anchors.fill: parent
-        radius: Kirigami.Units.cornerRadius
+        anchors.margins: win.shadowMargin
+        radius: Kirigami.Units.gridUnit * 0.6
         color: win.paper
         border.width: 1
-        border.color: Qt.tint(win.paper, Qt.alpha(win.ink, 0.25))
+        border.color: Qt.alpha(win.ink, 0.14)
+        shadow.size: win.shadowMargin
+        shadow.yOffset: Kirigami.Units.smallSpacing * 0.6
+        shadow.color: Qt.rgba(0, 0, 0, 0.32)
+
+        // The tools and the footer step back until the pointer is over the note or it is edited.
+        readonly property real chrome: noteHover.hovered || win.editing || win.active ? 1 : 0.3
+        HoverHandler { id: noteHover }
+
+        // A soft light from the top, so the paper is not a flat slab.
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.28) }
+                GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.0) }
+                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.02) }
+            }
+        }
 
         // The note's colours, for everything inside it.
         Kirigami.Theme.inherit: false
@@ -66,8 +87,11 @@ Window {
             // The strip to move the note by, with its tools.
             RowLayout {
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignTop
                 Layout.margins: Kirigami.Units.smallSpacing
                 spacing: 0
+                opacity: sheet.chrome
+                Behavior on opacity { NumberAnimation { duration: Kirigami.Units.shortDuration } }
 
                 QQC2.ToolButton {
                     icon.name: "list-add"
@@ -81,8 +105,8 @@ Window {
                 }
                 Item {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    implicitHeight: Kirigami.Units.gridUnit * 2
+                    // As tall as a tool button, no more: the strip must not compete with the text.
+                    implicitHeight: Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing * 2
                     DragHandler {
                         target: null
                         onActiveChanged: if (active) win.startSystemMove()
@@ -120,40 +144,58 @@ Window {
                 }
             }
 
-            QQC2.TextField {
+            QQC2.TextArea {
                 id: titleField
                 Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                Layout.rightMargin: Kirigami.Units.smallSpacing
+                Layout.alignment: Qt.AlignTop
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
                 placeholderText: i18n("Title")
-                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
+                // A long title takes at most three lines; the note below keeps its room.
+                Layout.maximumHeight: Kirigami.Units.gridUnit * 4.5
+                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.35
                 font.bold: true
+                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                leftPadding: 0
+                rightPadding: 0
+                topPadding: 0
+                bottomPadding: 0
                 color: win.ink
                 placeholderTextColor: Qt.alpha(win.ink, 0.55)
+                selectionColor: Qt.alpha(win.ink, 0.3)
+                selectedTextColor: win.ink
                 background: null
+                // A title is one line of text that wraps: Enter goes on to the note, it adds no line.
+                Keys.onReturnPressed: { win.editing = true; bodyField.forceActiveFocus() }
+                Keys.onEnterPressed: { win.editing = true; bodyField.forceActiveFocus() }
                 text: win.note.title ? win.note.title : ""
-                onTextEdited: win.backend.setTitle(win.key, text)
+                onTextChanged: if (activeFocus) win.backend.setTitle(win.key, text)
             }
 
             QQC2.ScrollView {
+                id: reader
                 visible: !win.editing
+                Layout.minimumHeight: Kirigami.Units.gridUnit * 3
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                Layout.rightMargin: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                contentWidth: availableWidth
+                QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
 
                 // Reading: the Markdown drawn.
                 TextEdit {
-                    width: parent.width
+                    width: reader.availableWidth
                     readOnly: true
                     selectByMouse: true
-                    wrapMode: TextEdit.Wrap
+                    wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
                     textFormat: TextEdit.MarkdownText
                     color: win.ink
                     selectionColor: Qt.alpha(win.ink, 0.3)
                     selectedTextColor: win.ink
                     font: Kirigami.Theme.defaultFont
-                    padding: Kirigami.Units.smallSpacing
+                    padding: 0
                     // What is typed in the editor, so the reading view is never behind it.
                     text: bodyField.text
                     onLinkActivated: link => Qt.openUrlExternally(link)
@@ -165,8 +207,9 @@ Window {
                 visible: win.editing
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                Layout.rightMargin: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
 
                 QQC2.TextArea {
                     id: bodyField
@@ -175,7 +218,9 @@ Window {
                     placeholderTextColor: Qt.alpha(win.ink, 0.55)
                     selectionColor: Qt.alpha(win.ink, 0.3)
                     selectedTextColor: win.ink
-                    wrapMode: TextEdit.Wrap
+                    wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                    leftPadding: 0
+                    rightPadding: 0
                     background: null
                     text: win.note.body ? win.note.body : ""
                     onTextChanged: if (activeFocus) win.backend.setBody(win.key, text)
@@ -186,11 +231,13 @@ Window {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.margins: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                opacity: sheet.chrome
+                Behavior on opacity { NumberAnimation { duration: Kirigami.Units.shortDuration } }
                 QQC2.Label {
                     text: win.note.appName ? win.note.appName : ""
                     color: Qt.alpha(win.ink, 0.7)
                     font: Kirigami.Theme.smallFont
-                    Layout.leftMargin: Kirigami.Units.smallSpacing
                 }
                 Item { Layout.fillWidth: true }
                 Kirigami.Icon {

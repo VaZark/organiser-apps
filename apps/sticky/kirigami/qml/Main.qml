@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls as QQC2
+import Qt.labs.platform as Labs
 import org.kde.kirigami as Kirigami
 import org.organiser.sticky
 
@@ -19,6 +20,34 @@ Kirigami.ApplicationWindow {
             init()
             if (opensManager()) root.openManager()
             root.checkExit()
+        }
+    }
+
+    // The tray icon (a StatusNotifierItem): the way back to Sticky Notes when its windows are
+    // closed or minimised. Shown while there is something to come back to.
+    Labs.SystemTrayIcon {
+        id: tray
+        visible: available && (root.desktopKeys.length > 0 || root.visible)
+        icon.name: "io.github.vazark.Sticky"
+        tooltip: i18n("Sticky Notes")
+        onActivated: reason => {
+            if (reason === Labs.SystemTrayIcon.Trigger) root.openManager()
+        }
+        menu: Labs.Menu {
+            Labs.MenuItem {
+                text: i18n("All Notes")
+                onTriggered: root.openManager()
+            }
+            Labs.MenuItem {
+                text: i18n("Bring Stickies Forward")
+                enabled: root.desktopKeys.length > 0
+                onTriggered: root.desktopKeys.forEach(k => root.showSticky(k))
+            }
+            Labs.MenuItem { separator: true }
+            Labs.MenuItem {
+                text: i18n("Quit")
+                onTriggered: Qt.quit()
+            }
         }
     }
 

@@ -10,7 +10,6 @@ Kirigami.AbstractCard {
     id: card
     required property var note
     signal opened()
-    signal toggledFavorite()
 
     showClickFeedback: true
     onClicked: opened()
@@ -40,13 +39,11 @@ Kirigami.AbstractCard {
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
             }
-            QQC2.ToolButton {
-                icon.name: card.note.favorite ? "emblem-favorite" : "bookmark-new"
-                display: QQC2.AbstractButton.IconOnly
-                text: card.note.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
-                QQC2.ToolTip.text: text
-                QQC2.ToolTip.visible: hovered
-                onClicked: card.toggledFavorite()
+            Kirigami.Icon {
+                visible: card.note.favorite
+                source: "emblem-favorite"
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
             }
         }
         QQC2.Label {

@@ -17,6 +17,12 @@ Item {
         width: note.width
         opacity: note.task.closed ? 0.6 : 1
         onClicked: note.clicked()
+        background: Rectangle {
+            radius: Kirigami.Units.cornerRadius
+            color: note.task.color ? Qt.alpha(note.task.color, 0.32) : Kirigami.Theme.backgroundColor
+            border.width: 1
+            border.color: note.task.color ? Qt.alpha(note.task.color, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
+        }
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
             RowLayout {
@@ -35,7 +41,7 @@ Item {
                 Layout.fillWidth: true
                 font: Kirigami.Theme.smallFont
                 color: Kirigami.Theme.disabledTextColor
-                text: [note.task.epicTitle, note.task.due ? i18n("due %1", note.task.due) : ""].filter(s => s).join(" · ")
+                text: [note.task.epicTitle, note.task.due ? i18n("due %1", applicationWindow().dates.show(note.task.due)) : ""].filter(s => s).join(" · ")
             }
             QQC2.Label {
                 visible: note.task.notes !== ""

@@ -5,6 +5,8 @@ import org.organiser.recipes
 
 Kirigami.ApplicationWindow {
     id: root
+    /// Dates as the system locale writes them; what is stored stays ISO.
+    readonly property QtObject dates: LocaleDates {}
     title: i18n("Recipes")
     width: Kirigami.Units.gridUnit * 60
     height: Kirigami.Units.gridUnit * 38

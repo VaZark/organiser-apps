@@ -6,6 +6,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 sed 's/i18n(/qsTr(/g' "$here/../qml/TagPicker.qml" > "$work/TagPicker.qml"
+sed 's/i18n(/qsTr(/g' "$here/../qml/DateField.qml" > "$work/DateField.qml"
+sed 's/i18n(/qsTr(/g' "$here/../qml/ColorPicker.qml" > "$work/ColorPicker.qml"
+cp "$here/../qml/LocaleDates.qml" "$work/LocaleDates.qml"
 cp "$here"/tst_*.qml "$work/"
 cd "$work"
 QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \

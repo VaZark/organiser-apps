@@ -34,6 +34,16 @@ FormCard.FormCardPage {
         onAccepted: page.backend.importFiles(JSON.stringify([selectedFolder.toString()]), page.importAsLink)
     }
 
+    FormCard.FormHeader { title: i18n("Sticky Notes") }
+    FormCard.FormCard {
+        FormCard.FormSwitchDelegate {
+            text: i18n("Show stickies on the desktop")
+            description: i18n("Notes made a Sticky Note appear in Sticky Notes. Turn on Make Sticky Note in a note's menu.")
+            checked: page.backend.stickyLinked()
+            onToggled: page.backend.setStickyLinked(checked)
+        }
+    }
+
     FormCard.FormHeader { title: i18n("Display") }
     FormCard.FormCard {
         FormCard.FormSwitchDelegate {

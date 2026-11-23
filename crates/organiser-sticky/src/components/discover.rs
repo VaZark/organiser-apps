@@ -145,21 +145,46 @@ pub fn launch() -> Result<(), String> {
         .map_err(|e| format!("cannot start Sticky Notes: {e}"))
 }
 
-/// Open an app on its create page, as `--new` does. In a sandbox the app is reached through the
-/// desktop portal, by the URI scheme it declares (`organiser-<slug>://new`); outside, by its
-/// binary on `PATH` (`<slug>-gui`) or its Flatpak.
+/// The binary names an app's GUI has had, newest first. Our own app is looked for before anything
+/// else is tried.
+fn gui_names(slug: &str) -> [String; 2] {
+    [format!("{slug}-kirigami"), format!("{slug}-gui")]
+}
+
+/// The first GUI binary of `slug` found in `dirs`, in the order of [`gui_names`].
+fn find_gui(dirs: &[PathBuf], slug: &str) -> Option<PathBuf> {
+    gui_names(slug)
+        .iter()
+        .find_map(|n| dirs.iter().map(|d| d.join(n)).find(|p| is_executable(p)))
+}
+
+/// Where our install script puts binaries, in case it is not on `PATH`.
+fn install_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/bin"))
+}
+
+/// Open an app on its create page: `--new 1` (a value, as the apps read their flags). In a sandbox
+/// the app is reached through the desktop portal, by the URI scheme it declares
+/// (`organiser-<slug>://new`); outside, our own GUI is searched for first (`<slug>-kirigami` on
+/// `PATH`, then in `~/.local/bin`), then the older `<slug>-gui`, then its Flatpak.
 pub fn open_new(slug: &str, app_id: &str) -> Result<(), String> {
     let mut cmd = if in_flatpak() {
         let mut c = Command::new("xdg-open");
         c.arg(format!("organiser-{slug}://new"));
         c
-    } else if let Some(bin) = on_path(&format!("{slug}-gui")) {
+    } else if let Some(bin) = {
+        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        dirs.extend(install_dir());
+        find_gui(&dirs, slug)
+    } {
         let mut c = Command::new(bin);
-        c.arg("--new");
+        c.args(["--new", "1"]);
         c
     } else {
         let mut c = Command::new("flatpak");
-        c.args(["run", app_id, "--new"]);
+        c.args(["run", app_id, "--new", "1"]);
         c
     };
     cmd.stdin(Stdio::null())
@@ -186,6 +211,27 @@ pub fn wants_background<S: AsRef<str>>(args: &[S]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn our_own_gui_is_found_before_the_old_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("sticky-gui-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let make = |name: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let dirs = [dir.clone()];
+        assert_eq!(find_gui(&dirs, "todo"), None);
+        make("todo-gui");
+        assert_eq!(find_gui(&dirs, "todo"), Some(dir.join("todo-gui")));
+        make("todo-kirigami");
+        assert_eq!(find_gui(&dirs, "todo"), Some(dir.join("todo-kirigami")));
+        assert_eq!(find_gui(&dirs, "notes"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_gdbus_boolean_reply_is_read() {

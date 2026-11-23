@@ -72,6 +72,17 @@ pub mod qobject {
         fn save_preferences(self: Pin<&mut Backend>);
         #[qinvokable]
         fn task(self: &Backend, id: i64) -> QString;
+        /// Put a task under another (`parent` -1: out to the top level).
+        #[qinvokable]
+        #[cxx_name = "setParent"]
+        fn set_parent(self: Pin<&mut Backend>, id: i64, parent: i64);
+        /// The tasks a task may go under, as JSON.
+        #[qinvokable]
+        #[cxx_name = "parentChoices"]
+        fn parent_choices(self: &Backend, id: i64) -> QString;
+        /// The direct subtasks of a task as JSON, closed ones too.
+        #[qinvokable]
+        fn subtasks(self: &Backend, id: i64) -> QString;
         /// The value after `--name` on the command line, or empty (development flags).
         #[qinvokable]
         fn arg(self: &Backend, name: &QString) -> QString;
@@ -97,6 +108,24 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "editNotes"]
         fn edit_notes(self: Pin<&mut Backend>, id: i64, notes: &QString);
+        #[qinvokable]
+        #[cxx_name = "setTaskColor"]
+        fn set_task_color(self: Pin<&mut Backend>, id: i64, color: &QString);
+        /// Make a task a desktop sticky (or not).
+        #[qinvokable]
+        #[cxx_name = "setSticky"]
+        fn set_sticky(self: Pin<&mut Backend>, id: i64, on: bool);
+        /// Whether Sticky Notes shows this app's stickies, and the switch for it.
+        #[qinvokable]
+        #[cxx_name = "stickyLinked"]
+        fn sticky_linked(self: &Backend) -> bool;
+        #[qinvokable]
+        #[cxx_name = "setStickyLinked"]
+        fn set_sticky_linked(self: Pin<&mut Backend>, on: bool);
+        /// The quick-pick colours as JSON (`[{"name", "hex"}]`).
+        #[qinvokable]
+        #[cxx_name = "colorPresets"]
+        fn color_presets(self: &Backend) -> QString;
         #[qinvokable]
         #[cxx_name = "editDue"]
         fn edit_due(self: Pin<&mut Backend>, id: i64, due: &QString);
@@ -255,6 +284,10 @@ impl qobject::Backend {
     }
 
     pub fn init(mut self: Pin<&mut Self>) {
+        // Tell Sticky Notes this app exists (switched off until the person links it).
+        if let Err(e) = organiser_sticky::store::publish(&todo_schema::STICKY) {
+            eprintln!("sticky registry: {e}");
+        }
         // `--vault DIR` picks a tasks folder for a trial; `--vault ''` means none.
         let vault = std::env::args()
             .skip_while(|a| a != "--vault")
@@ -425,6 +458,24 @@ impl qobject::Backend {
             .map_or_else(|| QString::from("{}"), QString::from)
     }
 
+    pub fn set_parent(self: Pin<&mut Self>, id: i64, parent: i64) {
+        self.act(|c| c.set_parent(id, (parent >= 0).then_some(parent)));
+    }
+
+    pub fn parent_choices(&self, id: i64) -> QString {
+        self.core
+            .as_ref()
+            .and_then(|c| c.parent_choices_json(id).ok())
+            .map_or_else(|| QString::from("[]"), QString::from)
+    }
+
+    pub fn subtasks(&self, id: i64) -> QString {
+        self.core
+            .as_ref()
+            .and_then(|c| c.subtasks_json(id).ok())
+            .map_or_else(|| QString::from("[]"), QString::from)
+    }
+
     pub fn create_task(mut self: Pin<&mut Self>, title: &QString, epic: i64, parent: i64) -> i64 {
         let title = title.to_string();
         let mut id = -1;
@@ -459,6 +510,29 @@ impl qobject::Backend {
     pub fn edit_notes(self: Pin<&mut Self>, id: i64, notes: &QString) {
         let v = notes.to_string();
         self.act(|c| c.edit_notes(id, &v));
+    }
+
+    pub fn set_task_color(self: Pin<&mut Self>, id: i64, color: &QString) {
+        let v = color.to_string();
+        self.act(|c| c.set_task_color(id, &v));
+    }
+
+    pub fn set_sticky(self: Pin<&mut Self>, id: i64, on: bool) {
+        self.act(|c| c.set_sticky(id, on));
+    }
+
+    pub fn sticky_linked(&self) -> bool {
+        organiser_sticky::store::is_linked(&todo_schema::STICKY)
+    }
+
+    pub fn set_sticky_linked(mut self: Pin<&mut Self>, on: bool) {
+        if let Err(e) = organiser_sticky::store::set_linked(&todo_schema::STICKY, on) {
+            self.as_mut().set_toast(QString::from(e));
+        }
+    }
+
+    pub fn color_presets(&self) -> QString {
+        QString::from(organiser_core::color::presets_json())
     }
 
     pub fn edit_due(self: Pin<&mut Self>, id: i64, due: &QString) {

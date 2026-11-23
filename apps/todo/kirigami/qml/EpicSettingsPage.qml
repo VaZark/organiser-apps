@@ -33,11 +33,17 @@ FormCard.FormCardPage {
             onEditingFinished: page.backend.setEpicNotes(page.epicId, text)
         }
         FormCard.FormDelegateSeparator {}
-        FormCard.FormTextFieldDelegate {
-            label: i18n("Due date")
-            placeholderText: "YYYY-MM-DD"
-            Component.onCompleted: text = page.e.due ? page.e.due : ""
-            onEditingFinished: page.backend.setEpicDue(page.epicId, text)
+        FormCard.FormDateTimeDelegate {
+            text: i18n("Due date")
+            dateTimeDisplay: FormCard.FormDateTimeDelegate.DateTimeDisplay.Date
+            resettable: true
+            // An unset date is an invalid Date. Only a real change is written back (the binding
+            // below also fires onValueChanged when the page loads or the epic changes).
+            value: page.e.due ? new Date(page.e.due + "T00:00:00") : new Date(NaN)
+            onValueChanged: {
+                const iso = isNaN(value.valueOf()) ? "" : Qt.formatDate(value, "yyyy-MM-dd")
+                if (iso !== (page.e.due ? page.e.due : "")) page.backend.setEpicDue(page.epicId, iso)
+            }
         }
         FormCard.FormDelegateSeparator {}
         FormCard.FormTextDelegate {

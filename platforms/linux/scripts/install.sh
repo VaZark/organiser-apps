@@ -72,4 +72,12 @@ if command -v flock >/dev/null; then
 else
   refresh_caches
 fi
+# Sticky is the handler of its own `organiser-sticky:` link, which Todo and Notes open to start it.
+# Say so, or the desktop asks which program to use. Only that scheme: no file type is claimed.
+case " $apps " in
+  *" sticky "*)
+    if command -v xdg-mime >/dev/null; then
+      xdg-mime default io.github.vazark.Sticky.desktop x-scheme-handler/organiser-sticky || true
+    fi ;;
+esac
 echo "Make sure $prefix/bin is on PATH."

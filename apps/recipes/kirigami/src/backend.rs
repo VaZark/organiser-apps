@@ -81,6 +81,13 @@ pub mod qobject {
         #[cxx_name = "setFavorite"]
         fn set_favorite(self: Pin<&mut Backend>, id: i64, on: bool);
         #[qinvokable]
+        #[cxx_name = "setRecipeColor"]
+        fn set_recipe_color(self: Pin<&mut Backend>, id: i64, color: &QString);
+        /// The quick-pick colours as JSON (`[{"name", "hex"}]`).
+        #[qinvokable]
+        #[cxx_name = "colorPresets"]
+        fn color_presets(self: &Backend) -> QString;
+        #[qinvokable]
         #[cxx_name = "setRating"]
         fn set_rating(self: Pin<&mut Backend>, id: i64, stars: i32);
         /// `tags` is a comma-separated list.
@@ -484,6 +491,15 @@ impl qobject::Backend {
 
     pub fn set_favorite(self: Pin<&mut Self>, id: i64, on: bool) {
         self.act(|c| c.set_favorite(id, on));
+    }
+
+    pub fn set_recipe_color(self: Pin<&mut Self>, id: i64, color: &QString) {
+        let v = color.to_string();
+        self.act(|c| c.set_color(id, &v));
+    }
+
+    pub fn color_presets(&self) -> QString {
+        QString::from(organiser_core::color::presets_json())
     }
 
     pub fn set_rating(self: Pin<&mut Self>, id: i64, stars: i32) {

@@ -334,6 +334,13 @@ impl Vault {
                 pinned: f.task.pinned,
             },
         )?;
+        if f.task.color.is_some() {
+            let edit = Edit {
+                color: Some(f.task.color.clone()),
+                ..Edit::default()
+            };
+            lifecycle::edit(db, t.id, &edit)?;
+        }
         if f.archived || f.task.archived {
             lifecycle::set_archived(db, t.id, true)?;
         }
@@ -434,6 +441,7 @@ impl Vault {
             start: (cur.start != want.start).then_some(want.start),
             due: (cur.due != want.due).then_some(want.due),
             priority: want.priority.filter(|p| *p != cur.priority),
+            color: (cur.color != want.color).then(|| want.color.clone()),
             ..Edit::default()
         };
         // Its epic, and its section: a subtask is in its parent's, any other in the one named.
@@ -451,6 +459,7 @@ impl Vault {
             || edit.start.is_some()
             || edit.due.is_some()
             || edit.priority.is_some()
+            || edit.color.is_some()
             || edit.epic.is_some()
         {
             lifecycle::edit(db, id, &edit)?;
@@ -1282,6 +1291,84 @@ mod tests {
         .find(|i| i.title == title)
         .map(Task::from)
         .unwrap_or_else(|| panic!("no task {title}"))
+    }
+
+    #[test]
+    fn a_task_colour_goes_to_its_file_comes_back_from_it_and_clears() {
+        let (mut db, v, dir) = setup();
+        let t = new(&mut db, "Paint");
+        flush(&mut db, &v);
+        assert!(!read(&dir, "Paint.md").contains("todo-color"));
+        // Set in the app: it reaches the file (any form is stored as #rrggbb).
+        let set = |db: &mut Db, c: Option<&str>| {
+            let edit = Edit {
+                color: Some(c.map(String::from)),
+                ..Edit::default()
+            };
+            lifecycle::edit(db, t.id, &edit).unwrap();
+        };
+        set(&mut db, Some("#6aa5e8"));
+        flush(&mut db, &v);
+        assert!(
+            read(&dir, "Paint.md").contains("todo-color: \"#6aa5e8\"")
+                || read(&dir, "Paint.md").contains("todo-color: #6aa5e8")
+        );
+        assert_eq!(task_named(&db, "Paint").color.as_deref(), Some("#6aa5e8"));
+        // Edited in the file (short form, upper case): it reaches the task.
+        let text = read(&dir, "Paint.md");
+        let line = text.lines().find(|l| l.starts_with("todo-color")).unwrap();
+        fs::write(
+            dir.join("Paint.md"),
+            text.replace(line, "todo-color: \"#F80\""),
+        )
+        .unwrap();
+        v.sync(&mut db).unwrap();
+        assert_eq!(task_named(&db, "Paint").color.as_deref(), Some("#ff8800"));
+        // A value that is not a colour is no colour.
+        let text = read(&dir, "Paint.md");
+        let line = text.lines().find(|l| l.starts_with("todo-color")).unwrap();
+        fs::write(
+            dir.join("Paint.md"),
+            text.replace(line, "todo-color: \"red\""),
+        )
+        .unwrap();
+        v.sync(&mut db).unwrap();
+        assert_eq!(task_named(&db, "Paint").color, None);
+        // Cleared in the app: the key leaves the file.
+        set(&mut db, Some("#6aa5e8"));
+        flush(&mut db, &v);
+        set(&mut db, None);
+        flush(&mut db, &v);
+        assert!(!read(&dir, "Paint.md").contains("todo-color"));
+    }
+
+    #[test]
+    fn a_new_file_with_a_colour_makes_a_coloured_task_and_sticky_colour_is_separate() {
+        let (mut db, v, dir) = setup();
+        fs::write(
+            dir.join("Blue.md"),
+            "---\ntodo-color: \"#6aa5e8\"\n---\n# Blue\n",
+        )
+        .unwrap();
+        v.sync(&mut db).unwrap();
+        let t = task_named(&db, "Blue");
+        assert_eq!(t.color.as_deref(), Some("#6aa5e8"));
+        // The sticky's colour is its own field: switching the sticky off leaves the task's.
+        db.update(
+            t.id,
+            ItemPatch::default()
+                .field("sticky", true)
+                .field("sticky_color", "#111111"),
+        )
+        .unwrap();
+        db.update(
+            t.id,
+            ItemPatch::default()
+                .field("sticky", serde_json::Value::Null)
+                .field("sticky_color", serde_json::Value::Null),
+        )
+        .unwrap();
+        assert_eq!(task_named(&db, "Blue").color.as_deref(), Some("#6aa5e8"));
     }
 
     #[test]

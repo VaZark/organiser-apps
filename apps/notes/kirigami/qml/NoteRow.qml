@@ -4,7 +4,9 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.organiser.notes
 
-/// A note as a list row, with row actions.
+/// A note as a list row: information only (colour, title, excerpt, folder, rating, pinned, favorite).
+/// It has no buttons: a click opens the note, whose page has Favorite, Pin, Sticky Note, Archive and
+/// Trash (and Restore and Delete Permanently for a trashed note).
 Kirigami.SwipeListItem {
     id: row
     required property var note
@@ -67,36 +69,4 @@ Kirigami.SwipeListItem {
             Layout.preferredHeight: Kirigami.Units.iconSizes.small
         }
     }
-    actions: [
-        Kirigami.Action {
-            text: i18n("Restore")
-            icon.name: "edit-undo"
-            visible: row.note.trashed
-            onTriggered: row.backend.restoreNote(row.note.id)
-        },
-        Kirigami.Action {
-            text: i18n("Delete Permanently")
-            icon.name: "edit-delete"
-            visible: row.note.trashed
-            onTriggered: row.backend.purgeNote(row.note.id)
-        },
-        Kirigami.Action {
-            text: row.note.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
-            icon.name: row.note.favorite ? "emblem-favorite" : "bookmark-new"
-            visible: !row.note.trashed
-            onTriggered: row.backend.setFavorite(row.note.id, !row.note.favorite)
-        },
-        Kirigami.Action {
-            text: row.note.pinned ? i18n("Unpin") : i18n("Pin")
-            icon.name: "pin"
-            visible: !row.note.trashed
-            onTriggered: row.backend.setPinned(row.note.id, !row.note.pinned)
-        },
-        Kirigami.Action {
-            text: i18n("Move to Trash")
-            icon.name: "user-trash"
-            visible: !row.note.trashed
-            onTriggered: row.backend.trashNote(row.note.id)
-        }
-    ]
 }

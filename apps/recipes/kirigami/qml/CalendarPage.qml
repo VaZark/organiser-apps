@@ -11,8 +11,9 @@ Kirigami.ScrollablePage {
     readonly property var cal: JSON.parse(backend.calendar)
     readonly property var days: cal.weeks ? cal.weeks.reduce((all, w) => all.concat(w), []) : []
     readonly property var meals: days.filter(d => d.inMonth).reduce((all, d) => all.concat(d.meals), [])
-    readonly property var weekdays: [i18n("Mon"), i18n("Tue"), i18n("Wed"), i18n("Thu"), i18n("Fri"), i18n("Sat"), i18n("Sun")]
-    title: cal.title ? cal.title : i18n("Log")
+    // Names of the months and days are the system locale's (the weeks themselves start on Monday).
+    readonly property var weekdays: [1, 2, 3, 4, 5, 6, 7].map(d => Qt.locale().dayName(d, Locale.ShortFormat))
+    title: cal.month ? Qt.locale().standaloneMonthName(cal.month - 1, Locale.LongFormat) + " " + cal.year : i18n("Log")
 
     actions: [
         Kirigami.Action {
@@ -115,7 +116,7 @@ Kirigami.ScrollablePage {
                 contentItem: RowLayout {
                     QQC2.Label { Layout.fillWidth: true; text: row.modelData.title; elide: Text.ElideRight }
                     QQC2.Label {
-                        text: row.modelData.date + (row.modelData.timeLabel !== "" ? ", " + row.modelData.timeLabel : "") + " · " + (row.modelData.planned ? i18n("planned") : i18n("cooked"))
+                        text: applicationWindow().dates.show(row.modelData.date) + (row.modelData.timeLabel !== "" ? ", " + row.modelData.timeLabel : "") + " · " + (row.modelData.planned ? i18n("planned") : i18n("cooked"))
                         color: Kirigami.Theme.disabledTextColor
                     }
                     QQC2.ToolButton {

@@ -1,6 +1,7 @@
 //! The typed views of task and epic items, and the patch that edits them.
 
 use chrono::NaiveDate;
+use organiser_core::color::Color;
 use organiser_engine::{Item, ItemPatch};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,8 +48,8 @@ pub struct Task {
     pub archived: bool,
     /// Shown as a desktop sticky by the Sticky app.
     pub sticky: bool,
-    /// The task's own colour, `#rrggbb` (the one its sticky takes); it wins over its epic's on a
-    /// card.
+    /// The task's own colour, `#rrggbb` (see `organiser_core::color`); it wins over its epic's on a
+    /// card. Not its sticky's colour, which is `sticky_color`.
     pub color: Option<String>,
     /// Kept ahead of the others, in every view.
     pub pinned: bool,
@@ -93,7 +94,9 @@ impl From<&Item> for Task {
                 .get("sticky")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            color: Some(text(i, "sticky_color")).filter(|c| !c.is_empty()),
+            color: Some(text(i, "color"))
+                .and_then(|c| Color::parse(&c))
+                .map(Color::hex),
             created: i.created,
             updated: i.updated,
         }
@@ -224,7 +227,7 @@ pub struct Edit {
     /// Only meaningful with an epic: [`lifecycle::edit`](crate::lifecycle::edit) clears it when
     /// the epic changes.
     pub section: Option<Option<i64>>,
-    /// An epic's colour, `#rrggbb`; `Some(None)` clears it.
+    /// An epic's or a task's colour, `#rrggbb`; `Some(None)` clears it.
     pub color: Option<Option<String>>,
     /// An epic's icon name; `Some(None)` clears it.
     pub icon: Option<Option<String>>,

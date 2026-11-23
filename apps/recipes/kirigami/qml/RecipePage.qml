@@ -20,6 +20,11 @@ Kirigami.ScrollablePage {
     property int photoTarget: -1
 
     title: found ? rec.title : ""
+    readonly property var presets: JSON.parse(backend.colorPresets())
+    // The recipe's colour tints the page, as a note's does.
+    background: Rectangle {
+        color: page.rec.color ? Qt.alpha(page.rec.color, 0.18) : Kirigami.Theme.backgroundColor
+    }
 
     function stars(n) { return "★".repeat(n) + "☆".repeat(5 - n) }
     onFoundChanged: if (!found) applicationWindow().pageStack.pop(page)
@@ -117,6 +122,20 @@ Kirigami.ScrollablePage {
                             // The star already chosen clears the rating.
                             onClicked: page.backend.setRating(page.recipeId, page.rec.rating === index + 1 ? 0 : index + 1)
                         }
+                    }
+                }
+            }
+            FormCard.AbstractFormDelegate {
+                text: i18n("Color")
+                background: null
+                contentItem: RowLayout {
+                    spacing: Kirigami.Units.largeSpacing
+                    QQC2.Label { text: i18n("Color"); Layout.alignment: Qt.AlignTop }
+                    ColorPicker {
+                        Layout.fillWidth: true
+                        presets: page.presets
+                        color: page.rec.color ? page.rec.color : ""
+                        onPicked: hex => page.backend.setRecipeColor(page.recipeId, hex)
                     }
                 }
             }
@@ -297,7 +316,7 @@ Kirigami.ScrollablePage {
                 model: page.rec.history
                 delegate: FormCard.FormTextDelegate {
                     required property var modelData
-                    text: modelData.date + (modelData.timeLabel !== "" ? ", " + modelData.timeLabel : "")
+                    text: applicationWindow().dates.show(modelData.date) + (modelData.timeLabel !== "" ? ", " + modelData.timeLabel : "")
                     description: (modelData.planned ? i18n("Planned") : i18n("Cooked")) + " · " + i18n("serves %1", modelData.servings)
                 }
             }

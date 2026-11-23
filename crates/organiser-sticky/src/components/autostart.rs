@@ -61,12 +61,37 @@ pub fn is_enabled() -> bool {
 /// The options of `RequestBackground`, as `gdbus` writes a variant dictionary.
 pub fn portal_options(on: bool) -> String {
     if on {
-        "{'autostart': <true>, 'commandline': <['sticky-gui-launch', '--background']>, \
+        "{'autostart': <true>, 'commandline': <['sticky-kirigami-launch', '--background']>, \
          'reason': <'Show your stickies when you log in'>}"
             .into()
     } else {
         "{'autostart': <false>}".into()
     }
+}
+
+/// The options that tell the Background portal Sticky keeps running with no window showing (the
+/// tray icon and the stickies stay), leaving the login setting as it is.
+pub fn background_options(autostart: bool) -> String {
+    format!(
+        "{{'autostart': <{autostart}>, 'commandline': <['sticky-kirigami-launch', '--background']>, \
+         'reason': <'Keep your stickies on the desktop'>}}"
+    )
+}
+
+/// In a sandbox, say to the Background portal that Sticky runs in the background, so the desktop
+/// does not end it when its windows are minimised or closed. Outside one there is nothing to do.
+/// Best effort: a refusal only means the desktop may stop it, so it is not an error.
+pub fn request_background() {
+    if !in_flatpak() {
+        return;
+    }
+    let options = background_options(is_enabled());
+    std::thread::spawn(move || {
+        let _ = crate::components::discover::portal(
+            "org.freedesktop.portal.Background.RequestBackground",
+            &["", &options],
+        );
+    });
 }
 
 pub fn set_enabled(on: bool) -> Result<(), String> {
@@ -119,8 +144,15 @@ mod tests {
     fn the_portal_options_are_a_variant_dictionary() {
         let on = portal_options(true);
         assert!(on.starts_with("{'autostart': <true>"));
-        assert!(on.contains("'commandline': <['sticky-gui-launch', '--background']>"));
+        assert!(on.contains("'commandline': <['sticky-kirigami-launch', '--background']>"));
         assert_eq!(portal_options(false), "{'autostart': <false>}");
+    }
+
+    #[test]
+    fn the_background_request_keeps_the_login_setting() {
+        assert!(background_options(true).starts_with("{'autostart': <true>"));
+        assert!(background_options(false).starts_with("{'autostart': <false>"));
+        assert!(background_options(false).contains("'--background'"));
     }
 
     #[test]

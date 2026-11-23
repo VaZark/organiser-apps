@@ -403,7 +403,11 @@ impl Core {
     /// Where a folder sits, as `top/sub/folder`. A deep path keeps its first and last folder and
     /// hides what is between: `top/../folder`.
     fn path_label(&self, id: i64) -> String {
-        let titles: Vec<&str> = self.path(id).iter().map(|s| s.folder.title.as_str()).collect();
+        let titles: Vec<&str> = self
+            .path(id)
+            .iter()
+            .map(|s| s.folder.title.as_str())
+            .collect();
         match titles.as_slice() {
             [first, _, _, .., last] => format!("{first}/../{last}"),
             all => all.join("/"),
@@ -476,6 +480,7 @@ impl Core {
             "color": own.map(|c| c.hex()).unwrap_or_default(),
             "darkText": own.is_some_and(Color::prefers_dark_text),
             "pinned": n.pinned,
+            "sticky": n.sticky,
             "favorite": n.favorite,
             "rating": n.rating.unwrap_or(0),
             "rated": folder.is_some_and(|f| f.rated),
@@ -795,6 +800,12 @@ impl Core {
             ..Edit::default()
         };
         lifecycle::edit(&mut self.db, id, &edit).map(|_| ())
+    }
+
+    /// Make the note a desktop sticky of Sticky Notes, or not (see `organiser-sticky`).
+    pub fn set_sticky(&mut self, id: i64, on: bool) -> Result<()> {
+        organiser_sticky::flag::set_sticky(&mut self.db, id, on)?;
+        Ok(())
     }
 
     pub fn set_pinned(&mut self, id: i64, on: bool) -> Result<()> {
@@ -1493,5 +1504,26 @@ mod tests {
         assert_eq!(page(&c)["count"], 1);
         let mut none = core();
         assert!(none.import(&[src], false, None).is_err());
+    }
+
+    #[test]
+    fn notes_survive_a_restart_with_and_without_a_folder() {
+        let d = temp("persist");
+        let db = d.join("t.db");
+        let cfg = d.join("c.ron");
+        let vault = d.join("vault");
+        // First session: choose a folder, then make a note.
+        let mut c = Core::open(&db, Some(PathBuf::new()), Some(cfg.clone())).unwrap();
+        c.set_vault(Some(vault.clone())).unwrap();
+        c.flush().unwrap();
+        make(&mut c, "First");
+        c.flush().unwrap();
+        make(&mut c, "Second");
+        c.flush().unwrap();
+        drop(c);
+        // Second session: nothing passed, the settings and database are all there is.
+        let c = Core::open(&db, None, Some(cfg)).unwrap();
+        let p = c.page_json().unwrap();
+        assert!(p.contains("First") && p.contains("Second"), "{p}");
     }
 }

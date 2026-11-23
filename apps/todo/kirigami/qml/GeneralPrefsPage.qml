@@ -24,6 +24,12 @@ Kirigami.ScrollablePage {
             onToggled: { page.backend.showClosed = checked; page.backend.applyFilters(); page.backend.savePreferences() }
         }
         QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Sticky Notes:")
+            text: i18n("Show tasks made a Sticky Note on the desktop")
+            checked: page.backend.stickyLinked()
+            onToggled: page.backend.setStickyLinked(checked)
+        }
+        QQC2.CheckBox {
             text: i18n("List subtasks as entries of their own")
             checked: page.backend.showSubtasks
             onToggled: { page.backend.showSubtasks = checked; page.backend.applyFilters(); page.backend.savePreferences() }

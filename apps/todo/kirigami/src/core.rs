@@ -1,12 +1,12 @@
 //! Todo's state and every action, with no Qt in it: the bridge in `backend.rs` only forwards.
 //! Lists come out as JSON (an array of objects) that QML reads straight into a list model.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
 use organiser_core::settings::{Loaded, Settings, StartView};
-use organiser_engine::{ChildPolicy, Db, Filters, Node, Result, TagFilter, build_tree};
+use organiser_engine::{ChildPolicy, Db, Filters, Node, Query, Result, TagFilter, build_tree};
 use serde_json::{Value, json};
 use todo_schema::lifecycle::{self, NewTask};
 use todo_schema::priority::Priority;
@@ -67,6 +67,20 @@ pub struct Core {
     pub settings: Settings,
     /// What the person should be told after the last action (a vault warning, a settings problem).
     pub notice: Option<String>,
+}
+
+/// A date as typed (`YYYY-MM-DD`): empty clears it, anything else that is not a date is refused
+/// rather than silently clearing the stored date.
+pub fn parse_date(s: &str) -> Result<Option<NaiveDate>> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| {
+            organiser_engine::Error::Invalid("The date should look like 2026-11-30.".into())
+        })
 }
 
 impl Core {
@@ -471,9 +485,66 @@ impl Core {
         .to_string())
     }
 
+    /// One task as the details page shows it: the task, plus its parent's title when it is a
+    /// subtask (`parentTitle`).
     pub fn task_json(&self, id: i64) -> Result<String> {
         let t: Task = (&self.db.get(id)?).into();
-        Ok(self.task_value(&t, 0, &self.epic_titles()).to_string())
+        let mut v = self.task_value(&t, 0, &self.epic_titles());
+        if let (Value::Object(m), Some(p)) = (&mut v, t.parent_id) {
+            m.insert("parentTitle".into(), json!(self.db.get(p)?.title));
+        }
+        Ok(v.to_string())
+    }
+
+    /// Make `id` a subtask of `parent`, or a top-level task (`None`). The schema refuses a task
+    /// under itself or under its own subtasks.
+    pub fn set_parent(&mut self, id: i64, parent: Option<i64>) -> Result<()> {
+        lifecycle::reparent(&mut self.db, id, parent)?;
+        Ok(())
+    }
+
+    /// The tasks `id` may go under, as JSON `[{id, title, epicTitle}]` by title: every open task
+    /// except itself and its own subtasks.
+    pub fn parent_choices_json(&self, id: i64) -> Result<String> {
+        let mut out: HashSet<i64> = lifecycle::descendants(&self.db, id)?
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        out.insert(id);
+        let titles = self.epic_titles();
+        let mut list: Vec<Task> = self
+            .db
+            .list(&Query {
+                kind: Some(todo_schema::TASK.into()),
+                archived: Some(false),
+                ..Query::default()
+            })?
+            .iter()
+            .map(Task::from)
+            .filter(|t| !out.contains(&t.id) && !self.statuses.is_closed(t.status))
+            .collect();
+        list.sort_by_key(|t| t.title.to_lowercase());
+        let rows: Vec<Value> = list
+            .iter()
+            .map(|t| {
+                json!({
+                    "id": t.id,
+                    "title": t.title,
+                    "epicTitle": t.epic.and_then(|e| titles.get(&e).cloned()),
+                })
+            })
+            .collect();
+        Ok(Value::Array(rows).to_string())
+    }
+
+    /// The direct subtasks of a task, closed ones too, as the views draw a task.
+    pub fn subtasks_json(&self, id: i64) -> Result<String> {
+        let titles = self.epic_titles();
+        let list: Vec<Value> = views::subtasks(&self.db, id)?
+            .iter()
+            .map(|t| self.task_value(t, 0, &titles))
+            .collect();
+        Ok(Value::Array(list).to_string())
     }
 
     pub fn epics_json(&self) -> Result<String> {
@@ -534,6 +605,25 @@ impl Core {
         Ok(())
     }
 
+    /// `#rrggbb` (or `#rgb`), or empty for none. The task's own colour, not its sticky's.
+    pub fn set_task_color(&mut self, id: i64, color: &str) -> Result<()> {
+        let c =
+            organiser_core::color::parse_input(color).map_err(organiser_engine::Error::Invalid)?;
+        self.edit(
+            id,
+            Edit {
+                color: Some(c.map(|c| c.hex())),
+                ..Edit::default()
+            },
+        )
+    }
+
+    /// Make the task a desktop sticky of Sticky Notes, or not (see `organiser-sticky`).
+    pub fn set_sticky(&mut self, id: i64, on: bool) -> Result<()> {
+        organiser_sticky::flag::set_sticky(&mut self.db, id, on)?;
+        Ok(())
+    }
+
     pub fn set_pinned(&mut self, id: i64, pinned: bool) -> Result<()> {
         lifecycle::set_pinned(&mut self.db, id, pinned)?;
         Ok(())
@@ -571,7 +661,7 @@ impl Core {
 
     /// `due` is `YYYY-MM-DD`, or empty to clear it.
     pub fn edit_due(&mut self, id: i64, due: &str) -> Result<()> {
-        let d = NaiveDate::parse_from_str(due.trim(), "%Y-%m-%d").ok();
+        let d = parse_date(due)?;
         self.edit(
             id,
             Edit {
@@ -684,7 +774,7 @@ impl Core {
 
     /// `YYYY-MM-DD`, or anything else to clear it.
     pub fn set_epic_due(&mut self, id: i64, due: &str) -> Result<()> {
-        let d = NaiveDate::parse_from_str(due.trim(), "%Y-%m-%d").ok();
+        let d = parse_date(due)?;
         self.edit_epic_with(
             id,
             Edit {
@@ -984,6 +1074,77 @@ mod tests {
         }
         c.set_start_view("nonsense");
         assert_eq!(c.start_view(), "notes");
+    }
+
+    #[test]
+    fn a_task_can_be_moved_under_another_and_back_but_not_under_its_own_subtask() {
+        let mut c = core();
+        let a = c.create_task("a", None, None).unwrap();
+        let b = c.create_task("b", None, None).unwrap();
+        let child = c.create_task("child", None, Some(a)).unwrap();
+        let choices = |c: &Core, id| -> Vec<i64> {
+            let v: Vec<Value> = serde_json::from_str(&c.parent_choices_json(id).unwrap()).unwrap();
+            v.iter().map(|t| t["id"].as_i64().unwrap()).collect()
+        };
+        // Not itself, not its own subtask.
+        assert_eq!(choices(&c, a), vec![b]);
+        assert!(choices(&c, child).contains(&b) && !choices(&c, child).contains(&child));
+        c.set_parent(b, Some(a)).unwrap();
+        let subs: Vec<Value> = serde_json::from_str(&c.subtasks_json(a).unwrap()).unwrap();
+        assert_eq!(subs.len(), 2);
+        assert!(c.set_parent(a, Some(child)).is_err());
+        c.set_parent(b, None).unwrap();
+        let t: Value = serde_json::from_str(&c.task_json(b).unwrap()).unwrap();
+        assert!(t["parent_id"].is_null());
+    }
+
+    #[test]
+    fn a_task_lists_its_subtasks_and_a_subtask_names_its_parent() {
+        let mut c = core();
+        let p = c.create_task("trip", None, None).unwrap();
+        let a = c.create_task("book flights", None, Some(p)).unwrap();
+        c.create_task("pack", None, Some(p)).unwrap();
+        let subs: Vec<Value> = serde_json::from_str(&c.subtasks_json(p).unwrap()).unwrap();
+        let titles: Vec<&str> = subs.iter().map(|t| t["title"].as_str().unwrap()).collect();
+        assert_eq!(titles.len(), 2);
+        assert!(titles.contains(&"book flights") && titles.contains(&"pack"));
+        let t: Value = serde_json::from_str(&c.task_json(a).unwrap()).unwrap();
+        assert_eq!(t["parentTitle"], "trip");
+        let top: Value = serde_json::from_str(&c.task_json(p).unwrap()).unwrap();
+        assert!(top.get("parentTitle").is_none());
+        assert_eq!(c.subtasks_json(a).unwrap(), "[]");
+    }
+
+    #[test]
+    fn a_task_has_its_own_colour_and_a_sticky_flag_apart_from_it() {
+        let mut c = core();
+        let id = c.create_task("paint", None, None).unwrap();
+        let t = |c: &Core| -> Value { serde_json::from_str(&c.task_json(id).unwrap()).unwrap() };
+        assert!(t(&c)["color"].is_null() && t(&c)["sticky"] == false);
+        c.set_task_color(id, "#6AA5E8").unwrap();
+        assert_eq!(t(&c)["color"], "#6aa5e8");
+        assert!(c.set_task_color(id, "blue").is_err());
+        assert_eq!(t(&c)["color"], "#6aa5e8");
+        c.set_sticky(id, true).unwrap();
+        assert_eq!(t(&c)["sticky"], true);
+        c.set_sticky(id, false).unwrap();
+        assert!(t(&c)["sticky"] == false && t(&c)["color"] == "#6aa5e8");
+        c.set_task_color(id, "").unwrap();
+        assert!(t(&c)["color"].is_null());
+    }
+
+    #[test]
+    fn a_bad_date_is_refused_and_keeps_the_old_one() {
+        let mut c = core();
+        let id = c.create_task("pay", None, None).unwrap();
+        c.edit_due(id, "2030-05-01").unwrap();
+        assert!(c.edit_due(id, "tomorrow").is_err());
+        assert!(c.edit_due(id, "2030-02-31").is_err());
+        let t: Value = serde_json::from_str(&c.task_json(id).unwrap()).unwrap();
+        assert_eq!(t["due"], "2030-05-01");
+        c.edit_due(id, "").unwrap();
+        let t: Value = serde_json::from_str(&c.task_json(id).unwrap()).unwrap();
+        assert!(t["due"].is_null() || t["due"] == "");
     }
 
     #[test]

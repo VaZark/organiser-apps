@@ -54,6 +54,8 @@ pub static SCHEMA: Schema = Schema {
                 Field::new("servings", FieldType::Number),
                 Field::new("favorite", FieldType::Bool).indexed(),
                 Field::new("rating", FieldType::Rating).indexed(),
+                // Any `#rrggbb`, same rules as a note's colour (see `organiser_core::color`).
+                Field::new("color", FieldType::Text),
             ],
         },
         // A step of a recipe, in order (the engine keeps the position).

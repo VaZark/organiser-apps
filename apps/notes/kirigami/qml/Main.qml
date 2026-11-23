@@ -240,4 +240,7 @@ Kirigami.ApplicationWindow {
         interval: 900
         onTriggered: root.header.parent.grabToImage(r => { r.saveToFile(notes.arg("screenshot")); Qt.quit() })
     }
+
+    // `--new 1` (Sticky's "New in Notes"): a blank note, ready to write.
+    Component.onCompleted: if (notes.arg("new") !== "") Qt.callLater(newNote)
 }

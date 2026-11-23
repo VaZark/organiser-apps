@@ -63,13 +63,19 @@ Kirigami.Page {
                                     onActiveChanged: if (!active) { card.Drag.drop(); card.x = 0; card.y = 0 }
                                 }
                                 onClicked: page.openTask(modelData.id)
+                                background: Rectangle {
+                                    radius: Kirigami.Units.cornerRadius
+                                    color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.32) : Kirigami.Theme.backgroundColor
+                                    border.width: 1
+                                    border.color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
+                                }
                                 contentItem: ColumnLayout {
                                     QQC2.Label { text: card.modelData.title; wrapMode: Text.Wrap; Layout.fillWidth: true; font.bold: card.modelData.pinned }
                                     QQC2.Label {
                                         visible: text !== ""
                                         font: Kirigami.Theme.smallFont
                                         color: Kirigami.Theme.disabledTextColor
-                                        text: [card.modelData.epicTitle, card.modelData.due].filter(s => s).join(" · ")
+                                        text: [card.modelData.epicTitle, applicationWindow().dates.show(card.modelData.due)].filter(s => s).join(" · ")
                                     }
                                     Flow {
                                         Layout.fillWidth: true

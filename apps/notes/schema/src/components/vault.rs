@@ -53,6 +53,10 @@ const FOLDER_META: &str = ".folder.toml";
 #[derive(Debug, Clone)]
 pub struct Vault {
     dir: PathBuf,
+    /// The directory did not exist when opened. Notes that remember a file are then not missing
+    /// their files, the folder is: in a sandbox without access to it, it is made afresh (and
+    /// empty) on every start. Nothing is trashed for it; the next flush writes the files again.
+    fresh: bool,
 }
 
 /// The names of the directories, from the folders in the database.
@@ -160,6 +164,7 @@ impl Vault {
     /// vault must not contain it.
     pub fn open(dir: impl Into<PathBuf>, db_path: Option<&Path>) -> Result<Self> {
         let dir = dir.into();
+        let fresh = !dir.exists();
         fs::create_dir_all(&dir).map_err(|e| io(e, &dir))?;
         let dir = fs::canonicalize(&dir).map_err(|e| io(e, &dir))?;
         if let Some(db) = db_path.and_then(|p| fs::canonicalize(p).ok())
@@ -170,7 +175,7 @@ impl Vault {
                 dir.display()
             )));
         }
-        Ok(Self { dir })
+        Ok(Self { dir, fresh })
     }
 
     pub fn dir(&self) -> &Path {
@@ -268,7 +273,7 @@ impl Vault {
         // A note whose file is gone: to the trash. One already there stays: only the person deleting
         // it in the app clears the trash, and the next flush writes its file again.
         for i in &items {
-            if matcher.seen(i.id) || field(i, "file").is_none() {
+            if self.fresh || matcher.seen(i.id) || field(i, "file").is_none() {
                 continue;
             }
             if !Note::from(i).is_trashed() {
@@ -1022,6 +1027,28 @@ mod tests {
             .collect();
         t.sort();
         t
+    }
+
+    #[test]
+    fn a_folder_made_afresh_does_not_trash_the_notes_that_had_files_in_it() {
+        let (mut db, v, dir) = setup();
+        lifecycle::create(
+            &mut db,
+            &NewNote {
+                title: "Keep".into(),
+                ..NewNote::default()
+            },
+        )
+        .unwrap();
+        sync_flush(&mut db, &v);
+        assert!(dir.join("Keep.md").exists());
+        // A sandbox that cannot see the folder makes a new, empty one in its place.
+        fs::remove_dir_all(&dir).unwrap();
+        let v = Vault::open(&dir, None).unwrap();
+        let r = sync_flush(&mut db, &v);
+        assert_eq!(r.trashed, 0);
+        assert_eq!(titles(&db), ["Keep"]);
+        assert!(dir.join("Keep.md").exists(), "written again");
     }
 
     #[test]

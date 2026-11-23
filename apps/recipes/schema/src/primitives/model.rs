@@ -1,6 +1,7 @@
 //! Recipes, steps, ingredients, the fridge and meals as typed values, and the patches that edit them.
 
 use chrono::NaiveDate;
+use organiser_core::color::Color;
 use organiser_engine::{Item, ItemPatch};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,6 +47,8 @@ pub struct Recipe {
     pub favorite: bool,
     /// 1 to 5 stars.
     pub rating: Option<u8>,
+    /// `#rrggbb`; none is the default card.
+    pub color: Option<String>,
     pub tags: Vec<String>,
     pub position: i64,
     pub created: i64,
@@ -66,6 +69,9 @@ impl From<&Item> for Recipe {
                 .get("rating")
                 .and_then(Value::as_u64)
                 .map(|r| r as u8),
+            color: Some(text(i, "color"))
+                .and_then(|c| Color::parse(&c))
+                .map(Color::hex),
             tags: i.tags.clone(),
             position: i.position,
             created: i.created,
@@ -84,6 +90,8 @@ pub struct RecipeEdit {
     pub servings: Option<Option<f64>>,
     pub favorite: Option<bool>,
     pub rating: Option<Option<u8>>,
+    /// `#rrggbb`; `Some(None)` clears it.
+    pub color: Option<Option<String>>,
 }
 
 impl RecipeEdit {
@@ -122,6 +130,10 @@ impl RecipeEdit {
         if let Some(r) = self.rating {
             p.fields
                 .insert("rating".into(), r.map_or(Value::Null, Value::from));
+        }
+        if let Some(c) = &self.color {
+            p.fields
+                .insert("color".into(), c.clone().map_or(Value::Null, Value::from));
         }
         p
     }
