@@ -1,0 +1,47 @@
+# Local Flatpak build of the Todo Kirigami (KDE) app (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Todo
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: todo-kirigami-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  - --share=ipc
+  # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
+  # host's, since the sandbox's own would hide it.
+  - --filesystem=xdg-data/todo:create
+  # The Plasma colour scheme and style, read-only, so the app follows the desktop.
+  - --filesystem=xdg-config/kdeglobals:ro
+  # This app's own config directory: its settings (`config.ron`, written by Preferences).
+  - --filesystem=xdg-config/io.github.vazark.Todo
+  # The list of apps linked to Sticky Notes, shared by every app. Finding and starting Sticky
+  # Notes needs nothing more: it goes through the desktop portals (OpenURI).
+  - --filesystem=xdg-config/organiser
+modules:
+  - name: todo
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/todo/cargo
+        # The SDK has Qt 6 as plain `qmake`.
+        QMAKE: /usr/bin/qmake
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p todo-kirigami --features organiser-engine/bundled
+      - install -Dm755 target/release/todo-kirigami /app/bin/todo-kirigami
+      - install -Dm755 platforms/linux/flatpak/todo-kirigami-launch /app/bin/todo-kirigami-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Todo.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Todo.svg
+      - mkdir -p /app/share/applications && target/release/todo-kirigami --print-desktop-entry | sed 's/^Exec=.*/Exec=todo-kirigami-launch %u/' > /app/share/applications/io.github.vazark.Todo.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Todo.metainfo.xml /app/share/metainfo/io.github.vazark.Todo.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, .flatpak-cache, build-dir]

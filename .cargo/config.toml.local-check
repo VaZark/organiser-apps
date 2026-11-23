@@ -1,0 +1,5 @@
+# Develop against sibling checkouts instead of the pinned revisions:
+#   cp .cargo/config.toml.local-check .cargo/config.toml
+# (.cargo/config.toml is ignored by git.)
+[patch."https://github.com/VaZark/weaver"]
+weaver = { path = "../weaver" }

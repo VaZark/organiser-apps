@@ -1,0 +1,28 @@
+target/
+
+# The local patch that points the git dependencies at sibling checkouts. Copy
+# .cargo/config.toml.local-check to .cargo/config.toml to use it; park it as config.toml.off to
+# build against the pinned revisions again. Only the .local-check template is tracked.
+.cargo/config.toml
+.cargo/config.toml.off
+
+# Agents
+/docs/agent
+/AGENTS_TODO_AND_STATUS.md
+/AGENTS_TODO_FORMAT.md
+.agents/
+.claude/
+
+
+# Local seed data and scripts.
+TODO/
+seed/
+local-scripts/
+
+# Flatpak build output, and the cargo downloads and compiled dependencies the Flatpak builds share.
+.flatpak-builder/
+.flatpak-cache/
+build-dir/
+
+# Shared QML copied into each Kirigami app by its build.rs.
+/apps/*/kirigami/qml/shared/

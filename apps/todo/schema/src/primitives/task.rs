@@ -1,0 +1,307 @@
+//! The typed views of task and epic items, and the patch that edits them.
+
+use chrono::NaiveDate;
+use organiser_engine::{Item, ItemPatch};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::priority::Priority;
+
+fn date(item: &Item, key: &str) -> Option<NaiveDate> {
+    item.fields.get(key)?.as_str()?.parse().ok()
+}
+
+fn text(item: &Item, key: &str) -> String {
+    item.fields
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The id of the status an item points at, if it has one.
+fn status(item: &Item) -> Option<i64> {
+    item.fields.get("status").and_then(Value::as_i64)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Task {
+    pub id: i64,
+    /// The id its Markdown file carries (a UUID version 7), once it has one.
+    pub uid: Option<String>,
+    pub parent_id: Option<i64>,
+    /// The epic this task belongs to.
+    pub epic: Option<i64>,
+    /// The section of that epic this task is in.
+    pub section: Option<i64>,
+    pub title: String,
+    pub notes: String,
+    /// The status this is in (see [`Statuses`](super::status::Statuses)); `None` counts as the
+    /// first open one.
+    pub status: Option<i64>,
+    pub priority: Priority,
+    pub start: Option<NaiveDate>,
+    pub due: Option<NaiveDate>,
+    pub tags: Vec<String>,
+    pub position: i64,
+    pub archived: bool,
+    /// Shown as a desktop sticky by the Sticky app.
+    pub sticky: bool,
+    /// The task's own colour, `#rrggbb` (the one its sticky takes); it wins over its epic's on a
+    /// card.
+    pub color: Option<String>,
+    /// Kept ahead of the others, in every view.
+    pub pinned: bool,
+    pub created: i64,
+    pub updated: i64,
+}
+
+impl From<&Item> for Task {
+    fn from(i: &Item) -> Self {
+        Self {
+            id: i.id,
+            uid: i
+                .fields
+                .get("uid")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(String::from),
+            parent_id: i.parent_id,
+            epic: i.fields.get("epic").and_then(Value::as_i64),
+            section: i.fields.get("section").and_then(Value::as_i64),
+            title: i.title.clone(),
+            notes: text(i, "notes"),
+            status: status(i),
+            priority: i
+                .fields
+                .get("priority")
+                .and_then(Value::as_str)
+                .and_then(Priority::parse)
+                .unwrap_or_default(),
+            start: date(i, "start"),
+            due: date(i, "due"),
+            tags: i.tags.clone(),
+            position: i.position,
+            archived: i.archived,
+            pinned: i
+                .fields
+                .get("pinned")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            sticky: i
+                .fields
+                .get("sticky")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            color: Some(text(i, "sticky_color")).filter(|c| !c.is_empty()),
+            created: i.created,
+            updated: i.updated,
+        }
+    }
+}
+
+/// A group of tasks working towards one goal, with its own dates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Epic {
+    pub id: i64,
+    pub title: String,
+    pub notes: String,
+    pub start: Option<NaiveDate>,
+    pub due: Option<NaiveDate>,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+    /// The name of its icon; none is the folder.
+    pub icon: Option<String>,
+    pub tags: Vec<String>,
+    pub created: i64,
+    pub updated: i64,
+}
+
+impl From<&Item> for Epic {
+    fn from(i: &Item) -> Self {
+        Self {
+            id: i.id,
+            title: i.title.clone(),
+            notes: text(i, "notes"),
+            start: date(i, "start"),
+            due: date(i, "due"),
+            color: i
+                .fields
+                .get("color")
+                .and_then(Value::as_str)
+                .map(String::from),
+            icon: i
+                .fields
+                .get("icon")
+                .and_then(Value::as_str)
+                .map(String::from),
+            tags: i.tags.clone(),
+            created: i.created,
+            updated: i.updated,
+        }
+    }
+}
+
+/// A named group of tasks inside an epic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Section {
+    pub id: i64,
+    pub epic: i64,
+    pub title: String,
+    /// What the section is for, Markdown.
+    pub notes: String,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+    pub position: i64,
+}
+
+/// A section with how far along its tasks are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionSummary {
+    pub section: Section,
+    /// Tasks not yet done or dismissed.
+    pub open: usize,
+    pub total: usize,
+}
+
+impl SectionSummary {
+    /// 0.0..=1.0; a section with no tasks has made no progress.
+    pub fn progress(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            (self.total - self.open) as f32 / self.total as f32
+        }
+    }
+}
+
+impl From<&Item> for Section {
+    fn from(i: &Item) -> Self {
+        Self {
+            id: i.id,
+            epic: i.parent_id.unwrap_or_default(),
+            title: i.title.clone(),
+            notes: text(i, "notes"),
+            color: i
+                .fields
+                .get("color")
+                .and_then(Value::as_str)
+                .map(String::from),
+            position: i.position,
+        }
+    }
+}
+
+/// An epic with how far along its tasks are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EpicSummary {
+    pub epic: Epic,
+    /// Tasks not yet done or dismissed.
+    pub open: usize,
+    pub total: usize,
+}
+
+impl EpicSummary {
+    /// 0.0..=1.0; an epic with no tasks has made no progress.
+    pub fn progress(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            (self.total - self.open) as f32 / self.total as f32
+        }
+    }
+}
+
+/// What to change. `None` leaves a field alone; `Some(None)` clears a date or the epic.
+#[derive(Debug, Clone, Default)]
+pub struct Edit {
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub start: Option<Option<NaiveDate>>,
+    pub due: Option<Option<NaiveDate>>,
+    pub priority: Option<Priority>,
+    pub epic: Option<Option<i64>>,
+    /// Only meaningful with an epic: [`lifecycle::edit`](crate::lifecycle::edit) clears it when
+    /// the epic changes.
+    pub section: Option<Option<i64>>,
+    /// An epic's colour, `#rrggbb`; `Some(None)` clears it.
+    pub color: Option<Option<String>>,
+    /// An epic's icon name; `Some(None)` clears it.
+    pub icon: Option<Option<String>>,
+    pub archived: Option<bool>,
+}
+
+impl Edit {
+    pub fn to_patch(&self) -> ItemPatch {
+        let mut p = ItemPatch {
+            title: self.title.clone(),
+            archived: self.archived,
+            ..ItemPatch::default()
+        };
+        if let Some(n) = &self.notes {
+            p.fields.insert(
+                "notes".into(),
+                if n.is_empty() {
+                    Value::Null
+                } else {
+                    n.clone().into()
+                },
+            );
+        }
+        for (key, v) in [("start", self.start), ("due", self.due)] {
+            if let Some(v) = v {
+                p.fields
+                    .insert(key.into(), v.map_or(Value::Null, |d| d.to_string().into()));
+            }
+        }
+        if let Some(pr) = self.priority {
+            p.fields.insert("priority".into(), pr.as_str().into());
+        }
+        if let Some(e) = self.epic {
+            p.fields
+                .insert("epic".into(), e.map_or(Value::Null, Value::from));
+        }
+        if let Some(c) = &self.color {
+            p.fields
+                .insert("color".into(), c.clone().map_or(Value::Null, Value::from));
+        }
+        if let Some(i) = &self.icon {
+            p.fields
+                .insert("icon".into(), i.clone().map_or(Value::Null, Value::from));
+        }
+        if let Some(sec) = self.section {
+            p.fields
+                .insert("section".into(), sec.map_or(Value::Null, Value::from));
+        }
+        p
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_the_closed_share() {
+        let epic = Epic {
+            id: 1,
+            title: "e".into(),
+            notes: String::new(),
+            start: None,
+            due: None,
+            color: None,
+            icon: None,
+            tags: vec![],
+            created: 0,
+            updated: 0,
+        };
+        let s = |open, total| EpicSummary {
+            epic: epic.clone(),
+            open,
+            total,
+        };
+        assert_eq!(s(0, 0).progress(), 0.0);
+        assert_eq!(s(1, 4).progress(), 0.75);
+        assert_eq!(s(0, 3).progress(), 1.0);
+    }
+}

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4d5a66"/>
+      <stop offset="1" stop-color="#31363b"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e8ecef"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="32" cy="59" rx="20" ry="2.6" fill="#000" opacity=".18"/>
+  <rect x="9" y="6" width="46" height="52" rx="5" fill="url(#board)"/>
+  <rect x="13" y="12" width="38" height="42" rx="2.5" fill="url(#paper)"/>
+  <rect x="22" y="3" width="20" height="9" rx="3" fill="#bdc3c7"/>
+  <rect x="25" y="5" width="14" height="4" rx="2" fill="#31363b"/>
+  <g fill="none" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17.5 21l3 3 5.5-6.5"/>
+    <path d="M17.5 33l3 3 5.5-6.5"/>
+  </g>
+  <rect x="17.5" y="43" width="8" height="8" rx="1.8" fill="none" stroke="#3daee9" stroke-width="2.4"/>
+  <g stroke="#7f8c8d" stroke-width="2.6" stroke-linecap="round">
+    <path d="M31 21h14M31 33h14M31 47h10"/>
+  </g>
+</svg>

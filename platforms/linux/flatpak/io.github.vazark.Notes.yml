@@ -1,0 +1,47 @@
+# Local Flatpak build of the Notes Kirigami (KDE) app (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Notes
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: notes-kirigami-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  - --share=ipc
+  # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
+  # host's, since the sandbox's own would hide it.
+  - --filesystem=xdg-data/notes:create
+  # The Plasma colour scheme and style, read-only, so the app follows the desktop.
+  - --filesystem=xdg-config/kdeglobals:ro
+  # This app's own config directory: its settings (`config.ron`, written by Preferences).
+  - --filesystem=xdg-config/io.github.vazark.Notes
+  # The list of apps linked to Sticky Notes, shared by every app. Finding and starting Sticky
+  # Notes needs nothing more: it goes through the desktop portals (OpenURI).
+  - --filesystem=xdg-config/organiser
+modules:
+  - name: notes
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/notes/cargo
+        # The SDK has Qt 6 as plain `qmake`.
+        QMAKE: /usr/bin/qmake
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p notes-kirigami --features organiser-engine/bundled
+      - install -Dm755 target/release/notes-kirigami /app/bin/notes-kirigami
+      - install -Dm755 platforms/linux/flatpak/notes-kirigami-launch /app/bin/notes-kirigami-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Notes.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Notes.svg
+      - mkdir -p /app/share/applications && target/release/notes-kirigami --print-desktop-entry | sed 's/^Exec=.*/Exec=notes-kirigami-launch %u/' > /app/share/applications/io.github.vazark.Notes.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Notes.metainfo.xml /app/share/metainfo/io.github.vazark.Notes.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, .flatpak-cache, build-dir]

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e8ecef"/>
+    </linearGradient>
+    <linearGradient id="pot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e5503a"/>
+      <stop offset="1" stop-color="#c0392b"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="32" cy="59" rx="23" ry="2.6" fill="#000" opacity=".18"/>
+  <rect x="7" y="5" width="50" height="52" rx="5" fill="url(#card)" stroke="#bdc3c7" stroke-width="1"/>
+  <rect x="7" y="5" width="50" height="10" rx="5" fill="#27ae60"/>
+  <rect x="7" y="10" width="50" height="5" fill="#27ae60"/>
+  <g stroke="#bdc3c7" stroke-width="2" stroke-linecap="round">
+    <path d="M13 21h16M13 27h12"/>
+  </g>
+  <g fill="none" stroke="#7f8c8d" stroke-width="2" stroke-linecap="round" opacity=".7">
+    <path d="M40 18c-2 2 2 3 0 6M46 18c-2 2 2 3 0 6"/>
+  </g>
+  <path d="M15 34h34v10a12 12 0 0 1-12 12H27a12 12 0 0 1-12-12z" fill="url(#pot)"/>
+  <rect x="12" y="31" width="40" height="5" rx="2.5" fill="#e74c3c"/>
+  <rect x="5" y="37" width="7" height="3.6" rx="1.8" fill="#7f8c8d"/>
+  <rect x="52" y="37" width="7" height="3.6" rx="1.8" fill="#7f8c8d"/>
+  <path d="M21 41v4" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".35"/>
+</svg>

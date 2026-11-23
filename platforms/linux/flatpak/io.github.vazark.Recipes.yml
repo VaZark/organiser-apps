@@ -1,0 +1,44 @@
+# Local Flatpak build of the Recipes Kirigami (KDE) app (see platforms/README.md). Wayland only.
+app-id: io.github.vazark.Recipes
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: recipes-kirigami-launch
+finish-args:
+  - --socket=wayland
+  - --device=dri
+  - --share=ipc
+  # The database the command line and the GUI share. The launcher points XDG_DATA_HOME at the
+  # host's, since the sandbox's own would hide it.
+  - --filesystem=xdg-data/recipes:create
+  # The Plasma colour scheme and style, read-only, so the app follows the desktop.
+  - --filesystem=xdg-config/kdeglobals:ro
+  # This app's own config directory: its settings (`config.ron`, written by Preferences).
+  - --filesystem=xdg-config/io.github.vazark.Recipes
+modules:
+  - name: recipes
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/recipes/cargo
+        # The SDK has Qt 6 as plain `qmake`.
+        QMAKE: /usr/bin/qmake
+    build-commands:
+      # SQLite is built in: the apps need its full-text search and JSON support.
+      - cargo build --release --locked -p recipes-kirigami --features organiser-engine/bundled
+      - install -Dm755 target/release/recipes-kirigami /app/bin/recipes-kirigami
+      - install -Dm755 platforms/linux/flatpak/recipes-kirigami-launch /app/bin/recipes-kirigami-launch
+      - install -Dm644 platforms/linux/icon/io.github.vazark.Recipes.svg /app/share/icons/hicolor/scalable/apps/io.github.vazark.Recipes.svg
+      - mkdir -p /app/share/applications && target/release/recipes-kirigami --print-desktop-entry | sed 's/^Exec=.*/Exec=recipes-kirigami-launch/' > /app/share/applications/io.github.vazark.Recipes.desktop
+      - install -Dm644 platforms/linux/flatpak/io.github.vazark.Recipes.metainfo.xml /app/share/metainfo/io.github.vazark.Recipes.metainfo.xml
+    sources:
+      - type: dir
+        path: ../../..
+        # .cargo holds a local-only patch to sibling checkouts the sandbox does not have; seed/
+        # is local demo data.
+        skip: [target, .git, .cargo, seed, .flatpak-builder, .flatpak-cache, build-dir]

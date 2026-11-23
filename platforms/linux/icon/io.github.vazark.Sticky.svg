@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="note" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff176"/>
+      <stop offset="1" stop-color="#fdd835"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0c419"/>
+      <stop offset="1" stop-color="#d9a606"/>
+    </linearGradient>
+    <radialGradient id="pin" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#ff7b86"/>
+      <stop offset="1" stop-color="#da4453"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="32" cy="59" rx="21" ry="2.6" fill="#000" opacity=".18"/>
+  <path d="M10 9h44v33L40 56H10z" fill="url(#note)"/>
+  <path d="M54 42L40 56V47a5 5 0 0 1 5-5z" fill="url(#fold)"/>
+  <g stroke="#b8860b" stroke-width="2.4" stroke-linecap="round" opacity=".7">
+    <path d="M17 26h30M17 34h30M17 42h14"/>
+  </g>
+  <ellipse cx="32.5" cy="12.5" rx="5.5" ry="2" fill="#000" opacity=".2"/>
+  <circle cx="32" cy="11" r="5.5" fill="url(#pin)"/>
+  <circle cx="30.3" cy="9.3" r="1.6" fill="#fff" opacity=".6"/>
+</svg>

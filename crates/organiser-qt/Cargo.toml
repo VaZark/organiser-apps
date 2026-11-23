@@ -1,0 +1,13 @@
+[package]
+name = "organiser-qt"
+description = "Shared Qt/Kirigami support for the Organiser apps: bootstrap, JSON helpers and common QML."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+organiser-core.workspace = true
+
+[build-dependencies]
+cc = "1"

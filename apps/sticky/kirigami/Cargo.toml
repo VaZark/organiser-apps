@@ -1,0 +1,28 @@
+[package]
+name = "sticky-kirigami"
+description = "Kirigami (Qt/KDE) frontend for Sticky Notes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "sticky-kirigami"
+path = "src/main.rs"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+organiser-core.workspace = true
+organiser-qt.workspace = true
+organiser-sticky.workspace = true
+serde_json.workspace = true
+sticky-engine.workspace = true
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+[dev-dependencies]
+notes-schema.workspace = true
+organiser-engine.workspace = true

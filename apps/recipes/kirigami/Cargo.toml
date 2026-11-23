@@ -1,0 +1,25 @@
+[package]
+name = "recipes-kirigami"
+description = "Kirigami (Qt/KDE) frontend for the Recipes app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "recipes-kirigami"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+organiser-core.workspace = true
+organiser-engine.workspace = true
+organiser-qt.workspace = true
+recipes-schema.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+cxx-qt-build = "0.10"
