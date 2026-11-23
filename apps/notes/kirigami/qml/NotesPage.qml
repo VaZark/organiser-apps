@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import org.organiser.notes
 
 /// The notes of the current scope: pinned, grouped by folder or listed, as cards or rows.
 Kirigami.ScrollablePage {
@@ -30,112 +31,137 @@ Kirigami.ScrollablePage {
         }
     }
 
-    function sortAction(name, label) {
-        return { name: name, label: label }
+    // ---- the page's actions ------------------------------------------------------------------
+    /// Narrow: this page's own actions are in the bottom bar and the top keeps only the app's menu.
+    readonly property bool narrow: Kirigami.Settings.isMobile || applicationWindow().width < Kirigami.Units.gridUnit * 30
+    readonly property bool pageBar: true
+
+    Kirigami.Action {
+        id: newNoteAction
+        text: i18n("New Note")
+        icon.name: "document-new"
+        shortcut: StandardKey.New
+        visible: !page.inTrash
+        onTriggered: page.newNote()
     }
 
-    actions: [
-        Kirigami.Action {
-            text: i18n("New Note")
-            icon.name: "document-new"
-            shortcut: StandardKey.New
-            visible: !page.inTrash
-            onTriggered: page.newNote()
-        },
-        Kirigami.Action {
-            id: searchAction
-            text: i18n("Search")
-            icon.name: "edit-find"
-            shortcut: StandardKey.Find
-            checkable: true
-            onTriggered: {
-                if (checked) searchField.forceActiveFocus()
-                else page.backend.setSearch("")
-            }
-        },
-        Kirigami.Action {
-            text: page.filterState.count > 0 ? i18n("Filter (%1)", page.filterState.count) : i18n("Filter")
-            icon.name: "view-filter"
-            onTriggered: filterSheet.open()
-        },
-        Kirigami.Action {
-            text: i18n("Empty Trash")
-            icon.name: "trash-empty"
-            visible: page.inTrash && page.pg.count > 0
-            onTriggered: emptyTrashDialog.open()
-        },
-        Kirigami.Action {
-            text: i18n("Configure Folder…")
-            icon.name: "configure"
-            visible: page.inFolder
-            onTriggered: page.openFolderSettings(page.pg.folderId)
-        },
-        Kirigami.Action {
-            text: i18n("New Folder Here")
-            icon.name: "folder-new"
-            visible: page.inFolder && !(page.pg.header && page.pg.header.isDefault)
-            onTriggered: page.newFolder(page.pg.folderId)
-        },
-        Kirigami.Action {
-            text: i18n("Sort By")
-            icon.name: "view-sort"
-            Kirigami.Action {
-                text: i18n("Recently Changed")
-                checkable: true
-                checked: page.backend.sort === "recent"
-                onTriggered: page.backend.sortBy("recent")
-            }
-            Kirigami.Action {
-                text: i18n("Newest")
-                checkable: true
-                checked: page.backend.sort === "created"
-                onTriggered: page.backend.sortBy("created")
-            }
-            Kirigami.Action {
-                text: i18n("Title")
-                checkable: true
-                checked: page.backend.sort === "title"
-                onTriggered: page.backend.sortBy("title")
-            }
-            Kirigami.Action {
-                text: i18n("Best Rated")
-                checkable: true
-                checked: page.backend.sort === "rating"
-                onTriggered: page.backend.sortBy("rating")
-            }
-        },
-        Kirigami.Action {
-            text: i18n("View")
-            icon.name: "view-list-icons"
-            Kirigami.Action {
-                text: i18n("Show as List")
-                checkable: true
-                checked: page.listView
-                onTriggered: page.backend.setPref("listView", checked)
-            }
-            Kirigami.Action {
-                text: i18n("Group by Folder")
-                checkable: true
-                checked: page.prefs.groupByFolder === true
-                visible: page.pg.canGroup === true
-                onTriggered: page.backend.setPref("groupByFolder", checked)
-            }
-            Kirigami.Action {
-                text: i18n("Group Folder Notes by Subfolder")
-                checkable: true
-                checked: page.prefs.groupBySection === true
-                visible: page.inFolder
-                onTriggered: page.backend.setPref("groupBySection", checked)
-            }
-            Kirigami.Action {
-                text: i18n("Show Notes of Subfolders")
-                checkable: true
-                checked: page.prefs.showAllNotes === true
-                visible: page.inFolder
-                onTriggered: page.backend.setPref("showAllNotes", checked)
-            }
+    Kirigami.Action {
+        id: searchAction
+        text: i18n("Search")
+        icon.name: "edit-find"
+        shortcut: StandardKey.Find
+        checkable: true
+        onTriggered: {
+            if (checked) searchField.forceActiveFocus()
+            else page.backend.setSearch("")
         }
-    ]
+    }
+
+    Kirigami.Action {
+        id: filterAction
+        text: page.filterState.count > 0 ? i18n("Filter (%1)", page.filterState.count) : i18n("Filter")
+        icon.name: "view-filter"
+        onTriggered: filterSheet.open()
+    }
+
+    Kirigami.Action {
+        id: emptyTrashAction
+        text: i18n("Empty Trash")
+        icon.name: "trash-empty"
+        visible: page.inTrash && page.pg.count > 0
+        onTriggered: emptyTrashDialog.open()
+    }
+
+    Kirigami.Action {
+        id: configureFolderAction
+        text: i18n("Configure Folder…")
+        icon.name: "configure"
+        visible: page.inFolder
+        onTriggered: page.openFolderSettings(page.pg.folderId)
+    }
+
+    Kirigami.Action {
+        id: newFolderAction
+        text: i18n("New Folder Here")
+        icon.name: "folder-new"
+        visible: page.inFolder && !(page.pg.header && page.pg.header.isDefault)
+        onTriggered: page.newFolder(page.pg.folderId)
+    }
+
+    Kirigami.Action {
+        id: sortMenu
+        text: i18n("Sort By")
+        icon.name: "view-sort"
+        Kirigami.Action {
+            text: i18n("Recently Changed")
+            checkable: true
+            checked: page.backend.sort === "recent"
+            onTriggered: page.backend.sortBy("recent")
+        }
+        Kirigami.Action {
+            text: i18n("Newest")
+            checkable: true
+            checked: page.backend.sort === "created"
+            onTriggered: page.backend.sortBy("created")
+        }
+        Kirigami.Action {
+            text: i18n("Title")
+            checkable: true
+            checked: page.backend.sort === "title"
+            onTriggered: page.backend.sortBy("title")
+        }
+        Kirigami.Action {
+            text: i18n("Best Rated")
+            checkable: true
+            checked: page.backend.sort === "rating"
+            onTriggered: page.backend.sortBy("rating")
+        }
+    }
+
+    Kirigami.Action {
+        id: viewMenu
+        text: i18n("View")
+        icon.name: "view-list-icons"
+        Kirigami.Action {
+            text: i18n("Show as List")
+            checkable: true
+            checked: page.listView
+            onTriggered: page.backend.setPref("listView", checked)
+        }
+        Kirigami.Action {
+            text: i18n("Group by Folder")
+            checkable: true
+            checked: page.prefs.groupByFolder === true
+            visible: page.pg.canGroup === true
+            onTriggered: page.backend.setPref("groupByFolder", checked)
+        }
+        Kirigami.Action {
+            text: i18n("Group Folder Notes by Subfolder")
+            checkable: true
+            checked: page.prefs.groupBySection === true
+            visible: page.inFolder
+            onTriggered: page.backend.setPref("groupBySection", checked)
+        }
+        Kirigami.Action {
+            text: i18n("Show Notes of Subfolders")
+            checkable: true
+            checked: page.prefs.showAllNotes === true
+            visible: page.inFolder
+            onTriggered: page.backend.setPref("showAllNotes", checked)
+        }
+    }
+
+    actions: [newNoteAction, searchAction, filterAction, emptyTrashAction, configureFolderAction, newFolderAction, sortMenu, viewMenu]
+
+    // The foot, narrow only: up to three icons (new note, search, filter) and the page's own menu
+    // (the view, sorting, and what the folder offers). The app's menu is at the top.
+    footer: PageBar {
+        visible: page.narrow
+        icons: [newNoteAction, searchAction, filterAction]
+        menu: [viewMenu, sortMenu, configureFolderAction, newFolderAction, emptyTrashAction]
+        heading: page.title
+    }
+
 
     header: QQC2.ToolBar {
         visible: searchAction.checked
@@ -198,6 +224,8 @@ Kirigami.ScrollablePage {
             model: block.items
             delegate: NoteRow {
                 required property var modelData
+                required property int index
+                divider: index > 0
                 width: ListView.view.width
                 note: modelData
                 backend: page.backend

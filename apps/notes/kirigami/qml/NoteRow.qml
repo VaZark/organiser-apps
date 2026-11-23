@@ -12,23 +12,30 @@ Kirigami.SwipeListItem {
     required property var note
     required property var backend
     signal opened()
+    /// A hairline above the row: only between two rows, so the last one has none hanging below.
+    property bool divider: false
 
     onClicked: opened()
-    // The note colour tints the row.
-    background: Rectangle {
-        color: row.note.color !== ""
-            ? Qt.alpha(row.note.color, row.containsMouse ? 0.35 : 0.22)
-            : (row.containsMouse ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent")
+    // The note's colour is the stripe at the row's left edge, as in Todo's list; the row itself is
+    // plain, and a hairline between two rows keeps them apart.
+    background: Item {
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 1
+            anchors.bottomMargin: 1
+            color: row.containsMouse ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent"
+            Rectangle {
+                visible: row.note.effectiveColor !== ""
+                width: Kirigami.Units.smallSpacing
+                height: parent.height
+                color: row.note.effectiveColor !== "" ? row.note.effectiveColor : "transparent"
+            }
+        }
+        Kirigami.Separator { visible: row.divider; anchors { left: parent.left; right: parent.right; top: parent.top } }
     }
+    leftPadding: Kirigami.Units.largeSpacing + Kirigami.Units.smallSpacing
     contentItem: RowLayout {
         spacing: Kirigami.Units.largeSpacing
-        Rectangle {
-            visible: row.note.color !== ""
-            color: row.note.color
-            radius: width / 2
-            implicitWidth: Kirigami.Units.gridUnit * 0.7
-            implicitHeight: implicitWidth
-        }
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 0

@@ -51,6 +51,11 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    // The menus of the pages: a dropdown in a wide window, a bottom sheet in a narrow one. One
+    // here, not one in each page: a page of this app does not start with its own.
+    ActionDrawer { id: sheet }
+    function showSheet(title, list, anchor) { sheet.showActions(title, list, anchor) }
+
     readonly property var desktopKeys: JSON.parse(sticky.desktopKeys)
 
     /// Show the main window, or bring the open one forward.
@@ -162,7 +167,6 @@ Kirigami.ApplicationWindow {
             text: i18n("About Sticky Notes"); icon.name: "help-about"
             onTriggered: root.about()
         }
-        Kirigami.Action { separator: true }
         Kirigami.Action {
             text: i18n("Quit"); icon.name: "application-exit"
             shortcut: StandardKey.Quit
@@ -181,7 +185,7 @@ Kirigami.ApplicationWindow {
 
     // One header across the whole window; the sidebar and the content sit side by side under it.
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    header: AppHeader { window: root }
+    header: AppHeader { window: root; iconOnly: true; sheets: true }
     // The sidebar lives inside the page row, so the header above it stays full width.
     pageStack.leftSidebar: root.globalDrawer
 

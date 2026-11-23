@@ -32,7 +32,6 @@ Kirigami.ApplicationWindow {
     /// Show a scope in the first column; the details column closes.
     function showScope(name, folder) {
         notes.show(name, folder === undefined ? -1 : folder)
-        pageStack.layers.clear()
         while (pageStack.depth > 1) pageStack.pop()
     }
 
@@ -54,9 +53,16 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    /// Settings, tags and About open as a page beside the list (a page of their own when narrow),
+    /// with Back to return. Not on Kirigami's layers: pushing there warns about its own anchors.
+    function openBeside(page) {
+        if (!page) return
+        while (pageStack.depth > 1) pageStack.pop()
+        pageStack.push(page)
+    }
+
     function openFolderSettings(id) {
-        const page = create("FolderSettingsPage", { folderId: id })
-        if (page) pageStack.layers.push(page)
+        openBeside(create("FolderSettingsPage", { folderId: id }))
     }
 
     function newFolder(parent) {
@@ -70,15 +76,16 @@ Kirigami.ApplicationWindow {
     function openSettings() {
         const page = create("SettingsPage")
         if (page) {
-            page.openTags.connect(() => { const t = root.create("TagsPage"); if (t) pageStack.layers.push(t) })
-            pageStack.layers.push(page)
+            // Tags open on top of the settings.
+            page.openTags.connect(() => { const t = root.create("TagsPage"); if (t) pageStack.push(t) })
+            root.openBeside(page)
         }
     }
 
     function openAbout() {
         const comp = Qt.createComponent(Qt.resolvedUrl("shared/AboutPage.qml"))
         const page = comp.createObject(pageStack, { appName: "Notes", appComment: "Capture notes as colourful cards", appId: "io.github.vazark.Notes" })
-        if (page) pageStack.layers.push(page)
+        openBeside(page)
     }
 
     /// The folders, one action each (indented by depth), made from the folder list.
@@ -116,7 +123,6 @@ Kirigami.ApplicationWindow {
             text: i18n("About Notes"); icon.name: "help-about"
             onTriggered: root.openAbout()
         }
-        Kirigami.Action { separator: true }
         Kirigami.Action {
             text: i18n("Quit"); icon.name: "application-exit"
             shortcut: StandardKey.Quit
@@ -128,14 +134,14 @@ Kirigami.ApplicationWindow {
     Connections {
         target: root.pageStack
         function onPageInserted(position, page) {
-            if (page && page.actions !== undefined && !Array.from(page.actions).includes(root.appMenu))
+            if (page && page.actions !== undefined && page.ownMenu !== true && !Array.from(page.actions).includes(root.appMenu))
                 page.actions = [].concat(Array.from(page.actions), [root.appMenu])
         }
     }
 
     // One header across the whole window; the sidebar and the content sit side by side under it.
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    header: AppHeader { window: root }
+    header: AppHeader { window: root; iconOnly: true; sheets: true }
     // Too narrow for the list and the details side by side: stack them, one page at a time.
     pageStack.columnView.columnResizeMode: root.width < Kirigami.Units.gridUnit * 55
         ? Kirigami.ColumnView.SingleColumn : Kirigami.ColumnView.DynamicColumns
@@ -230,7 +236,7 @@ Kirigami.ApplicationWindow {
             if (notes.arg("folder-settings") !== "") root.openFolderSettings(parseInt(notes.arg("folder-settings")))
             const page = notes.arg("page")
             if (page === "settings") root.openSettings()
-            else if (page === "tags") { const t = root.create("TagsPage"); pageStack.layers.push(t) }
+            else if (page === "tags") root.openBeside(root.create("TagsPage"))
             else if (page === "about") root.openAbout()
             grabTimer.start()
         }

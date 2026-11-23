@@ -73,47 +73,47 @@ Kirigami.ScrollablePage {
     // A pending edit is not lost when the page goes.
     Component.onDestruction: if (saveTimer.running) { saveTimer.stop(); page.save() }
 
-    // The header keeps what shapes the note, as icons; everything else about the note (archive, its
-    // file, trash) is in the "Note" menu at the foot; Preview and the way out of the note (trash) sit at the foot of the page.
-    actions: [
-        Kirigami.Action {
-            text: i18n("Create Note")
-            icon.name: "document-save"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            shortcut: StandardKey.Save
-            visible: page.isDraft
-            onTriggered: page.create()
-        },
-        Kirigami.Action {
-            text: page.note.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
-            icon.name: page.note.favorite ? "emblem-favorite" : "bookmark-new"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            visible: !page.trashed
-            checkable: true
-            checked: page.note.favorite === true
-            onTriggered: page.setFavorite(!page.note.favorite)
-        },
-        Kirigami.Action {
-            text: page.note.pinned ? i18n("Unpin") : i18n("Pin")
-            icon.name: "pin"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            visible: !page.trashed
-            checkable: true
-            checked: page.note.pinned === true
-            onTriggered: page.setPinned(!page.note.pinned)
-        },
-        Kirigami.Action {
-            text: page.note.sticky ? i18n("Remove Sticky Note") : i18n("Make Sticky Note")
-            icon.name: "view-pim-notes"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            visible: !page.isDraft && !page.trashed
-            checkable: true
-            checked: page.note.sticky === true
-            onTriggered: page.backend.setSticky(page.noteId, !page.note.sticky)
-        }
-    ]
+    // Nothing in the header but Back: every action of the note is at the foot, in the bar or in its
+    // one menu, so there is a single place to look (as in Todo's task page).
+    readonly property bool ownMenu: true
+    readonly property bool roomy: width >= Kirigami.Units.gridUnit * 20
+    Kirigami.Action {
+        id: createAction
+        text: i18n("Create Note")
+        icon.name: "document-save"
+        shortcut: StandardKey.Save
+        visible: page.isDraft
+        onTriggered: page.create()
+    }
+    Kirigami.Action {
+        id: favoriteAction
+        text: page.note.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
+        icon.name: page.note.favorite ? "emblem-favorite" : "bookmark-new"
+        visible: !page.trashed
+        checkable: true
+        checked: page.note.favorite === true
+        onTriggered: page.setFavorite(!page.note.favorite)
+    }
+    Kirigami.Action {
+        id: pinAction
+        text: page.note.pinned ? i18n("Unpin") : i18n("Pin")
+        icon.name: "pin"
+        visible: !page.trashed
+        checkable: true
+        checked: page.note.pinned === true
+        onTriggered: page.setPinned(!page.note.pinned)
+    }
+    Kirigami.Action {
+        id: stickyAction
+        text: page.note.sticky ? i18n("Remove Sticky Note") : i18n("Make Sticky Note")
+        icon.name: "view-pim-notes"
+        visible: !page.isDraft && !page.trashed
+        checkable: true
+        checked: page.note.sticky === true
+        onTriggered: page.backend.setSticky(page.noteId, !page.note.sticky)
+    }
 
-    // The foot of the page. These are not in `actions`, so the header does not show them too.
+    // The rest of the foot's actions.
     Kirigami.Action {
         id: previewAction
         text: i18n("Preview")
@@ -157,6 +157,8 @@ Kirigami.ScrollablePage {
         onTriggered: purgeDialog.open()
     }
 
+    // The foot: Preview, then up to three icons in one row while there is room (favourite, pin,
+    // sticky note), and the one menu for the rest. Without room the icons go into the menu too.
     footer: QQC2.ToolBar {
         position: QQC2.ToolBar.Footer
         contentItem: RowLayout {
@@ -166,9 +168,33 @@ Kirigami.ScrollablePage {
                 action: previewAction
                 display: QQC2.AbstractButton.TextBesideIcon
             }
+            QQC2.ToolButton {
+                visible: page.isDraft
+                text: createAction.text
+                icon.name: createAction.icon.name
+                display: QQC2.AbstractButton.TextBesideIcon
+                onClicked: createAction.trigger()
+            }
             Item { Layout.fillWidth: true }
+            Repeater {
+                model: page.roomy ? [favoriteAction, pinAction, stickyAction] : []
+                delegate: QQC2.ToolButton {
+                    required property var modelData
+                    visible: modelData.visible
+                    icon.name: modelData.icon.name
+                    text: modelData.text
+                    display: QQC2.AbstractButton.IconOnly
+                    checkable: modelData.checkable
+                    checked: modelData.checked
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    onClicked: modelData.trigger()
+                }
+            }
             // Everything else about the note: its file, archive and the way out of it.
             QQC2.ToolButton {
+                id: noteActionsButton
                 visible: !page.isDraft
                 text: i18n("Note Actions")
                 icon.name: "overflow-menu"
@@ -176,21 +202,15 @@ Kirigami.ScrollablePage {
                 QQC2.ToolTip.text: text
                 QQC2.ToolTip.visible: hovered
                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                checked: noteMenu.visible
-                onClicked: noteMenu.popup(this, width - noteMenu.width, -noteMenu.height)
+                // One plain list, no dividers: the icons first when there was no room for them in the bar.
+                onClicked: noteSheet.showActions(i18n("Note"), (page.roomy ? [] : [favoriteAction, pinAction, stickyAction])
+                    .concat([archiveAction, showFileAction, trashAction, restoreAction, purgeAction]), noteActionsButton)
             }
         }
     }
 
-    QQC2.Menu {
-        id: noteMenu
-        QQC2.MenuItem { action: archiveAction; visible: archiveAction.visible; height: visible ? implicitHeight : 0 }
-        QQC2.MenuItem { action: showFileAction; visible: showFileAction.visible; height: visible ? implicitHeight : 0 }
-        QQC2.MenuSeparator { visible: trashAction.visible }
-        QQC2.MenuItem { action: trashAction; visible: trashAction.visible; height: visible ? implicitHeight : 0 }
-        QQC2.MenuItem { action: restoreAction; visible: restoreAction.visible; height: visible ? implicitHeight : 0 }
-        QQC2.MenuItem { action: purgeAction; visible: purgeAction.visible; height: visible ? implicitHeight : 0 }
-    }
+    // A menu in a wide window, a bottom sheet in a narrow one.
+    ActionDrawer { id: noteSheet }
 
     Kirigami.PromptDialog {
         id: purgeDialog

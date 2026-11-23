@@ -12,6 +12,22 @@ Kirigami.Page {
     title: i18n("Board")
     padding: Kirigami.Units.smallSpacing
 
+    // ---- the page's actions ------------------------------------------------------------------
+    /// Narrow: this page's own actions are in the bottom bar and the top keeps only the app's menu.
+    readonly property bool narrow: Kirigami.Settings.isMobile || applicationWindow().width < Kirigami.Units.gridUnit * 30
+    readonly property bool pageBar: true
+    /// What Main puts first in the top bar (see `wire`).
+    readonly property var primaryAction: applicationWindow().addAction
+
+    // The foot, narrow only: up to three icons (add, view, filter) and the page's own menu (what to
+    // show). The app's menu is at the top.
+    footer: PageBar {
+        visible: page.narrow
+        icons: [applicationWindow().addAction, applicationWindow().viewMenu, applicationWindow().filterAct]
+        menu: [applicationWindow().showMenu]
+        heading: page.title
+    }
+
     readonly property var statuses: JSON.parse(backend.statuses)
     readonly property var tasks: JSON.parse(backend.allTasks)
 
@@ -65,9 +81,9 @@ Kirigami.Page {
                                 onClicked: page.openTask(modelData.id)
                                 background: Rectangle {
                                     radius: Kirigami.Units.cornerRadius
-                                    color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.32) : Kirigami.Theme.backgroundColor
+                                    color: card.modelData.effectiveColor ? Qt.alpha(card.modelData.effectiveColor, 0.32) : Kirigami.Theme.backgroundColor
                                     border.width: 1
-                                    border.color: card.modelData.color ? Qt.alpha(card.modelData.color, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
+                                    border.color: card.modelData.effectiveColor ? Qt.alpha(card.modelData.effectiveColor, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
                                 }
                                 contentItem: ColumnLayout {
                                     QQC2.Label { text: card.modelData.title; wrapMode: Text.Wrap; Layout.fillWidth: true; font.bold: card.modelData.pinned }

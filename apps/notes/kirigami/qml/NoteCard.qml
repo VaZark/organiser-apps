@@ -17,9 +17,9 @@ Kirigami.AbstractCard {
 
     background: Rectangle {
         radius: Kirigami.Units.cornerRadius
-        color: card.note.color !== "" ? Qt.alpha(card.note.color, 0.32) : Kirigami.Theme.backgroundColor
+        color: card.note.effectiveColor !== "" ? Qt.alpha(card.note.effectiveColor, 0.32) : Kirigami.Theme.backgroundColor
         border.width: 1
-        border.color: card.note.color !== "" ? Qt.alpha(card.note.color, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
+        border.color: card.note.effectiveColor !== "" ? Qt.alpha(card.note.effectiveColor, 0.7) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.25)
     }
 
     contentItem: ColumnLayout {

@@ -20,37 +20,61 @@ Kirigami.ScrollablePage {
     function stars(n) { return "★".repeat(n) + "☆".repeat(5 - n) }
     function open(id) { applicationWindow().openRecipe(id) }
 
+    // ---- adding a recipe ---------------------------------------------------------------------
+    /// Start typing a new recipe (the New shortcut).
+    function focusQuickAdd() { newDialog.open() }
+
+    // A new recipe's title is typed in a small dialog; the recipe then opens for the rest.
     Kirigami.PromptDialog {
-        id: newRecipe
+        id: newDialog
         title: i18n("New Recipe")
         standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
         QQC2.TextField {
             id: newTitle
             placeholderText: i18n("Title")
-            onAccepted: newRecipe.accept()
+            onAccepted: newDialog.accept()
         }
         onOpened: { newTitle.text = ""; newTitle.forceActiveFocus() }
-        onAccepted: {
-            const id = page.backend.createRecipe(newTitle.text)
+        onAccepted: if (newTitle.text.trim() !== "") {
+            const id = page.backend.createRecipe(newTitle.text.trim())
             if (id >= 0) page.open(id)
         }
     }
 
-    actions: [
-        Kirigami.Action {
-            text: i18n("New Recipe")
-            icon.name: "list-add"
-            shortcut: StandardKey.New
-            onTriggered: newRecipe.open()
-        },
-        Kirigami.Action {
-            text: page.backend.filterCount > 0 ? i18n("Filter (%1)…", page.backend.filterCount) : i18n("Filter…")
-            icon.name: "view-filter"
-            onTriggered: applicationWindow().configure("FilterPage.qml")
-        },
-        Kirigami.Action {
-            text: i18n("Sort By")
-            icon.name: "view-sort"
+    // ---- the page's actions ------------------------------------------------------------------
+    /// Narrow: this page's own actions are in the bottom bar and the top keeps only the app's menu.
+    readonly property bool narrow: Kirigami.Settings.isMobile || applicationWindow().width < Kirigami.Units.gridUnit * 30
+    readonly property bool pageBar: true
+
+    Kirigami.Action {
+        id: newAction
+        text: i18n("New Recipe")
+        icon.name: "list-add"
+        shortcut: StandardKey.New
+        displayHint: Kirigami.DisplayHint.IconOnly
+        onTriggered: newDialog.open()
+    }
+    Kirigami.Action {
+        id: filterAction
+        text: page.backend.filterCount > 0 ? i18n("Filter (%1)…", page.backend.filterCount) : i18n("Filter…")
+        icon.name: "view-filter"
+        displayHint: Kirigami.DisplayHint.IconOnly
+        onTriggered: applicationWindow().configure("FilterPage.qml")
+    }
+    Kirigami.Action {
+        id: favoritesAction
+        text: i18n("Favorites Only")
+        icon.name: page.backend.favoritesOnly ? "starred-symbolic" : "non-starred-symbolic"
+        displayHint: Kirigami.DisplayHint.IconOnly
+        checkable: true
+        checked: page.backend.favoritesOnly
+        onTriggered: { page.backend.favoritesOnly = !page.backend.favoritesOnly; page.backend.applyFilters() }
+    }
+    Kirigami.Action {
+        id: sortAction
+        text: i18n("Sort By")
+        icon.name: "view-sort"
+        displayHint: Kirigami.DisplayHint.IconOnly
             Kirigami.Action {
                 text: i18n("My Order")
                 checkable: true
@@ -75,8 +99,18 @@ Kirigami.ScrollablePage {
                 checked: page.backend.sort === "recent"
                 onTriggered: { page.backend.sort = "recent"; page.backend.applyFilters() }
             }
-        }
-    ]
+    }
+
+    actions: [newAction, filterAction, favoritesAction, sortAction]
+
+    // The foot, narrow only: up to three icons (new, filter, favourites) and the page's own menu
+    // (sorting). The app's menu is at the top.
+    footer: PageBar {
+        visible: page.narrow
+        icons: [newAction, filterAction, favoritesAction]
+        menu: [sortAction]
+        heading: page.title
+    }
 
     header: QQC2.ToolBar {
         contentItem: RowLayout {
@@ -175,11 +209,13 @@ Kirigami.ScrollablePage {
                 Kirigami.Action {
                     text: card.modelData.favorite ? i18n("Remove From Favorites") : i18n("Add to Favorites")
                     icon.name: card.modelData.favorite ? "starred-symbolic" : "non-starred-symbolic"
+                    displayHint: Kirigami.DisplayHint.IconOnly
                     onTriggered: page.backend.setFavorite(card.modelData.id, !card.modelData.favorite)
                 },
                 Kirigami.Action {
                     text: i18n("Add to Shopping List")
                     icon.name: "view-task"
+                    displayHint: Kirigami.DisplayHint.IconOnly
                     onTriggered: page.backend.shopAdd(card.modelData.id)
                 }
             ]
@@ -200,7 +236,7 @@ Kirigami.ScrollablePage {
         helpfulAction: Kirigami.Action {
             text: i18n("New Recipe")
             icon.name: "list-add"
-            onTriggered: newRecipe.open()
+            onTriggered: page.focusQuickAdd()
         }
     }
 }

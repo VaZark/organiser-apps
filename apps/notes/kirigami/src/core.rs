@@ -419,10 +419,17 @@ impl Core {
         self.path(id?).first().map(|s| s.folder.id)
     }
 
+    /// The nearest colour a folder has of its own, looking at the folder itself and then at the
+    /// folders above it: the folder nearest the note wins.
+    fn inherited_color(&self, id: Option<i64>) -> Option<Color> {
+        self.path(id?).iter().rev().find_map(|s| s.folder.color)
+    }
+
     /// A folder's colour: its own, or one made from its name so folders tell apart at a glance;
     /// the default folder is plain (empty) unless coloured.
     fn folder_color(&self, f: &Folder) -> String {
-        if let Some(c) = f.color {
+        // Its own, else the nearest of the folders above it.
+        if let Some(c) = f.color.or_else(|| self.inherited_color(f.parent)) {
             return c.hex();
         }
         if f.is_default {
@@ -477,7 +484,14 @@ impl Core {
             "title": n.title,
             "body": n.body,
             "excerpt": excerpt,
+            // `color` is the note's own (what its picker edits); `effectiveColor` is what is drawn:
+            // its own, else its folder's, else that of the folders above it, else gray.
             "color": own.map(|c| c.hex()).unwrap_or_default(),
+            "effectiveColor": own
+                .or_else(|| self.inherited_color(n.folder_id))
+                .map(|c| c.hex())
+                // Nothing above it gives a colour: gray.
+                .unwrap_or_else(|| organiser_core::color::DEFAULT_HEX.to_string()),
             "darkText": own.is_some_and(Color::prefers_dark_text),
             "pinned": n.pinned,
             "sticky": n.sticky,
@@ -1525,5 +1539,42 @@ mod tests {
         let c = Core::open(&db, None, Some(cfg)).unwrap();
         let p = c.page_json().unwrap();
         assert!(p.contains("First") && p.contains("Second"), "{p}");
+    }
+
+    #[test]
+    fn a_note_is_drawn_in_the_nearest_colour_above_it_and_its_own_is_highest() {
+        let mut c = core();
+        let top = c.create_folder(None).unwrap();
+        let sub = c.create_folder(Some(top)).unwrap();
+        c.set_folder_color(top, "#ff0000").unwrap();
+        c.refresh().unwrap();
+        let id = c
+            .create_note(&json!({"title": "n", "folder": sub}).to_string())
+            .unwrap();
+        c.refresh().unwrap();
+        let note = |c: &Core| -> Value { serde_json::from_str(&c.note_json(id).unwrap()).unwrap() };
+        // The folder above reaches a note in a folder with no colour of its own.
+        assert_eq!(note(&c)["effectiveColor"], "#ff0000");
+        assert_eq!(note(&c)["folderColor"], "#ff0000");
+        // The nested folder takes priority.
+        c.set_folder_color(sub, "#00ff00").unwrap();
+        c.refresh().unwrap();
+        assert_eq!(note(&c)["effectiveColor"], "#00ff00");
+        // The note's own colour is highest, and is all its picker sees as its own.
+        c.set_note_color(id, "#0000ff").unwrap();
+        c.refresh().unwrap();
+        assert_eq!(note(&c)["effectiveColor"], "#0000ff");
+        c.set_note_color(id, "").unwrap();
+        c.refresh().unwrap();
+        assert_eq!(note(&c)["color"], "");
+        assert_eq!(note(&c)["effectiveColor"], "#00ff00");
+        // Nothing above it: gray.
+        c.set_folder_color(sub, "").unwrap();
+        c.set_folder_color(top, "").unwrap();
+        c.refresh().unwrap();
+        assert_eq!(
+            note(&c)["effectiveColor"],
+            organiser_core::color::DEFAULT_HEX
+        );
     }
 }

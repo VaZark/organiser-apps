@@ -18,10 +18,50 @@ Kirigami.ScrollablePage {
          : backend.noEpic ? i18n("Unassigned") : i18n("Tasks")
 
 
+    // ---- adding a task -----------------------------------------------------------------------
     /// Start typing a new task (`--new`, as Sticky's "New in Todo" opens the app).
-    function focusQuickAdd() { quick.forceActiveFocus() }
+    function focusQuickAdd() { applicationWindow().addAction.trigger() }
 
-    // Quick add stays at the foot of the list: `Buy milk #home due:tomorrow`.
+    // ---- the page's actions ------------------------------------------------------------------
+    /// Narrow: this page's own actions are in the bottom bar and the top keeps only the app's menu.
+    readonly property bool narrow: Kirigami.Settings.isMobile || applicationWindow().width < Kirigami.Units.gridUnit * 30
+    readonly property bool pageBar: true
+    /// What Main puts first in the top bar (see `wire`).
+    readonly property var primaryAction: applicationWindow().addAction
+
+    Kirigami.Action {
+        id: configureEpicAction
+        text: i18n("Configure Epic…")
+        icon.name: "configure"
+        visible: page.backend.epic >= 0
+        onTriggered: page.openEpicSettings(page.backend.epic)
+    }
+    Kirigami.Action {
+        id: groupAction
+        text: i18n("Group By")
+        icon.name: "view-group"
+        displayHint: Kirigami.DisplayHint.IconOnly
+            Kirigami.Action { text: i18n("None"); checkable: true; checked: page.activeGroup === ""; onTriggered: page.setGroup("") }
+            Kirigami.Action { text: i18n("Status"); checkable: true; checked: page.activeGroup === "status"; onTriggered: page.setGroup("status") }
+            // Epics split the tasks of all epics; sections split the tasks of one epic.
+            Kirigami.Action { text: i18n("Epic"); visible: page.inEpic < 0 && !page.backend.noEpic; checkable: true; checked: page.activeGroup === "epic"; onTriggered: page.setGroup("epic") }
+            Kirigami.Action { text: i18n("Section"); visible: page.inEpic >= 0; checkable: true; checked: page.activeGroup === "section"; onTriggered: page.setGroup("section") }
+    }
+    Kirigami.Action {
+        id: sortAction
+        text: i18n("Sort")
+        icon.name: "view-sort"
+        displayHint: Kirigami.DisplayHint.IconOnly
+            Kirigami.Action { text: i18n("Manual"); onTriggered: { page.backend.sort = "manual"; page.backend.applyFilters() } }
+            Kirigami.Action { text: i18n("Priority"); onTriggered: { page.backend.sort = "priority"; page.backend.applyFilters() } }
+            Kirigami.Action { text: i18n("Newest"); onTriggered: { page.backend.sort = "created"; page.backend.applyFilters() } }
+            Kirigami.Action { text: i18n("Due date"); onTriggered: { page.backend.sort = "due"; page.backend.applyFilters() } }
+    }
+
+    actions: [configureEpicAction, groupAction, sortAction]
+
+    // The foot, narrow only, above any bulk-selection bar: up to three icons (add, view, filter) and
+    // the page's own menu (what to show, grouping, sorting). The app's menu is at the top.
     footer: ColumnLayout {
         spacing: 0
         // The bulk actions, while any task is ticked.
@@ -35,47 +75,33 @@ Kirigami.ScrollablePage {
                 QQC2.ToolButton {
                     text: i18n("Actions")
                     icon.name: "overflow-menu"
-                    onClicked: bulkMenu.popup(this, 0, -bulkMenu.implicitHeight)
-                    QQC2.Menu {
-                        id: bulkMenu
-                        QQC2.MenuItem { text: i18n("Finish"); icon.name: "checkmark"; onTriggered: page.bulkStatus(true) }
-                        QQC2.MenuItem { text: i18n("Reopen"); icon.name: "view-refresh"; onTriggered: page.bulkStatus(false) }
-                        QQC2.MenuItem { text: i18n("Pin"); icon.name: "pin"; onTriggered: page.bulk(id => page.backend.setPinned(id, true)) }
-                        QQC2.MenuItem {
-                            text: page.backend.scope === "archived" ? i18n("Restore") : i18n("Archive")
-                            icon.name: "archive-insert"
-                            onTriggered: page.bulk(id => page.backend.setArchived(id, page.backend.scope !== "archived"))
-                        }
-                        QQC2.MenuSeparator {}
-                        QQC2.MenuItem { text: i18n("Delete…"); icon.name: "edit-delete"; onTriggered: confirmDelete.open() }
-                    }
+                    onClicked: bulkSheet.showActions(i18n("%1 selected", page.pickedIds.length), page.bulkActions)
                 }
             }
         }
-        QQC2.ToolBar {
-        Layout.fillWidth: true
-        visible: page.backend.scope !== "archived"
-        contentItem: RowLayout {
-            QQC2.TextField {
-                id: quick
-                Layout.fillWidth: true
-                placeholderText: i18n("Add a task… (#tag, due:tomorrow)")
-                onAccepted: if (text.trim() !== "") {
-                    page.backend.createTask(text, page.backend.epic, -1)
-                    text = ""
-                }
-            }
-            QQC2.Button {
-                text: i18n("Add")
-                icon.name: "list-add"
-                enabled: quick.text.trim() !== ""
-                onClicked: quick.accepted()
-            }
-        }
+        PageBar {
+            Layout.fillWidth: true
+            visible: page.narrow
+            icons: [applicationWindow().addAction, applicationWindow().viewMenu, applicationWindow().filterAct]
+            menu: [applicationWindow().showMenu, groupAction, sortAction, configureEpicAction]
+            heading: page.title
         }
     }
 
     // ---- selection for bulk actions ----------------------------------------------------------
+    ActionDrawer { id: bulkSheet }
+    readonly property list<Kirigami.Action> bulkActions: [
+        Kirigami.Action { text: i18n("Finish"); icon.name: "checkmark"; onTriggered: page.bulkStatus(true) },
+        Kirigami.Action { text: i18n("Reopen"); icon.name: "view-refresh"; onTriggered: page.bulkStatus(false) },
+        Kirigami.Action { text: i18n("Pin"); icon.name: "pin"; onTriggered: page.bulk(id => page.backend.setPinned(id, true)) },
+        Kirigami.Action {
+            text: page.backend.scope === "archived" ? i18n("Restore") : i18n("Archive")
+            icon.name: "archive-insert"
+            onTriggered: page.bulk(id => page.backend.setArchived(id, page.backend.scope !== "archived"))
+        },
+        Kirigami.Action { text: i18n("Delete…"); icon.name: "edit-delete"; onTriggered: confirmDelete.open() }
+    ]
+
     /// Ticked task ids (as keys); only those still in the list count, see `pickedIds`.
     property var picked: ({})
     readonly property var pickedIds: tasks.filter(t => !t.header && page.picked[t.id] === true).map(t => t.id)
@@ -119,35 +145,6 @@ Kirigami.ScrollablePage {
         ]
     }
 
-    actions: [
-        Kirigami.Action {
-            text: i18n("Configure Epic…")
-            icon.name: "configure"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            visible: page.backend.epic >= 0
-            onTriggered: page.openEpicSettings(page.backend.epic)
-        },
-        Kirigami.Action {
-            text: i18n("Group By")
-            icon.name: "view-group"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            Kirigami.Action { text: i18n("None"); checkable: true; checked: page.activeGroup === ""; onTriggered: page.setGroup("") }
-            Kirigami.Action { text: i18n("Status"); checkable: true; checked: page.activeGroup === "status"; onTriggered: page.setGroup("status") }
-            // Epics split the tasks of all epics; sections split the tasks of one epic.
-            Kirigami.Action { text: i18n("Epic"); visible: page.inEpic < 0 && !page.backend.noEpic; checkable: true; checked: page.activeGroup === "epic"; onTriggered: page.setGroup("epic") }
-            Kirigami.Action { text: i18n("Section"); visible: page.inEpic >= 0; checkable: true; checked: page.activeGroup === "section"; onTriggered: page.setGroup("section") }
-        },
-        Kirigami.Action {
-            text: i18n("Sort")
-            icon.name: "view-sort"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            Kirigami.Action { text: i18n("Manual"); onTriggered: { page.backend.sort = "manual"; page.backend.applyFilters() } }
-            Kirigami.Action { text: i18n("Priority"); onTriggered: { page.backend.sort = "priority"; page.backend.applyFilters() } }
-            Kirigami.Action { text: i18n("Newest"); onTriggered: { page.backend.sort = "created"; page.backend.applyFilters() } }
-            Kirigami.Action { text: i18n("Due date"); onTriggered: { page.backend.sort = "due"; page.backend.applyFilters() } }
-        }
-    ]
-
     readonly property var tasks: JSON.parse(backend.tasks)
     readonly property int inEpic: backend.epic
     /// The grouping in effect: what was chosen, unless it does not fit the tasks shown.
@@ -189,6 +186,7 @@ Kirigami.ScrollablePage {
         delegate: Loader {
             id: row
             required property var modelData
+            required property int index
             width: ListView.view ? ListView.view.width : 0
             // Only while the ListView holds this row: Kirigami's SwipeListItem looks up through
             // its parents for the ListView when it is made, and fails on a row being released.
@@ -229,6 +227,8 @@ Kirigami.ScrollablePage {
                 id: taskComp
                 TaskDelegate {
                     task: row.modelData
+                    // Between two task rows only: not above the first, nor under a group's header.
+                    divider: row.index > 0 && !!page.tasks[row.index - 1] && !page.tasks[row.index - 1].header
                     selected: page.picked[row.modelData.id] === true
                     onClicked: page.openTask(row.modelData.id)
                     onSelectionToggled: (id, on) => page.pick(id, on)

@@ -60,7 +60,8 @@ Kirigami.ApplicationWindow {
     }
 
     function wire(page) {
-        page.actions = [].concat([viewMenu, filterAct], Array.from(page.actions), [appMenu])
+        // A page's own main action (Add) comes first; then the page-level menus; the app's menu last.
+        page.actions = [].concat(page.primaryAction ? [page.primaryAction] : [], [viewMenu, filterAct, showMenu], Array.from(page.actions), [appMenu])
         if (page.openTask) page.openTask.connect(id => root.openTask(id))
         if (page.openEpicSettings) page.openEpicSettings.connect(id => root.openEpicSettings(id))
         if (page.openSection) page.openSection.connect(type => root.pushOn(type))
@@ -81,7 +82,49 @@ Kirigami.ApplicationWindow {
         icon.name: "application-menu"
         text: i18n("Menu")
         displayHint: Kirigami.DisplayHint.IconOnly
-        // What the lists include (the Filter sheet has the rest).
+        Kirigami.Action {
+            text: i18n("Configure Todo…"); icon.name: "configure"
+            shortcut: StandardKey.Preferences
+            onTriggered: root.push("PreferencesPage")
+        }
+        Kirigami.Action {
+            text: i18n("About Todo"); icon.name: "help-about"
+            onTriggered: root.push("AboutPage", { appName: "Todo", appComment: "Organise tasks, subtasks and deadlines", appId: "io.github.vazark.Todo" })
+        }
+        Kirigami.Action {
+            text: i18n("Quit"); icon.name: "application-exit"
+            shortcut: StandardKey.Quit
+            onTriggered: Qt.quit()
+        }
+    }
+
+    // Adding a task, from the list, the board and the matrix: a small dialog, `Buy milk #home due:tomorrow`.
+    Kirigami.PromptDialog {
+        id: addDialog
+        title: i18n("Add Task")
+        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
+        QQC2.TextField {
+            id: addField
+            placeholderText: i18n("Add a task… (#tag, due:tomorrow)")
+            onAccepted: addDialog.accept()
+        }
+        onOpened: { addField.text = ""; addField.forceActiveFocus() }
+        onAccepted: if (addField.text.trim() !== "") todo.createTask(addField.text, todo.epic, -1)
+    }
+    readonly property Kirigami.Action addAction: Kirigami.Action {
+        text: i18n("Add Task")
+        icon.name: "list-add"
+        shortcut: StandardKey.New
+        visible: todo.scope !== "archived"
+        onTriggered: addDialog.open()
+    }
+
+    // What the lists include: a page-level menu (the Filter sheet has the rest), kept apart from the
+    // app's own menu (Configure, About, Quit).
+    readonly property Kirigami.Action showMenu: Kirigami.Action {
+        text: i18n("Show")
+        icon.name: "view-visible"
+        displayHint: Kirigami.DisplayHint.IconOnly
         Kirigami.Action {
             text: i18n("Completed Tasks"); icon.name: "checkmark"
             checkable: true
@@ -105,22 +148,6 @@ Kirigami.ApplicationWindow {
             checkable: true
             checked: root.filterState.overdue === true
             onTriggered: todo.toggleFilter("overdue", root.filterState.overdue === true ? "0" : "1")
-        }
-        Kirigami.Action { separator: true }
-        Kirigami.Action {
-            text: i18n("Configure Todo…"); icon.name: "configure"
-            shortcut: StandardKey.Preferences
-            onTriggered: root.push("PreferencesPage")
-        }
-        Kirigami.Action {
-            text: i18n("About Todo"); icon.name: "help-about"
-            onTriggered: root.push("AboutPage", { appName: "Todo", appComment: "Organise tasks, subtasks and deadlines", appId: "io.github.vazark.Todo" })
-        }
-        Kirigami.Action { separator: true }
-        Kirigami.Action {
-            text: i18n("Quit"); icon.name: "application-exit"
-            shortcut: StandardKey.Quit
-            onTriggered: Qt.quit()
         }
     }
 
@@ -200,7 +227,10 @@ Kirigami.ApplicationWindow {
     function openEpicSettings(id) {
         const comp = Qt.createComponent(Qt.resolvedUrl("EpicSettingsPage.qml"))
         const page = comp.createObject(pageStack, { backend: todo, epicId: id })
-        if (page) pageStack.layers.push(page)
+        if (!page) return
+        // Beside the list, with Back (not on Kirigami's layers: pushing there warns about its anchors).
+        while (pageStack.depth > 1) pageStack.pop()
+        pageStack.push(page)
     }
     function newEpic() {
         const id = todo.createEpic(i18n("New Epic"))
@@ -269,7 +299,7 @@ Kirigami.ApplicationWindow {
 
     // One header across the whole window; the sidebar and the content sit side by side under it.
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    header: AppHeader { window: root }
+    header: AppHeader { window: root; iconOnly: true; sheets: true }
     // The sidebar lives inside the page row, so the header above it stays full width.
     pageStack.leftSidebar: root.globalDrawer
 

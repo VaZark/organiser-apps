@@ -52,49 +52,126 @@ Kirigami.ScrollablePage {
         ]
     }
 
-    actions: [
-        Kirigami.Action {
-            text: page.editing ? i18n("Done") : i18n("Edit")
-            icon.name: page.editing ? "dialog-ok-apply" : "document-edit"
-            checkable: true
-            checked: page.editing
-            onTriggered: page.editing = !page.editing
-        },
-        Kirigami.Action {
-            text: i18n("Favorite")
-            icon.name: page.rec.favorite ? "starred-symbolic" : "non-starred-symbolic"
-            onTriggered: page.backend.setFavorite(page.recipeId, !page.rec.favorite)
-        },
-        Kirigami.Action {
-            text: i18n("Cooked Today")
-            icon.name: "checkmark"
-            onTriggered: page.backend.cookedToday(page.recipeId)
-        },
-        Kirigami.Action {
-            text: i18n("Plan Meal…")
-            icon.name: "view-calendar"
-            onTriggered: applicationWindow().logMeal("", page.recipeId)
-        },
-        Kirigami.Action {
-            text: i18n("Add to Shopping List")
-            icon.name: "view-task"
-            onTriggered: page.backend.shopAdd(page.recipeId)
-        },
-        Kirigami.Action {
-            text: i18n("Delete Recipe…")
-            icon.name: "edit-delete"
-            displayHint: Kirigami.DisplayHint.AlwaysHide
-            onTriggered: confirmDelete.open()
+    // Nothing in the header but Back: every action of the recipe is at the foot, in the bar or in
+    // its one menu, and the app's own menu is not added here (see Main.qml), as in Todo's task page.
+    readonly property bool ownMenu: true
+    readonly property bool roomy: width >= Kirigami.Units.gridUnit * 20
+    Kirigami.Action {
+        id: editAction
+        text: page.editing ? i18n("Done") : i18n("Edit")
+        icon.name: page.editing ? "dialog-ok-apply" : "document-edit"
+        onTriggered: page.editing = !page.editing
+    }
+    Kirigami.Action {
+        id: favoriteAction
+        text: page.rec.favorite ? i18n("Remove From Favorites") : i18n("Add to Favorites")
+        icon.name: page.rec.favorite ? "starred-symbolic" : "non-starred-symbolic"
+        onTriggered: page.backend.setFavorite(page.recipeId, !page.rec.favorite)
+    }
+    Kirigami.Action {
+        id: cookedAction
+        text: i18n("Cooked Today")
+        icon.name: "checkmark"
+        onTriggered: page.backend.cookedToday(page.recipeId)
+    }
+    Kirigami.Action {
+        id: planAction
+        text: i18n("Plan Meal…")
+        icon.name: "view-calendar"
+        onTriggered: applicationWindow().logMeal("", page.recipeId)
+    }
+    Kirigami.Action {
+        id: shopAction
+        text: i18n("Add to Shopping List")
+        icon.name: "view-task"
+        onTriggered: page.backend.shopAdd(page.recipeId)
+    }
+    Kirigami.Action {
+        id: deleteAction
+        text: i18n("Delete Recipe…")
+        icon.name: "edit-delete"
+        onTriggered: confirmDelete.open()
+    }
+
+    ActionDrawer { id: recipeSheet }
+
+    // The foot: Edit, then up to three icons in one row while there is room (cooked today, plan a
+    // meal, shopping list), and the one menu for the rest. Without room the icons go into the menu.
+    footer: QQC2.ToolBar {
+        visible: page.found
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            // A mode, so it says what it is.
+            QQC2.ToolButton {
+                text: editAction.text
+                icon.name: editAction.icon.name
+                display: QQC2.AbstractButton.TextBesideIcon
+                checkable: true
+                checked: page.editing
+                onClicked: editAction.trigger()
+            }
+            Item { Layout.fillWidth: true }
+            Repeater {
+                model: page.roomy ? [cookedAction, planAction, shopAction] : []
+                delegate: QQC2.ToolButton {
+                    required property var modelData
+                    icon.name: modelData.icon.name
+                    text: modelData.text
+                    display: QQC2.AbstractButton.IconOnly
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    onClicked: modelData.trigger()
+                }
+            }
+            QQC2.ToolButton {
+                id: recipeMoreButton
+                text: i18n("Recipe Actions")
+                icon.name: "overflow-menu"
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                // One plain list, no dividers: the icons first when there was no room for them in the bar.
+                onClicked: recipeSheet.showActions(i18n("Recipe"), (page.roomy ? [] : [cookedAction, planAction, shopAction])
+                    .concat([favoriteAction, deleteAction]), recipeMoreButton)
+            }
         }
-    ]
+    }
 
     ColumnLayout {
         spacing: 0
         visible: page.found
 
         // ---- the recipe itself ----
-        FormCard.FormHeader { title: i18n("Recipe") }
+        // Reading: the title and what is worth knowing at a glance.
+        ColumnLayout {
+            visible: !page.editing
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.smallSpacing
+            Kirigami.Heading { Layout.fillWidth: true; level: 1; wrapMode: Text.Wrap; text: page.rec.title ? page.rec.title : "" }
+            RowLayout {
+                spacing: Kirigami.Units.largeSpacing
+                visible: !!page.rec.servings || page.rec.rating > 0
+                QQC2.Label { visible: !!page.rec.servings; text: i18n("Serves %1", page.rec.servings); color: Kirigami.Theme.disabledTextColor }
+                QQC2.Label { visible: page.rec.rating > 0; text: "★".repeat(page.rec.rating) + "☆".repeat(5 - page.rec.rating) }
+            }
+            Flow {
+                Layout.fillWidth: true
+                visible: page.rec.tags.length > 0
+                spacing: Kirigami.Units.smallSpacing
+                Repeater {
+                    model: page.rec.tags
+                    TagChip { required property string modelData; text: modelData }
+                }
+            }
+        }
+
+        // Editing: every field.
+        FormCard.FormHeader { title: i18n("Recipe"); visible: page.editing }
         FormCard.FormCard {
+            visible: page.editing
             FormCard.FormTextFieldDelegate {
                 id: titleField
                 visible: page.editing

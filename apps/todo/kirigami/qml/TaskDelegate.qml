@@ -13,14 +13,23 @@ Kirigami.SwipeListItem {
     property var statuses: []
     /// Ticked in the list's selection.
     property bool selected: false
+    /// A hairline above the row: only between two rows, so the last one has none hanging below.
+    property bool divider: false
     signal selectionToggled(int id, bool on)
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    // The task's own colour tints its row (the same rule as a note's card).
-    background: Rectangle {
-        color: row.selected ? Qt.alpha(Kirigami.Theme.highlightColor, 0.25)
-             : row.task.color ? Qt.alpha(row.task.color, row.hovered ? 0.4 : 0.28) : (row.hovered ? Kirigami.Theme.hoverColor : "transparent")
-        Rectangle { visible: !!row.task.color; width: Kirigami.Units.smallSpacing; height: parent.height; color: row.task.color ? row.task.color : "transparent" }
+    // The task's colour is the stripe at the row's left edge.
+    background: Item {
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 1
+            anchors.bottomMargin: 1
+            // Only the stripe carries the colour; the row itself is plain.
+            color: row.selected ? Qt.alpha(Kirigami.Theme.highlightColor, 0.25)
+                 : row.hovered ? Kirigami.Theme.hoverColor : "transparent"
+            Rectangle { visible: !!row.task.effectiveColor; width: Kirigami.Units.smallSpacing; height: parent.height; color: row.task.effectiveColor ? row.task.effectiveColor : "transparent" }
+        }
+        Kirigami.Separator { visible: row.divider; anchors { left: parent.left; right: parent.right; top: parent.top } }
     }
     leftPadding: Kirigami.Units.largeSpacing + task.depth * Kirigami.Units.gridUnit * 1.5
     opacity: task.closed ? 0.6 : 1
@@ -31,7 +40,6 @@ Kirigami.SwipeListItem {
             checked: row.selected
             onToggled: row.selectionToggled(row.task.id, checked)
         }
-        StatusDot { tint: row.task.statusColor ? row.task.statusColor : Kirigami.Theme.disabledTextColor }
         ColumnLayout {
             spacing: 0
             Layout.fillWidth: true
@@ -63,5 +71,7 @@ Kirigami.SwipeListItem {
             model: row.task.tags
             TagChip { required property string modelData; text: modelData }
         }
+        // The status, at the right edge.
+        StatusDot { Layout.leftMargin: Kirigami.Units.smallSpacing; tint: row.task.statusColor ? row.task.statusColor : Kirigami.Theme.disabledTextColor }
     }
 }

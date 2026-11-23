@@ -41,7 +41,6 @@ Kirigami.ApplicationWindow {
 
     function show(name) {
         section = name
-        pageStack.layers.clear()
         pageStack.clear()
         pageStack.push(make(pages[name], { backend: backend }))
     }
@@ -52,8 +51,17 @@ Kirigami.ApplicationWindow {
         pageStack.push(make("RecipePage.qml", { backend: backend, recipeId: id }))
     }
 
+    /// Settings, tags, the filter and About open as a page beside the list (a page of their own
+    /// when narrow), with Back to return. Not on Kirigami's layers: pushing there warns about its
+    /// own anchors.
+    function openBeside(page) {
+        if (!page) return
+        while (pageStack.depth > 1) pageStack.pop()
+        pageStack.push(page)
+    }
+
     function configure(name) {
-        pageStack.layers.push(Qt.resolvedUrl(name), { backend: backend })
+        openBeside(make(name, { backend: backend }))
     }
 
     /// Choose a day (and maybe a recipe) to log a meal for.
@@ -78,13 +86,12 @@ Kirigami.ApplicationWindow {
         }
         Kirigami.Action {
             text: i18n("About Recipes"); icon.name: "help-about"
-            onTriggered: pageStack.layers.push(root.make("shared/AboutPage.qml", {
+            onTriggered: root.openBeside(root.make("shared/AboutPage.qml", {
                 appName: "Recipes",
                 appComment: "Keep your recipes, step by step, and what you cooked",
                 appId: "io.github.vazark.Recipes"
             }))
         }
-        Kirigami.Action { separator: true }
         Kirigami.Action {
             text: i18n("Quit"); icon.name: "application-exit"
             shortcut: StandardKey.Quit
@@ -96,14 +103,14 @@ Kirigami.ApplicationWindow {
     Connections {
         target: root.pageStack
         function onPageInserted(position, page) {
-            if (page && page.actions !== undefined && !Array.from(page.actions).includes(root.appMenu))
+            if (page && page.actions !== undefined && page.ownMenu !== true && !Array.from(page.actions).includes(root.appMenu))
                 page.actions = [].concat(Array.from(page.actions), [root.appMenu])
         }
     }
 
     // One header across the whole window; the sidebar and the content sit side by side under it.
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    header: AppHeader { window: root }
+    header: AppHeader { window: root; iconOnly: true; sheets: true }
     // The sidebar lives inside the page row, so the header above it stays full width.
     pageStack.leftSidebar: root.globalDrawer
 
@@ -170,7 +177,7 @@ Kirigami.ApplicationWindow {
             else if (page === "tags") root.configure("TagsPage.qml")
             else if (page === "prefs") root.configure("PreferencesPage.qml")
             else if (page === "filter") root.configure("FilterPage.qml")
-            else if (page === "about") pageStack.layers.push(root.make("shared/AboutPage.qml", { appName: "Recipes", appComment: "", appId: "io.github.vazark.Recipes" }))
+            else if (page === "about") root.openBeside(root.make("shared/AboutPage.qml", { appName: "Recipes", appComment: "", appId: "io.github.vazark.Recipes" }))
             if (backend.arg("open-recipe") !== "") root.openRecipe(parseInt(backend.arg("open-recipe")))
             grabTimer.start()
         }

@@ -17,6 +17,9 @@ pub struct Color {
 }
 
 /// Quick picks offered next to the custom picker. Not a limit: any [`Color`] is valid.
+/// What an item with no colour of its own, and none above it, is drawn in.
+pub const DEFAULT_HEX: &str = "#9e9e9e";
+
 pub const PRESETS: &[(&str, &str)] = &[
     ("Red", "#e66a6a"),
     ("Orange", "#f0a35e"),

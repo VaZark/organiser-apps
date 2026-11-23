@@ -11,6 +11,22 @@ Kirigami.Page {
     signal openTask(int id)
     title: i18n("Matrix")
 
+    // ---- the page's actions ------------------------------------------------------------------
+    /// Narrow: this page's own actions are in the bottom bar and the top keeps only the app's menu.
+    readonly property bool narrow: Kirigami.Settings.isMobile || applicationWindow().width < Kirigami.Units.gridUnit * 30
+    readonly property bool pageBar: true
+    /// What Main puts first in the top bar (see `wire`).
+    readonly property var primaryAction: applicationWindow().addAction
+
+    // The foot, narrow only: up to three icons (add, view, filter) and the page's own menu (what to
+    // show). The app's menu is at the top.
+    footer: PageBar {
+        visible: page.narrow
+        icons: [applicationWindow().addAction, applicationWindow().viewMenu, applicationWindow().filterAct]
+        menu: [applicationWindow().showMenu]
+        heading: page.title
+    }
+
     readonly property var tasks: JSON.parse(backend.allTasks).filter(t => !t.closed)
     readonly property var boxes: [
         { title: i18n("Do first"), hint: i18n("Important and urgent") },
@@ -47,6 +63,25 @@ Kirigami.Page {
                             required property var modelData
                             width: ListView.view.width
                             text: modelData.title
+                            // Clear of the colour stripe: the label's own inset, which the delegate's
+                            // padding does not reach.
+                            contentItem: QQC2.Label {
+                                text: parent.text
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: Kirigami.Units.gridUnit * 0.75
+                                rightPadding: Kirigami.Units.smallSpacing
+                            }
+                            // The task's own colour, else the nearest above it (as in the list).
+                            background: Rectangle {
+                                color: parent.modelData.effectiveColor ? Qt.alpha(parent.modelData.effectiveColor, parent.hovered ? 0.4 : 0.28) : (parent.hovered ? Kirigami.Theme.hoverColor : "transparent")
+                                Rectangle {
+                                    visible: !!parent.parent.modelData.effectiveColor
+                                    width: Kirigami.Units.smallSpacing
+                                    height: parent.height
+                                    color: parent.parent.modelData.effectiveColor ? parent.parent.modelData.effectiveColor : "transparent"
+                                }
+                            }
                             onClicked: page.openTask(modelData.id)
                         }
                     }

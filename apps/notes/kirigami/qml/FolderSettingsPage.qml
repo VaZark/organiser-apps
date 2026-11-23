@@ -16,7 +16,7 @@ FormCard.FormCardPage {
 
     title: i18n("Configure %1", f.title ? f.title : i18n("Folder"))
 
-    function close() { applicationWindow().pageStack.layers.pop() }
+    function close() { applicationWindow().pageStack.pop() }
 
     FormCard.FormHeader { title: i18n("General") }
     FormCard.FormCard {

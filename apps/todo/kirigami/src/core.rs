@@ -14,7 +14,7 @@ use todo_schema::quadrant::{self, Quadrant};
 use todo_schema::sort::{SortKey, sort_tasks};
 use todo_schema::status::Statuses;
 use todo_schema::statuses::{self, StatusEdit};
-use todo_schema::task::{Edit, Task};
+use todo_schema::task::{Edit, Epic, Section, Task};
 use todo_schema::vault::{Known, Vault};
 use todo_schema::views::{self, Filter, Scope};
 
@@ -301,6 +301,38 @@ impl Core {
             .unwrap_or_default()
     }
 
+    /// The colour a task is drawn in: its own, else the nearest above it: its parent task's (so a
+    /// subtask follows the task it is under), its section's, its epic's, else gray. The most specific wins.
+    pub fn effective_color(&self, t: &Task) -> Option<String> {
+        // The task and the tasks above it, nearest first.
+        let mut chain = vec![t.clone()];
+        while chain.len() < 64 {
+            let parent = chain
+                .last()
+                .and_then(|c| c.parent_id)
+                .and_then(|id| self.db.get(id).ok())
+                .filter(|p| p.kind == todo_schema::TASK);
+            match parent {
+                Some(p) => chain.push(Task::from(&p)),
+                None => break,
+            }
+        }
+        if let Some(c) = chain.iter().find_map(|c| c.color.clone()) {
+            return Some(c);
+        }
+        let of = |id: i64| self.db.get(id).ok();
+        chain
+            .iter()
+            .find_map(|c| c.section.and_then(of).and_then(|i| Section::from(&i).color))
+            .or_else(|| {
+                chain
+                    .iter()
+                    .find_map(|c| c.epic.and_then(of).and_then(|i| Epic::from(&i).color))
+            })
+            // Nothing above it gives a colour: gray.
+            .or_else(|| Some(organiser_core::color::DEFAULT_HEX.to_string()))
+    }
+
     /// One task as the views draw it: its fields plus the status it is in, its epic's title, its
     /// nesting depth and the box of the Eisenhower matrix it belongs to.
     fn task_value(&self, t: &Task, depth: usize, epics: &HashMap<i64, String>) -> Value {
@@ -308,6 +340,8 @@ impl Core {
         let mut v = serde_json::to_value(t).unwrap_or(Value::Null);
         if let Value::Object(m) = &mut v {
             m.insert("depth".into(), json!(depth));
+            // `color` stays the task's own (what its colour picker edits); this is what is drawn.
+            m.insert("effectiveColor".into(), json!(self.effective_color(t)));
             m.insert("statusId".into(), json!(status.map(|s| s.id)));
             m.insert("statusName".into(), json!(status.map(|s| s.name.clone())));
             m.insert(
@@ -1205,5 +1239,62 @@ mod tests {
         c.delete_task(id).unwrap();
         c.flush().unwrap();
         assert!(md_files(&dir.join("tasks/.archive")).is_empty());
+    }
+
+    #[test]
+    fn a_task_takes_the_colour_of_what_is_nearest_above_it() {
+        let mut c = core();
+        let e = c.create_epic("Garden").unwrap();
+        c.set_epic_color(e, "#ff0000").unwrap();
+        let sec = lifecycle::create_section(&mut c.db, e, "Spring").unwrap();
+        let t = c.create_task("sow", Some(e), None).unwrap();
+        let task = |c: &Core, id| Task::from(&c.db.get(id).unwrap());
+        // The epic's colour reaches its tasks.
+        assert_eq!(c.effective_color(&task(&c, t)).as_deref(), Some("#ff0000"));
+        // A section is nearer than its epic.
+        c.edit(
+            t,
+            Edit {
+                section: Some(Some(sec.id)),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
+        lifecycle::edit_section(
+            &mut c.db,
+            sec.id,
+            &Edit {
+                color: Some(Some("#00ff00".into())),
+                ..Edit::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(c.effective_color(&task(&c, t)).as_deref(), Some("#00ff00"));
+        // A subtask follows its parent task; a colour of its own is highest.
+        let sub = c.create_task("water", Some(e), Some(t)).unwrap();
+        c.set_task_color(t, "#0000ff").unwrap();
+        assert_eq!(
+            c.effective_color(&task(&c, sub)).as_deref(),
+            Some("#0000ff")
+        );
+        c.set_task_color(sub, "#123456").unwrap();
+        assert_eq!(
+            c.effective_color(&task(&c, sub)).as_deref(),
+            Some("#123456")
+        );
+        // With no colour anywhere above it, a task is gray.
+        let loose = c.create_task("loose", None, None).unwrap();
+        assert_eq!(
+            c.effective_color(&task(&c, loose)).as_deref(),
+            Some(organiser_core::color::DEFAULT_HEX)
+        );
+        let e2 = c.create_epic("Plain").unwrap();
+        let inside = c.create_task("in", Some(e2), None).unwrap();
+        assert_eq!(
+            c.effective_color(&task(&c, inside)).as_deref(),
+            Some(organiser_core::color::DEFAULT_HEX)
+        );
+        // `color` is still only the task's own, so its picker shows what it edits.
+        assert!(task(&c, t).color.as_deref() == Some("#0000ff"));
     }
 }

@@ -27,28 +27,33 @@ Kirigami.ScrollablePage {
         color: sheet.task.color ? Qt.alpha(sheet.task.color, 0.18) : Kirigami.Theme.backgroundColor
     }
 
-    // The header keeps what shapes the task, as icons; everything else about it (archive, delete)
-    // is in the menu at the foot, beside Add Subtask.
-    actions: [
-        Kirigami.Action {
-            text: sheet.task.sticky ? i18n("Remove Sticky Note") : i18n("Make Sticky Note")
-            icon.name: "view-pim-notes"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            checkable: true
-            checked: sheet.task.sticky === true
-            onTriggered: sheet.backend.setSticky(sheet.taskId, !sheet.task.sticky)
-        },
-        Kirigami.Action {
-            text: sheet.task.pinned ? i18n("Unpin") : i18n("Pin")
-            icon.name: "pin"
-            displayHint: Kirigami.DisplayHint.IconOnly
-            checkable: true
-            checked: sheet.task.pinned === true
-            onTriggered: sheet.backend.setPinned(sheet.taskId, !sheet.task.pinned)
-        }
-    ]
+    // Nothing in the header but Back: every action of the task is at the foot, in the bar or in
+    // its menu, so there is one place to look and no second sheet to open from the top.
+    readonly property bool roomy: width >= Kirigami.Units.gridUnit * 20
+    Kirigami.Action {
+        id: addSubtaskAction
+        text: i18n("Add Subtask")
+        icon.name: "list-add"
+        onTriggered: subtaskField.forceActiveFocus()
+    }
+    Kirigami.Action {
+        id: pinAction
+        text: sheet.task.pinned ? i18n("Unpin") : i18n("Pin")
+        icon.name: "pin"
+        checkable: true
+        checked: sheet.task.pinned === true
+        onTriggered: sheet.backend.setPinned(sheet.taskId, !sheet.task.pinned)
+    }
+    Kirigami.Action {
+        id: stickyAction
+        text: sheet.task.sticky ? i18n("Remove Sticky Note") : i18n("Make Sticky Note")
+        icon.name: "view-pim-notes"
+        checkable: true
+        checked: sheet.task.sticky === true
+        onTriggered: sheet.backend.setSticky(sheet.taskId, !sheet.task.sticky)
+    }
 
-    // The foot of the page. These are not in `actions`, so the header does not show them too.
+    // The rest of the foot's actions.
     Kirigami.Action {
         id: archiveAction
         text: sheet.task.archived ? i18n("Restore Task") : i18n("Archive Task")
@@ -75,39 +80,45 @@ Kirigami.ScrollablePage {
         onTriggered: confirmDelete.open()
     }
 
+    // The foot: up to three icons in one row while there is room (add a subtask, pin, sticky note),
+    // and the menu for the rest. Without room the icons go into the menu too.
     footer: QQC2.ToolBar {
         position: QQC2.ToolBar.Footer
         contentItem: RowLayout {
             spacing: Kirigami.Units.smallSpacing
-            QQC2.ToolButton {
-                text: i18n("Add Subtask")
-                icon.name: "list-add"
-                display: QQC2.AbstractButton.TextBesideIcon
-                onClicked: subtaskField.forceActiveFocus()
+            Repeater {
+                model: sheet.roomy ? [addSubtaskAction, pinAction, stickyAction] : []
+                delegate: QQC2.ToolButton {
+                    required property var modelData
+                    icon.name: modelData.icon.name
+                    text: modelData.text
+                    display: QQC2.AbstractButton.IconOnly
+                    checkable: modelData.checkable
+                    checked: modelData.checked
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    onClicked: modelData.trigger()
+                }
             }
             Item { Layout.fillWidth: true }
             QQC2.ToolButton {
+                id: taskMoreButton
                 text: i18n("Task Actions")
                 icon.name: "overflow-menu"
                 display: QQC2.AbstractButton.IconOnly
                 QQC2.ToolTip.text: text
                 QQC2.ToolTip.visible: hovered
                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                checked: taskMenu.visible
-                onClicked: taskMenu.popup(this, width - taskMenu.width, -taskMenu.height)
+                // One plain list, no dividers: the icons first when there was no room for them in the
+                // bar, then where the task is, then archive and delete.
+                onClicked: taskSheet.showActions(i18n("Task"), (sheet.roomy ? [] : [addSubtaskAction, pinAction, stickyAction])
+                    .concat([changeParentAction, separateAction, archiveAction, deleteAction]), taskMoreButton)
             }
         }
     }
 
-    QQC2.Menu {
-        id: taskMenu
-        QQC2.MenuItem { action: changeParentAction }
-        QQC2.MenuItem { action: separateAction; visible: separateAction.visible; height: visible ? implicitHeight : 0 }
-        QQC2.MenuSeparator {}
-        QQC2.MenuItem { action: archiveAction }
-        QQC2.MenuSeparator {}
-        QQC2.MenuItem { action: deleteAction }
-    }
+    ActionDrawer { id: taskSheet }
 
     function close() { applicationWindow().pageStack.removePage(sheet) }
 
